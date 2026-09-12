@@ -1841,3 +1841,35 @@ if not any(json.loads(l)["event"] == "run_done" for l in lines):
     sys.exit("the stream has no run_done, so a consumer cannot tell it ended")
 ' || fail "the recorded stream is not one object per line"
 }
+
+# --- the app's toolchain ------------------------------------------------------
+# Xcode 15.2 is the newest release for this machine's macOS, which caps Swift at 5.9 and the SDK at
+# 14.2. The risk of working across two machines is one-directional: raising the tools version or
+# reaching for a newer API on the newer Mac leaves the always-available one unable to build at all.
+# Prose cannot hold that line, so a test does.
+
+@test "the Swift package still pins the toolchain this machine can build" {
+	local pkg="$BATS_TEST_DIRNAME/../app/Package.swift"
+	[ -f "$pkg" ] || skip "no Swift package yet"
+	grep -q '^// swift-tools-version:5.9$' "$pkg" \
+		|| fail "the tools version moved off 5.9: $(head -1 "$pkg")"
+	grep -q 'platforms: \[.macOS(.v13)\]' "$pkg" \
+		|| fail "the deployment target moved off macOS 13"
+	# @Observable is macOS 14 and the obvious thing to reach for; ObservableObject is the one that
+	# builds here. Caught by grep rather than by a build failure on the wrong machine.
+	! grep -rn '@Observable' "$BATS_TEST_DIRNAME/../app/Sources" \
+		|| fail "@Observable needs macOS 14; use ObservableObject"
+}
+
+@test "the app bundle script produces something launchable" {
+	command -v swift >/dev/null || skip "no swift toolchain"
+	local app="$BATS_TEST_DIRNAME/../dist/LogGrade.app"
+	run "$BATS_TEST_DIRNAME/../app/make-app.sh"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ -x "$app/Contents/MacOS/LogGrade" ] || fail "no executable in the bundle"
+	[ -f "$app/Contents/Info.plist" ] || fail "no Info.plist, so macOS treats it as a stray binary"
+	# The engine travels with it: a launched app inherits no useful PATH and should not break
+	# because a checkout moved.
+	[ -x "$app/Contents/Resources/engine/scripts/grade.sh" ] || fail "the engine was not vendored"
+	[ -f "$app/Contents/Resources/engine/look.json" ] || fail "look.json was not vendored"
+}

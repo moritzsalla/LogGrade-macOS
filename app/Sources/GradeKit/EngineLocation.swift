@@ -1,0 +1,162 @@
+import Foundation
+
+/// Where the engine is, and whether it can actually run.
+///
+/// This exists because of one fact about GUI processes on macOS: they do not inherit the shell's
+/// PATH. Every tool the engine calls — ffmpeg, ffprobe, jq, python3 — is a bare name in the
+/// scripts, and on this machine ffmpeg lives in ~/.local/bin, which a launched app has never heard
+/// of. So the app resolves each one to an absolute path and hands them over explicitly, and it
+/// refuses to start a render it knows will die with an opaque non-zero exit.
+///
+/// The engine also has files that are deliberately absent on a fresh clone: Apple's conversion
+/// cube cannot be redistributed. `grade.sh` has no check for it and fails inside ffmpeg with a raw
+/// filter error naming a path nobody chose, so the preflight checks it here instead.
+public struct EngineLocation {
+    /// The repo root: the directory holding `scripts/`, `luts/` and `look.json`.
+    public let root: URL
+
+    public init(root: URL) {
+        self.root = root
+    }
+
+    public var gradeScript: URL { root.appendingPathComponent("scripts/grade.sh") }
+    public var lookFile: URL { root.appendingPathComponent("look.json") }
+    public var toneGenerator: URL { root.appendingPathComponent("scripts/make-tone-lut.py") }
+    public var correctGenerator: URL { root.appendingPathComponent("scripts/make-correct-lut.py") }
+    public var appleCube: URL {
+        root.appendingPathComponent("luts/apple/AppleLogToRec709-v1.0.cube")
+    }
+    public var lookCubes: URL { root.appendingPathComponent("luts/looks") }
+
+    /// What a preflight can conclude. Each case names the thing to fix, because "could not render"
+    /// is the message this whole type exists to avoid.
+    public enum Problem: Equatable, CustomStringConvertible {
+        case missingFile(URL)
+        case notExecutable(URL)
+        case missingTool(String)
+        case appleCubeAbsent(URL)
+
+        public var description: String {
+            switch self {
+            case .missingFile(let u):
+                return "missing: \(u.path)"
+            case .notExecutable(let u):
+                return "not executable: \(u.path)"
+            case .missingTool(let name):
+                return "\(name) is not on any path this app knows about"
+            case .appleCubeAbsent(let u):
+                return """
+                Apple's conversion LUT is missing: \(u.path)
+                It is deliberately not committed — Apple's licence does not permit \
+                redistributing it. See luts/apple/SOURCE.txt.
+                """
+            }
+        }
+    }
+
+    /// The tools the engine shells out to, by bare name, in the order the scripts need them.
+    public static let requiredTools = ["ffmpeg", "ffprobe", "jq", "python3"]
+
+    /// Directories searched for those tools, ahead of whatever PATH says. `~/.local/bin` is first
+    /// because that is where this machine's ffmpeg is, and a launched app's PATH does not include
+    /// it. Homebrew's two prefixes follow, so the same build works on an Apple silicon machine.
+    public static var toolSearchPaths: [String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+    }
+
+    /// Absolute path for a tool, or nil. Searched explicitly rather than by asking the shell,
+    /// because the shell a GUI process would spawn has the same impoverished PATH it does.
+    public static func resolveTool(_ name: String,
+                                  extraPaths: [String] = [],
+                                  fileManager: FileManager = .default) -> URL? {
+        var dirs = extraPaths + toolSearchPaths
+        if let path = ProcessInfo.processInfo.environment["PATH"] {
+            dirs += path.split(separator: ":").map(String.init)
+        }
+        for dir in dirs where !dir.isEmpty {
+            let candidate = URL(fileURLWithPath: dir).appendingPathComponent(name)
+            if fileManager.isExecutableFile(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    /// Everything wrong with this engine, in the order a person would fix it. Empty means it runs.
+    public func preflight(fileManager: FileManager = .default) -> [Problem] {
+        var problems: [Problem] = []
+        for url in [gradeScript, toneGenerator, correctGenerator] {
+            if !fileManager.fileExists(atPath: url.path) {
+                problems.append(.missingFile(url))
+            } else if !fileManager.isExecutableFile(atPath: url.path) {
+                problems.append(.notExecutable(url))
+            }
+        }
+        for url in [lookFile, lookCubes] where !fileManager.fileExists(atPath: url.path) {
+            problems.append(.missingFile(url))
+        }
+        if !fileManager.fileExists(atPath: appleCube.path) {
+            problems.append(.appleCubeAbsent(appleCube))
+        }
+        for tool in Self.requiredTools where Self.resolveTool(tool, fileManager: fileManager) == nil {
+            problems.append(.missingTool(tool))
+        }
+        return problems
+    }
+
+    /// Where the engine is, in the order the app should look.
+    ///
+    /// FOUND THE HARD WAY. The first version asked the current working directory, which is `/`
+    /// when a bundle is launched from the Finder — so the app opened and said it had no engine
+    /// while sitting two directories away from one. An app has to look next to ITSELF.
+    ///
+    /// 1. `LOGGRADE_ENGINE`, an explicit override. This is the debug arrangement: point a build at
+    ///    a working copy and the shell scripts stay editable without rebuilding the bundle.
+    /// 2. The bundle's own copy, `Contents/Resources/engine`, which is what make-app.sh vendors so
+    ///    the app does not break when a checkout moves.
+    /// 3. Upwards from the executable, which is how `swift run` inside the repo finds it.
+    /// 4. Upwards from the working directory, last, because it is the one a launched app lies
+    ///    about.
+    public static func locate(environment: [String: String] = ProcessInfo.processInfo.environment,
+                              executable: URL? = Bundle.main.executableURL,
+                              workingDirectory: URL = URL(fileURLWithPath:
+                                  FileManager.default.currentDirectoryPath),
+                              fileManager: FileManager = .default) -> EngineLocation? {
+        if let override = environment["LOGGRADE_ENGINE"], !override.isEmpty {
+            let candidate = EngineLocation(root: URL(fileURLWithPath: override))
+            if candidate.looksLikeAnEngine(fileManager: fileManager) { return candidate }
+        }
+        if let executable {
+            // Contents/MacOS/LogGrade -> Contents/Resources/engine
+            let bundled = executable
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Resources/engine")
+            let candidate = EngineLocation(root: bundled)
+            if candidate.looksLikeAnEngine(fileManager: fileManager) { return candidate }
+            if let up = discover(from: executable.deletingLastPathComponent(),
+                                 fileManager: fileManager) { return up }
+        }
+        return discover(from: workingDirectory, fileManager: fileManager)
+    }
+
+    /// The two files that make a directory an engine rather than a directory.
+    public func looksLikeAnEngine(fileManager: FileManager = .default) -> Bool {
+        fileManager.fileExists(atPath: gradeScript.path)
+            && fileManager.fileExists(atPath: lookFile.path)
+    }
+
+    /// Walks up from a starting directory looking for the engine. Used by the tests to find the
+    /// checkout they live in, and by a debug build pointed at a working copy.
+    public static func discover(from start: URL,
+                                fileManager: FileManager = .default) -> EngineLocation? {
+        var dir = start.standardizedFileURL
+        while dir.path != "/" {
+            let candidate = EngineLocation(root: dir)
+            if candidate.looksLikeAnEngine(fileManager: fileManager) { return candidate }
+            dir = dir.deletingLastPathComponent()
+        }
+        return nil
+    }
+}

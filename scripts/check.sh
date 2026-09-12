@@ -62,6 +62,20 @@ else
 fi
 
 echo
+echo "== swift (GradeKit) =="
+# The app's package is part of this repo, so the one command that checks the repo has to check it.
+# A missing toolchain is a SKIP under the same contract as every other tool here: recorded, and
+# fatal at the end unless --allow-skips. Xcode 15.2 is the newest for this machine's macOS, which
+# is why Package.swift pins the tools version rather than tracking whatever is installed.
+if command -v swift >/dev/null; then
+	swift build --package-path app 2>&1 | tail -2
+	swift test --package-path app 2>&1 | tail -3
+else
+	echo "swift NOT INSTALLED (needs Xcode, and its licence accepted)"
+	SKIPPED="$SKIPPED swift"
+fi
+
+echo
 echo "== conformance (this fork vs the frozen precursor) =="
 # OPT-IN, and deliberately not counted as a skip. The missing-tool rule above exists because an
 # absent tool silently removed coverage; choosing not to pass --conformance is not silent, and this

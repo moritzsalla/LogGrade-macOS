@@ -80,3 +80,8 @@ __pycache__/
 # docs/reference-maps-SOURCE.txt has the coordinates to pull them up again locally.
 docs/reference-apple-maps.png
 docs/reference-street-view.png
+
+# SwiftPM build products. Reconstructible from Sources/ by `swift build`.
+.build/
+*.xcuserstate
+.swiftpm/
