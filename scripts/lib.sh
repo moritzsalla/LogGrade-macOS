@@ -376,22 +376,27 @@ resolve_work_dir() {
 # width and height are therefore not what the filter graph will see. That is the whole reason
 # docs/adr/0005 exists.
 source_frame_size() {  # source_frame_size <file>  -> "W H"
-	local file="$1" stem tmp w h
-	# mktemp CREATES the file it names, and ".png" is appended to that name — so the file mktemp
-	# made is not the file that gets removed. Both have to go, or a 19-clip batch leaks 19.
-	stem="$(mktemp -t framesize)"
-	tmp="$stem.png"
-	if ! ffmpeg -v error -y -i "$file" -frames:v 1 "$tmp" 2>/dev/null; then
-		rm -f "$stem" "$tmp"; echo "could not decode a frame from $file" >&2; return 1
-	fi
-	w=$(ffprobe -v error -show_entries stream=width -of default=nw=1:nk=1 "$tmp" | head -1)
-	h=$(ffprobe -v error -show_entries stream=height -of default=nw=1:nk=1 "$tmp" | head -1)
-	rm -f "$stem" "$tmp"
+	local file="$1" size w h
+	# `showinfo` REPORTS THE DECODED FRAME, which is the whole point, and costs only the decode.
+	# This used to write the frame out as a PNG and ffprobe the file: on a 4K clip that is an
+	# 8-megapixel PNG compressed to disk for the sake of two integers, measured at 9.3 seconds
+	# against 0.6 here. Every clip in every run paid it, and so did every preview.
+	#
+	# Measuring a DECODED frame rather than the container is still the rule: this camera stores
+	# rotation as a display-matrix flag and ffmpeg autorotates, so the container says 3840x2160 for
+	# a clip that decodes 2160x3840. That is docs/adr/0005, and nothing here reasons about the
+	# matrix — it reads what came out of the decoder.
+	#
+	# `-v info` because showinfo logs at INFO and `-v error` would suppress the only output that
+	# matters. Same trap the exposure probe hit with metadata=print.
+	size=$(ffmpeg -v info -i "$file" -frames:v 1 -vf showinfo -f null - 2>&1 \
+		| grep -oE 's:[0-9]+x[0-9]+' | head -1 | cut -d: -f2)
+	w="${size%x*}"
+	h="${size#*x}"
 
 	# Refuse what cannot be measured. A missing or non-numeric dimension makes `[ "$h" -le "$w" ]`
 	# ERROR, and an `if` reads an erroring condition as FALSE — so the caller used to accept the
-	# clip it had just failed to measure. Same fail-open shape as the trailing comma on this
-	# camera's csv output.
+	# clip it had just failed to measure.
 	case "$w" in ''|*[!0-9]*) w="";; esac
 	case "$h" in ''|*[!0-9]*) h="";; esac
 	if [ -z "$w" ] || [ -z "$h" ]; then

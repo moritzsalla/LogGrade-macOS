@@ -132,12 +132,14 @@ fail() {
 	# fail-open shape as the trailing comma on this camera's csv output, which is what this guard
 	# was written to replace in the first place.
 	#
-	# A probe that answers nothing is the honest way to reproduce it — shadow ffprobe on PATH and
-	# leave ffmpeg real, so the decode still succeeds and only the measurement is lost.
+	# A tool that answers nothing is the honest way to reproduce it. It shadows ffmpeg now rather
+	# than ffprobe: the measurement used to write a PNG and ffprobe it, and reads the decoded
+	# frame's own size from showinfo instead — so the decode and the measurement are one step and
+	# there is no longer a way to lose only the second half.
 	local bin="$BATS_TEST_TMPDIR/stub-bin"
 	mkdir -p "$bin"
-	printf '#!/bin/sh\nexit 0\n' > "$bin/ffprobe"
-	chmod +x "$bin/ffprobe"
+	printf '#!/bin/sh\nexit 0\n' > "$bin/ffmpeg"
+	chmod +x "$bin/ffmpeg"
 	PATH="$bin:$PATH" run require_portrait "$FIXTURES/portrait_tagged.mov"
 	[ "$status" -ne 0 ]
 	[[ "$output" == *"REFUSING"* ]] || fail "[[ \"$output\" == *\"REFUSING\"* ]]"
@@ -1880,4 +1882,31 @@ if not any(json.loads(l)["event"] == "run_done" for l in lines):
 	# because a checkout moved.
 	[ -x "$app/Contents/Resources/engine/scripts/grade.sh" ] || fail "the engine was not vendored"
 	[ -f "$app/Contents/Resources/engine/look.json" ] || fail "look.json was not vendored"
+}
+
+@test "a measured exposure can be handed back instead of measured again" {
+	# The probe reads a number that does not change when a look does, so an interface adjusting a
+	# curve re-measures the same value on every render — about a second of a four-second preview.
+	# What matters is that the shortcut is not a different grade.
+	local work src
+	work=$(resolve_work_dir "$BATS_TEST_DIRNAME/.." 2>/dev/null) || work="$BATS_TEST_DIRNAME/.."
+	src=$(ls "$work"/src/*.mov 2>/dev/null | head -1) || true
+	[ -n "$src" ] || skip "no source footage"
+
+	local a="$BATS_TEST_TMPDIR/measured" b="$BATS_TEST_TMPDIR/handed"
+	mkdir -p "$a" "$b"
+	GRADE_WORK_DIR="$a" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	local measured
+	measured=$(printf '%s\n' "$output" | sed -n 's/.*YAVG=\([0-9.]*\).*/\1/p' | head -1)
+	[ -n "$measured" ] || fail "the probe reported nothing: $output"
+
+	YAVG_IN="$measured" GRADE_WORK_DIR="$b" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[[ "$output" == *"YAVG=${measured}"* ]] || fail "the handed value was not used: $output"
+	[[ "$output" == *"(matched)"* ]] || fail "the solve did not run: $output"
+
+	# And a value that is not a number is refused rather than spliced into the solve.
+	YAVG_IN="600,metadata=print" GRADE_WORK_DIR="$b" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
+	[ "$status" -ne 0 ] || fail "accepted a non-numeric exposure"
 }

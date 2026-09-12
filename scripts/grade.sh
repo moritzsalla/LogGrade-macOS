@@ -11,6 +11,8 @@
 #   STAB=0            skip stabilisation entirely (faster)
 #   SMOOTHING=<n>     frames of camera-path lowpass; higher is closer to locked-off
 #   MATCH=0           skip exposure matching and use look.json's gamma raw
+#   YAVG_IN=<n>       the clip's post-CST mean, if it has already been measured. Skips the probe,
+#                     which costs about a second; the render is identical either way.
 #   GRAIN_STRENGTH=<n>  override look.json's grain strength
 #   PROOF=<seconds>   render this many seconds through the real chain into dist/proofs/
 #   DRY=1             plan only, render nothing
@@ -251,7 +253,14 @@ for SRC in "${CLIPS[@]}"; do
 
 	# --- exposure match: one cheap probe, not a full pass --------------------------------
 	GAMMA="$G_GAMMA_REF"; YAVG="-"
-	if [ "$MATCH" = "1" ]; then
+	if [ "$MATCH" = "1" ] && [ -n "${YAVG_IN:-}" ]; then
+		# ALREADY MEASURED. The probe reads the clip's post-CST mean, which does not change when a
+		# look does — so an interface adjusting a curve re-measures the same number on every
+		# render. It costs about a second of a four-second preview. Passing it back skips that,
+		# and the render is identical either way, which a test asserts.
+		YAVG="$(require_number YAVG_IN "$YAVG_IN")"
+		GAMMA=$("$SCRIPT_DIR/solve-gamma.py" "$YAVG" "$Y_REF" "$G_GAMMA_REF")
+	elif [ "$MATCH" = "1" ]; then
 		YAVG=$(ffmpeg -v error -ss 1 -i "$SRC" -frames:v 1 \
 			-vf "lut3d=file='${CST}':interp=tetrahedral,scale=320:-1,signalstats,metadata=print:file=-" \
 			-f null - 2>/dev/null | grep -m1 -oE 'YAVG=[0-9.]+' | cut -d= -f2 || true)

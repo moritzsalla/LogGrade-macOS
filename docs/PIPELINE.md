@@ -180,6 +180,19 @@ The chroma really is untouched, so the neon failure this stage exists to prevent
 prevented. What is not true is the description. docs/adr/0003 carries the correction and why the
 graph is not being changed to match it.
 
+## Measuring a frame cost nine seconds a clip
+
+`require_portrait` decoded one frame, wrote it out as a PNG, and ffprobed the file for two
+integers. On a 4K clip that is an 8-megapixel image compressed to disk: measured at 9.29 seconds,
+against 0.60 for reading the decoded frame's own size out of `showinfo`. Every clip in every run
+paid it, and so did every preview — it was two thirds of a 14-second preview.
+
+The rule it exists for is unchanged: measure the DECODED frame, never the container, because this
+camera stores rotation as a display-matrix flag and the container says 3840x2160 for a clip that
+decodes 2160x3840. `showinfo` reports what came out of the decoder, so the rule holds and the cost
+does not. `-v info` is load-bearing: showinfo logs at INFO and `-v error` suppresses the only line
+that matters, which is the same trap the exposure probe hit with `metadata=print`.
+
 ## Mistakes made (kept here so they don't repeat)
 
 - **Never chain a command that can fail into an unconditional `mv`.** Twice in this pipeline a

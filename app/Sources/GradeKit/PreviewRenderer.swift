@@ -25,20 +25,34 @@ public final class PreviewRenderer {
 
     /// Renders a still for one clip at one timecode with one look. Synchronous: the caller decides
     /// which queue it wants to wait on, and the interface debounces rather than pipelining.
+    /// The clip's post-CST mean, measured once by the engine and remembered here. It does not
+    /// change when a look does, and re-measuring it costs about a second of every preview.
+    private var measuredExposure: [String: Double] = [:]
+
     public func render(clip: URL, seconds: Double, look: Look, height: Int = 1440,
                        onStart: ((Process) -> Void)? = nil) throws -> Frame {
         let lookFile = workDirectory.appendingPathComponent("preview-look.json")
         try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
         try look.write(to: lookFile)
 
+        let stem = clip.deletingPathExtension().lastPathComponent
+        var environment = ["FRAME": String(seconds),
+                           "FRAME_HEIGHT": String(height),
+                           "LOOK_FILE": lookFile.path,
+                           "GRADE_WORK_DIR": workDirectory.path,
+                           "MATCH": "1"]
+        if let known = measuredExposure[stem] {
+            environment["YAVG_IN"] = String(known)
+        }
         let outcome = try EngineRun(engine: engine).run(
             arguments: [clip.path],
-            environment: ["FRAME": String(seconds),
-                          "FRAME_HEIGHT": String(height),
-                          "LOOK_FILE": lookFile.path,
-                          "GRADE_WORK_DIR": workDirectory.path,
-                          "MATCH": "1"],
+            environment: environment,
             onStart: onStart)
+        // Remember what the engine measured, so the next preview of this clip skips the probe.
+        if let planned = outcome.events.first(where: { $0.name == "clip_planned" }),
+           let yavg = planned.double("yavg") {
+            measuredExposure[stem] = yavg
+        }
         guard outcome.succeeded else {
             throw Failure.engineRefused(outcome.codes, outcome.stderrText)
         }
