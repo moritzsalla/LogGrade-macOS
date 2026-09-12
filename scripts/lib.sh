@@ -128,7 +128,11 @@ check_disk_space() {
 		echo "LOW DISK SPACE: ${avail_gb}GB available in $dir, wanted ${need_gb}GB+" >&2
 		return 1
 	fi
-	echo "disk OK: ${avail_gb}GB available in $dir"
+	# STDERR, not stdout. Under JSON=1 stdout carries the event stream and nothing else, and this
+	# line was landing in the middle of it — the first thing a consumer read was not JSON. A
+	# verdict a person glances at is diagnostic output; the machine-readable answer is the event.
+	echo "disk OK: ${avail_gb}GB available in $dir" >&2
+	emit disk dir "$dir" available_gb "$avail_gb" wanted_gb "$need_gb"
 }
 
 # --- validating what reaches a filter graph -----------------------------------

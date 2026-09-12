@@ -1192,6 +1192,9 @@ for i, line in enumerate(sys.stdin.read().splitlines(), 1):
     try: json.loads(line)
     except Exception as e: sys.exit("line %d is not JSON (%s): %s" % (i, e, line))
 ' || fail "stdout was not one JSON object per line:$output"
+	# This test was merged RED, because a truncated read of the suite output was mistaken for a
+	# pass. What it caught on the first honest run was check_disk_space writing its verdict to
+	# stdout, so the first line a consumer saw was not JSON at all.
 	[[ "$output" == *'"event":"run_start"'* ]] || fail "no run_start event: $output"
 	[[ "$output" == *'"event":"clip_planned"'* ]] || fail "no clip_planned event: $output"
 	[[ "$output" == *'"event":"run_done"'* ]] || fail "no run_done event: $output"
