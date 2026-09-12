@@ -24,6 +24,12 @@ Apply with ffmpeg's `lut1d` filter.
 USAGE
     ./make-tone-lut.py OUT.cube [--pivot 0.42] [--contrast 1.25]
                                 [--toe 0.30] [--shoulder 0.30] [--black 0.0]
+    ./make-tone-lut.py --stdout [--pivot ...]      same curve, written to stdout
+
+    --stdout exists for the preview, which regenerates this curve on every slider move and wants
+    it in memory rather than through a temp file. It is also what keeps the curve in ONE
+    implementation: a caller that can spawn this does not need its own port of the maths, which
+    is the third copy the parity harness could not see.
 
     --gamma     midtone level, applied FIRST: v = x**gamma. >1 darkens. Needed because contrast
                 pivoted about a point BELOW the image's own average brightens rather than
@@ -38,6 +44,7 @@ USAGE
 """
 import argparse
 import os
+import sys
 
 SIZE = 4096
 
@@ -87,7 +94,8 @@ def is_current(path, a):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("out")
+    ap.add_argument("out", nargs="?", help="file to write; omit it and pass --stdout instead")
+    ap.add_argument("--stdout", action="store_true", help="write the cube to stdout")
     ap.add_argument("--gamma", type=float, default=1.0)
     ap.add_argument("--pivot", type=float, default=0.42)
     ap.add_argument("--contrast", type=float, default=1.25)
@@ -95,10 +103,16 @@ def main():
     ap.add_argument("--shoulder", type=float, default=0.30)
     ap.add_argument("--black", type=float, default=0.0)
     a = ap.parse_args()
+    # Exactly one destination. Both together would be ambiguous about which one the caller reads,
+    # and neither is the no-argument case that used to die on a bare positional.
+    if a.stdout == bool(a.out):
+        ap.error("pass exactly one of OUT or --stdout")
 
     # Idempotent by design, so callers can invoke it unconditionally and drop their own staleness
     # logic. Generating the 4096-entry table costs ~0.1s, so there is nothing to save by guessing.
-    if is_current(a.out, a):
+    # There is nothing to compare against on the stdout path: the caller asked for the curve, not
+    # for a file that might already hold it.
+    if not a.stdout and is_current(a.out, a):
         print(f"{a.out} is already current")
         return
 
@@ -133,6 +147,13 @@ def main():
     # treated as current forever — silently grading every clip through a partial curve. Staging
     # makes a half-written cube impossible to observe. Same failure class 00-stabilise-detect.sh
     # guards with its .partial file, one layer down.
+    # The cube itself goes to stdout and the commentary to stderr. A progress line mixed into the
+    # curve would be read as a table entry by whatever is parsing it.
+    if a.stdout:
+        sys.stdout.write("\n".join(lines) + "\n")
+        print(f"wrote {SIZE}-entry 1D LUT to stdout", file=sys.stderr)
+        return
+
     partial = a.out + ".partial"
     try:
         with open(partial, "w") as fh:

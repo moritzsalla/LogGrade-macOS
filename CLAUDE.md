@@ -75,6 +75,11 @@ single-line ffprobe answer without checking what it actually printed.
   must happen on the way out. Test those in a subshell that sources `lib.sh`, which is what
   production actually runs under. A `run`-based test stayed green against a `render_delivery` that
   aborted mid-pipeline and left its staging file behind.
+- **`pipefail` makes several obvious assertions lie.** It is set by `lib.sh`, so it is in force in
+  every test body that sources it. `grep -qv` closes the pipe on its first match and the writer
+  dies of SIGPIPE, so the pipeline reports 141 regardless of the content; `x=$(ls glob | head -1)`
+  fails the whole assignment when the glob matches nothing. Negate a positive match, or end the
+  lookup in `|| true`.
 - **Mutation-test anything you add.** Break the guard, confirm the test goes red. Two tests here
   passed against a *removed* guard before this was done, and two more passed against a removed
   guard again afterwards for the `[[ ]]` reason above. Apply the mutation and *verify it applied* —

@@ -1385,3 +1385,38 @@ for line in sys.stdin.read().splitlines():
 	[ ! -f "$work/dist/stab/CLIP.trf" ] || fail "FRAME ran the detect pass anyway"
 	[[ "$output" != *"stabilising from"* ]] || fail "FRAME claimed to stabilise a still: $output"
 }
+
+@test "the tone generator writes the same curve to stdout as to a file" {
+	# The preview regenerates this curve on every slider move and wants it in memory. If the two
+	# paths could differ, the preview would be predicting a curve the render never uses — and the
+	# whole reason the generator is subprocessed rather than ported is that there is one curve.
+	local f="$BATS_TEST_TMPDIR/tone.cube"
+	run "$SCRIPTS/make-tone-lut.py" "$f" --gamma 2.02 --pivot 0.39 --contrast 1.09 \
+		--toe 0 --shoulder 0.1 --black 0.025
+	[ "$status" -eq 0 ]
+	run --separate-stderr "$SCRIPTS/make-tone-lut.py" --stdout --gamma 2.02 --pivot 0.39 \
+		--contrast 1.09 --toe 0 --shoulder 0.1 --black 0.025
+	[ "$status" -eq 0 ]
+	printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/from-stdout.cube"
+	cmp "$f" "$BATS_TEST_TMPDIR/from-stdout.cube" \
+		|| fail "the stdout curve is not the curve that gets rendered"
+}
+
+@test "the tone generator keeps its commentary out of the curve" {
+	# A progress line mixed into the table is read as an entry by whatever parses it.
+	run --separate-stderr "$SCRIPTS/make-tone-lut.py" --stdout --gamma 1.0
+	[ "$status" -eq 0 ]
+	[[ "$output" == TITLE* ]] || fail "stdout did not begin with the cube's TITLE: ${output:0:80}"
+	[[ "$stderr" == *"stdout"* ]] || fail "no confirmation on stderr: $stderr"
+	# `grep -qv` would have been the obvious assertion and is wrong under pipefail: -q closes the
+	# pipe on the first match, printf dies of SIGPIPE, and the pipeline reports 141 whatever the
+	# content was. Negate a positive match instead, which reads the whole input when it passes.
+	! printf '%s\n' "$output" | grep -q '^wrote' || fail "commentary leaked into the curve"
+}
+
+@test "the tone generator refuses an ambiguous destination" {
+	run "$SCRIPTS/make-tone-lut.py" "$BATS_TEST_TMPDIR/x.cube" --stdout
+	[ "$status" -ne 0 ] || fail "accepted both a file and stdout"
+	run "$SCRIPTS/make-tone-lut.py"
+	[ "$status" -ne 0 ] || fail "accepted neither a file nor stdout"
+}
