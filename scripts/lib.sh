@@ -18,7 +18,8 @@
 set -euo pipefail
 
 # Resolved relative to lib.sh itself, so every stage sees the same file regardless of cwd.
-LOOK_FILE="${LOOK_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/look.json}"
+LIB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOOK_FILE="${LOOK_FILE:-$LIB_ROOT/look.json}"
 
 # The look LUT is part of the grade, so it is chosen in look.json like every other look value and
 # resolved HERE, once, rather than in each render path. Both scripts used to carry their own copy
@@ -579,8 +580,17 @@ DELIVERY_BLEND="blend=all_mode=grainmerge:shortest=1"
 # applied it back in stage 01), and tag is DELIVERY_SETPARAMS wherever the result feeds filters
 # that negotiate a colourspace.
 grade_chain() {  # grade_chain <tone-lut> <sat> <warm> [head-prefix] [tag-prefix]
-	# An empty LOOK_LUT means no look: the filter is left out of the string entirely rather than
-	# pointed at an identity cube. See resolve_look_lut for why that is not the same thing.
+	# UNSET is not the same as EMPTY, and the difference is load-bearing. Empty means a deliberate
+	# choice of no look. Unset means nobody has chosen, which is look.json's question to answer —
+	# so it is answered here rather than silently treated as "no look".
+	#
+	# Two callers got this wrong the moment the look stopped being a constant this file assigned at
+	# source time: the parity harness and the test that pins the golden to the chain both sourced
+	# lib.sh, called this function, and received a chain with no look filter in it. Both looked
+	# correct. The golden's freshness guard is what caught it.
+	if [ -z "${LOOK_LUT+set}" ]; then
+		LOOK_LUT="$(resolve_look_lut "$(look .look.lut)" "$LIB_ROOT")"
+	fi
 	local look=""
 	[ -z "${LOOK_LUT:-}" ] || look="lut3d=file='${LOOK_LUT}':interp=tetrahedral,"
 	printf "%s%sformat=yuv444p10le,split=2[gc_y][gc_c];[gc_y]lut1d=file='%s':interp=linear,format=yuv444p10le[gc_t];[gc_t][gc_c]mergeplanes=0x001112:yuv444p10le,%shue=s=%s,colorbalance=rm=%s:bm=-%s" \

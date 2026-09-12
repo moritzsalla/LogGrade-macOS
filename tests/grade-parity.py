@@ -65,7 +65,7 @@ GOLDEN = os.path.join(FIXTURES, "grade-golden.json")
 # NEITHER CALIBRATION RUN IS A LOOK. Both neutralise the curve, the saturation and the warmth, and
 # they differ only in which 3D LUT sits at the head of the chain:
 #
-#   floor      an identity cube. What this moves is the RGB/YUV round-trip ffmpeg performs either
+#   floor      no look filter at all. What this moves is the RGB/YUV round-trip ffmpeg performs
 #              side of the chain — error that belongs to colour conversion, not to anyone's maths.
 #              Every other number here has to be read on top of it.
 #   post-look  the real Portra cube. This is the Bench's documented input (post-CST, post-look), so
@@ -75,7 +75,7 @@ GOLDEN = os.path.join(FIXTURES, "grade-golden.json")
 # which was the look LUT's own effect rather than any conversion error. Two runs, two questions.
 CASES = [
     ("floor", dict(gamma=1.00, pivot=0.50, contrast=1.00, toe=0.00, shoulder=0.00, black=0.000),
-     1.00, 0.000, "identity"),
+     1.00, 0.000, "none"),
     ("post-look", dict(gamma=1.00, pivot=0.50, contrast=1.00, toe=0.00, shoulder=0.00, black=0.000),
      1.00, 0.000, "real"),
     # The shipped look, then the same look split in half, so the divergence can be attributed
@@ -89,6 +89,14 @@ CASES = [
      1.00, 0.000, "real"),
     ("trims-only", dict(gamma=1.00, pivot=0.50, contrast=1.00, toe=0.00, shoulder=0.00,
                         black=0.000), 1.27, 0.005, "real"),
+    # One trim each, at a value large enough to see on its own. Without these the guard is
+    # insensitive to a small trim regression: the shipped look's divergence is dominated by the
+    # tone stage, so deleting the Bench's warmth line entirely hid underneath it and left
+    # `shipped` green. Found by mutation.
+    ("warm-only", dict(gamma=1.00, pivot=0.50, contrast=1.00, toe=0.00, shoulder=0.00,
+                       black=0.000), 1.00, 0.120, "real"),
+    ("sat-only", dict(gamma=1.00, pivot=0.50, contrast=1.00, toe=0.00, shoulder=0.00,
+                      black=0.000), 1.60, 0.000, "real"),
     ("extreme", dict(gamma=2.60, pivot=0.25, contrast=1.80, toe=0.80, shoulder=0.80, black=0.080),
      1.60, 0.120, "real"),
     ("negative-black", dict(gamma=1.50, pivot=0.65, contrast=0.80, toe=0.40, shoulder=0.00,
@@ -178,36 +186,32 @@ def sample_offsets(n):
 
 
 # --- the chain, out of lib.sh -------------------------------------------------
-def chain_string(tone, sat, warm, look=""):
-    """The production chain, out of lib.sh. `look` overrides LOOK_LUT *after* sourcing, which is
-    how the floor run swaps the Portra cube for an identity one without this file transcribing a
-    single filter."""
+def chain_string(tone, sat, warm, look="real"):
+    """The production chain, out of lib.sh.
+
+    `look` is "real" for look.json's own choice, or anything resolve_look_lut accepts — "none"
+    being the one the floor run uses. It has to be resolved the way the entry scripts resolve it,
+    because lib.sh stopped setting LOOK_LUT when the look stopped being a constant: sourcing it and
+    calling grade_chain therefore emits a chain with NO look filter at all. The fingerprint guard
+    is what caught that, which is the whole reason it hashes the chain rather than trusting it."""
     r = subprocess.run(["bash", "-c",
-                        'set -euo pipefail; source "$1"; [ -z "$5" ] || LOOK_LUT="$5"; '
+                        'set -euo pipefail; source "$1"; '
+                        'if [ "$5" = "real" ]; then '
+                        '  LOOK_LUT="$(resolve_look_lut "$(look .look.lut)" "$6")"; '
+                        'else LOOK_LUT="$(resolve_look_lut "$5" "$6")"; fi; '
                         'grade_chain "$2" "$3" "$4"',
-                        "_", LIB, tone, sat, warm, look],
+                        "_", LIB, tone, sat, warm, look, ROOT],
                        capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit("could not read grade_chain out of lib.sh:\n" + r.stderr)
     return r.stdout.strip()
 
 
-def identity_cube(path):
-    """A 3D LUT that maps every corner to itself. Interpolating it is exact, so the floor run
-    measures conversion and nothing else."""
-    with open(path, "w") as f:
-        f.write("TITLE \"identity\"\nLUT_3D_SIZE 2\n")
-        for b in (0, 1):
-            for g in (0, 1):
-                for r in (0, 1):
-                    f.write("%d %d %d\n" % (r, g, b))
-
-
 def chain_fingerprint():
     """Hash the chain's SHAPE, with the parameters and the absolute LUT path tokenised out. The
     look LUT's path contains the checkout location, so hashing it raw would make every clone
     disagree, and the parameters vary per case and are recorded separately anyway."""
-    s = chain_string("<TONE>", "<SAT>", "<WARM>").replace(ROOT, "<ROOT>")
+    s = chain_string("<TONE>", "<SAT>", "<WARM>", "real").replace(ROOT, "<ROOT>")
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
@@ -215,11 +219,9 @@ def chain_fingerprint():
 def render_case(params, sat, warm, probe_path, look="real"):
     with tempfile.NamedTemporaryFile(suffix=".cube", delete=False) as f:
         cube = f.name
-    ident = None
-    if look == "identity":
-        with tempfile.NamedTemporaryFile(suffix=".cube", delete=False) as f:
-            ident = f.name
-        identity_cube(ident)
+    # "none" omits the look filter rather than interpolating an identity cube through it, which is
+    # what the engine itself now does — and it measures the round trip without a lookup in it at
+    # all, which is what this case was always trying to isolate.
     try:
         cmd = [sys.executable, GEN, cube]
         for k, v in params.items():
@@ -227,7 +229,7 @@ def render_case(params, sat, warm, probe_path, look="real"):
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             sys.exit("make-tone-lut.py failed:\n" + r.stderr)
-        graph = "[0:v]%s,format=rgb48le[o]" % chain_string(cube, str(sat), str(warm), ident or "")
+        graph = "[0:v]%s,format=rgb48le[o]" % chain_string(cube, str(sat), str(warm), look)
         r = subprocess.run(["ffmpeg", "-v", "error", "-i", probe_path,
                             "-filter_complex", graph, "-map", "[o]",
                             "-f", "rawvideo", "-pix_fmt", "rgb48le", "-"],
@@ -239,8 +241,6 @@ def render_case(params, sat, warm, probe_path, look="real"):
                 for off in sample_offsets(len(probe_patches()))]
     finally:
         os.unlink(cube)
-        if ident:
-            os.unlink(ident)
 
 
 # --- the javascript side ------------------------------------------------------

@@ -108,6 +108,11 @@ single-line ffprobe answer without checking what it actually printed.
 - **The scene-linear filmic route was tried and lost on colour.** Its measurements are in
   `docs/adr/0002_KEEP_APPLES_CST.md`; the cubes themselves are gitignored, so `luts/filmic/` holds
   only `SOURCE.txt` on a fresh clone and is regenerated from `scripts/make-filmic-lut.py`.
+- **An UNSET variable is not an empty one, and `grade_chain` depends on the difference.** Empty
+  `LOOK_LUT` means a deliberate choice of no look; unset means nobody chose, which `look.json`
+  answers. When the look stopped being a constant assigned at source time, two callers that
+  sourced `lib.sh` and called `grade_chain` silently got a chain with no look filter in it, and
+  both looked correct. The golden's freshness guard caught it; nothing else would have.
 - **Look values live in `look.json`,** never hardcoded in a script. `grade.sh` broke this with its
   own copy of the tone block, so a grade from the Bench changed `shipped.cube` and the staged path
   while production kept rendering the old tone. `look()` has **no fallbacks** on purpose: a missing
