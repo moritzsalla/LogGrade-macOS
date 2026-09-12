@@ -232,8 +232,12 @@ for SRC in "${CLIPS[@]}"; do
 			say "      stabilising from $TRF (smoothing=${SMOOTHING})"
 			emit stabilisation clip "$CLIP" state fresh transform "$TRF" smoothing "$SMOOTHING"
 		elif [ -f "$TRF" ]; then
-			say "      stale transform at $TRF — older than the source, rendering unstabilised"
-			say "      re-run 00-stabilise-detect.sh for $CLIP to refresh it"
+			# Only reachable in a dry run: a real run recomputes a stale transform a few lines
+			# up, because `! transform_is_fresh` is what triggers the detect pass. The old
+			# message said "rendering unstabilised", which is what neither case does — a dry run
+			# renders nothing and a real one refreshes it. Saying the cost out loud matters
+			# because this is the one decision in a plan that costs ~65s per clip to get wrong.
+			say "      stale transform at $TRF — a real run will recompute it (~65s)"
 			emit_code STALE_TRANSFORM
 			emit stabilisation clip "$CLIP" state stale transform "$TRF"
 		else

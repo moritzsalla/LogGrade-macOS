@@ -11,6 +11,10 @@
 #          at the bottom. It is NOT assumed correct for every clip's composition — eyeball a crop
 #          preview per clip and pass the right offset.
 #
+#   ACCEPT_STALE=1 delivers even though the transform is older than its source, i.e. unstabilised
+#          on purpose. Without it a stale transform is refused: this stage has no detect pass, so
+#          the alternative is a file that looks finished and quietly lacks the stabilisation.
+#
 # WHY ONE SCRIPT. This was two, 86% identical line for line, and they had already drifted: the
 # grain rationale existed in the reels copy only. The two deliverables differ in four values —
 # output size, grain plate size, whether a crop precedes the downscale, and the output name — so
@@ -78,8 +82,22 @@ if transform_is_fresh "$TRF" "$SRC"; then
 	STAB_PREFIX="$(stab_prefix "$TRF" "$SMOOTHING")"
 	echo "stabilising with $TRF (smoothing=${SMOOTHING})"
 elif [ -f "$TRF" ]; then
-	echo "stale transform at $TRF — older than $SRC, rendering unstabilised"
-	echo "  re-run 00-stabilise-detect.sh $CLIP to refresh it"
+	# REFUSED, not warned about. This stage has no detect pass, so a stale transform here means
+	# delivering a file that quietly lacks the stabilisation someone asked for — and it looks
+	# finished, which is CONTEXT.md's "squashed" failure class in another dimension. The warning
+	# was printed among a dozen other lines and then the render went ahead anyway.
+	#
+	# ACCEPT_STALE=1 is how you say "yes, unstabilised, I know": a decision someone made rather
+	# than a default nobody saw.
+	emit_code STALE_TRANSFORM
+	if [ "${ACCEPT_STALE:-0}" != "1" ]; then
+		echo "REFUSING: stale transform at $TRF — older than $SRC." >&2
+		echo "  It was measured on footage that no longer exists, so the warp would fight the" >&2
+		echo "  frames it is applied to. Re-run 00-stabilise-detect.sh $CLIP to refresh it," >&2
+		echo "  or pass ACCEPT_STALE=1 to deliver this unstabilised on purpose." >&2
+		exit 1
+	fi
+	echo "stale transform at $TRF — rendering unstabilised, accepted via ACCEPT_STALE=1"
 else
 	echo "no transforms at $TRF — rendering unstabilised (run 00-stabilise-detect.sh first)"
 fi

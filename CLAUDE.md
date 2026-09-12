@@ -80,6 +80,10 @@ single-line ffprobe answer without checking what it actually printed.
   dies of SIGPIPE, so the pipeline reports 141 regardless of the content; `x=$(ls glob | head -1)`
   fails the whole assignment when the glob matches nothing. Negate a positive match, or end the
   lookup in `|| true`.
+- **A test whose subject is a refusal must assert the refusal's own words**, and that the work was
+  not attempted. A synthetic fixture cannot complete the delivery chain — it fails reinitialising
+  filters on the way to 1080x1920 — so `status != 0` and an empty output folder are true whether or
+  not the guard fired. Three tests here passed against a removed guard for exactly that reason.
 - **Mutation-test anything you add.** Break the guard, confirm the test goes red. Two tests here
   passed against a *removed* guard before this was done, and two more passed against a removed
   guard again afterwards for the `[[ ]]` reason above. Apply the mutation and *verify it applied* —

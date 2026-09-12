@@ -1420,3 +1420,63 @@ for line in sys.stdin.read().splitlines():
 	run "$SCRIPTS/make-tone-lut.py"
 	[ "$status" -ne 0 ] || fail "accepted neither a file nor stdout"
 }
+
+# --- stale transforms ---------------------------------------------------------
+# A transform is measured from the DECODED source. If the source changes, the transform describes
+# motion in frames that no longer exist, and applying it makes the warp fight the footage.
+
+@test "03-final refuses a stale transform rather than delivering unstabilised" {
+	# This stage has no detect pass, so the alternative is shipping a file that looks finished and
+	# quietly lacks the stabilisation someone asked for. The warning it used to print sat among a
+	# dozen other lines and the render went ahead regardless.
+	local work="$BATS_TEST_TMPDIR/stale-final"
+	mkdir -p "$work/src" "$work/dist/02-graded" "$work/dist/stab"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
+	printf 'measured before the source changed\n' > "$work/dist/stab/CLIP.trf"
+	# Stamped, not touched: bash 3.2's -nt compares whole seconds.
+	touch -t 202609010000 "$work/dist/stab/CLIP.trf"
+	touch -t 202609020000 "$work/src/CLIP.mov"
+	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
+	[ "$status" -ne 0 ] || fail "delivered against a stale transform"
+	# Assert the REFUSAL's own words and that the render was never attempted. A synthetic fixture
+	# cannot complete the delivery chain, so `status != 0` and an empty output folder are true
+	# whether or not the guard fired — written that way, this test passed with the guard removed.
+	[[ "$output" == *"REFUSING: stale transform"* ]] || fail "not refused by the guard: $output"
+	[[ "$output" != *"encode"* ]] || fail "reached the render despite the stale transform: $output"
+	[[ "$output" == *"GRADE_CODE=STALE_TRANSFORM"* ]] || fail "unnamed refusal: $output"
+}
+
+@test "ACCEPT_STALE proceeds past the refusal as a decision someone made" {
+	# Scoped to the GUARD, not to the render. A 64x128 synthetic fixture cannot complete the
+	# delivery chain — it fails reinitialising filters on the way to 1080x1920 — so asserting a
+	# successful delivery here would be asserting something about the fixture. What this pins is
+	# that the refusal is skipped, said out loud, and the render is attempted.
+	local work="$BATS_TEST_TMPDIR/stale-ok"
+	mkdir -p "$work/src" "$work/dist/02-graded" "$work/dist/stab"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
+	printf 'measured before the source changed\n' > "$work/dist/stab/CLIP.trf"
+	touch -t 202609010000 "$work/dist/stab/CLIP.trf"
+	touch -t 202609020000 "$work/src/CLIP.mov"
+	ACCEPT_STALE=1 GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
+	[[ "$output" == *"accepted via ACCEPT_STALE=1"* ]] || fail "said nothing about it: $output"
+	[[ "$output" != *"REFUSING"* ]] || fail "refused despite ACCEPT_STALE=1: $output"
+	[[ "$output" == *"encode"* ]] || fail "never reached the render: $output"
+}
+
+@test "a dry run says a stale transform will be recomputed, not ignored" {
+	# grade.sh's stale branch is only reachable in a dry run, because a real run recomputes it a
+	# few lines earlier. The message said "rendering unstabilised", which is what neither case
+	# does — and this is the one decision in a plan that costs ~65s per clip to get wrong.
+	local work="$BATS_TEST_TMPDIR/stale-dry"
+	mkdir -p "$work/src" "$work/dist/stab"
+	printf 'measured before the source changed\n' > "$work/dist/stab/CLIP.trf"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	touch -t 202609010000 "$work/dist/stab/CLIP.trf"
+	touch -t 202609020000 "$work/src/CLIP.mov"
+	DRY=1 MATCH=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"will recompute"* ]] || fail "did not say what a real run would do: $output"
+	[[ "$output" != *"rendering unstabilised"* ]] || fail "still claims it renders unstabilised"
+}
