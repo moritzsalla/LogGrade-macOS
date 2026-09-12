@@ -8,7 +8,7 @@
 # Run both.
 #
 # A MISSING TOOL IS A FAILURE, NOT A PASS. This is the command CLAUDE.md tells you to trust, and
-# it used to exit 0 having skipped shellcheck and the curve parity check — so "green" could mean
+# it used to exit 0 having skipped shellcheck and the grade parity check — so "green" could mean
 # "ran the bats suite and nothing else". Each skip is now recorded and the run exits non-zero at
 # the end, naming what did not run. Pass --allow-skips when you genuinely want a partial run, e.g.
 # iterating on one bats test without node installed.
@@ -52,13 +52,13 @@ else
 fi
 
 echo
-echo "== curve parity (Bench JS vs make-tone-lut.py) =="
+echo "== grade parity (Bench JS vs ffmpeg's own output) =="
 if command -v node >/dev/null; then
-	./tests/curve-parity.py
+	./tests/grade-parity.py
 else
 	echo "node NOT INSTALLED. This is the check that catches the Bench's preview silently"
 	echo "diverging from the renderer."
-	SKIPPED="$SKIPPED curve-parity"
+	SKIPPED="$SKIPPED grade-parity"
 fi
 
 echo

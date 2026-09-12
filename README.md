@@ -77,7 +77,7 @@ each generated `.cube` carries its own parameters in its `TITLE`, and a mismatch
 is checked by content rather than by timestamp, because git does not preserve timestamps and a
 fresh clone would otherwise trust a stale cube forever.
 
-The Bench's curve maths is a port of the renderer's. `tests/curve-parity.py` runs both over the
+The Bench's grade maths is a port of the renderer's. `tests/grade-parity.py` runs both over the
 same inputs and fails if they diverge — otherwise the preview could quietly stop predicting the
 render and nothing would say so.
 
@@ -152,7 +152,7 @@ docs/           PIPELINE.md is the real documentation.
   BATCH_RUNBOOK.md  per-clip procedure, and which calls are not safe to automate
   SHOOTING_SETUP.md how to shoot for this pipeline, and what the first shoot measured
   adr/            decisions that would be expensive to reverse, with the measurements
-tests/          bats suite + the curve parity check.
+tests/          bats suite + the grade parity check and its probe.
 CONTEXT.md      What each word means here.
 ```
 
@@ -164,7 +164,7 @@ discover mid-conversion that a guard had broken.
 Run everything with `./scripts/check.sh`:
 
 - **shellcheck** across every script.
-- **`tests/curve-parity.py`** — the important one. Runs the Bench's JavaScript and the Python
+- **`tests/grade-parity.py`** — the important one. Runs the Bench's JavaScript and the Python
   generator over the same inputs and fails if they disagree by more than one 8-bit code value. If
   these drift, the browser preview stops predicting the render and nothing else would catch it.
 - **`tests/lib.bats`** — the bats suite. Most of it covers the safety layer: colour-tag

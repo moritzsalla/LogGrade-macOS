@@ -10,7 +10,7 @@ what you measure against and depart from deliberately, and a *baseline* is not a
 ## Run this before trusting any change
 
 ```sh
-./scripts/check.sh        # shellcheck, curve parity, the bats suite
+./scripts/check.sh        # shellcheck, grade parity, the bats suite
 ```
 
 A **missing tool now fails the run** rather than skipping quietly. This command used to exit 0

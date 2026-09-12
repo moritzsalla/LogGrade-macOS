@@ -61,7 +61,7 @@ Kept here so they are not re-litigated from scratch.
 - **The scene-linear filmic route.** Architecturally correct and it lost on colour; kept in
   `luts/filmic/` with its measurements. See ADR-0002.
 - **Playwright tests for the Bench.** The property that actually matters — the Bench's curve maths
-  matching the renderer's — is tested directly by `tests/curve-parity.py`, which is cheaper and
+  matching the renderer's — is tested directly by `tests/grade-parity.py`, which is cheaper and
   more precise than driving a browser.
 - **An accessibility audit of the Bench.** Single-user desktop tool. Revisit if it is ever shared.
 - **Python linting.** Two scripts, ~300 lines. Run `ruff` once if it bothers you.
