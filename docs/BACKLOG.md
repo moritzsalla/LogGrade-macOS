@@ -2,6 +2,10 @@
 
 Everything raised and not finished. Ordered by what blocks what, not by size.
 
+**Inherited from the precursor.** Most of what follows was written about that shoot and still reads
+as true of the engine; the app's own work is tracked outside this file. `PROVENANCE.md` says what
+came across.
+
 ## Blocking the rest of the shoot
 
 **Sign off the v4 look.** The current proof carries four changes on top of the approved grade:
@@ -44,8 +48,8 @@ once for the whole grade. One-line fix next time that file is open.
 **`dist/proofs/` is doing three jobs** — proofs, variant renders, and ladder images. Nothing
 references the folder, so splitting it is free whenever the naming settles.
 
-**A fifth ADR.** "The grade is set in a browser bench and sent back as data, rather than described
-in words." It meets the same bar as the other four and is already argued in `docs/BATCH_RUNBOOK.md`.
+~~**A fifth ADR.**~~ Written, as `docs/adr/0007_THE_GRADE_IS_DECIDED_IN_A_BENCH_AND_SENT_AS_DATA.md`.
+The item said "a fifth" when six already existed, which is what a count in prose does.
 
 ## Considered and declined
 

@@ -1,9 +1,8 @@
 # Grading pipeline — rationale, decisions, findings
 
-The four decisions in here that a later reader is most likely to "fix" are also written up short
-in `docs/adr/`: grade by tone and not by colour (0001), keep Apple's CST over the filmic route
-(0002), tone on luma only (0003), one clip's intermediates on disk (0004). The measurements behind
-them stay here. `CONTEXT.md` is the vocabulary.
+The decisions in here that a later reader is most likely to "fix" are also written up short in
+`docs/adr/`, and that folder is the index rather than a number in this sentence — which said "four"
+while six existed. The measurements behind them stay here. `CONTEXT.md` is the vocabulary.
 
 ## Goal
 

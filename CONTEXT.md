@@ -41,8 +41,17 @@ _Avoid_: export, render, delivery, `<clip>_final` — a final is named for its d
 being finished
 
 **Proof**:
-A deliberately cheap, deliberately undelivered render made only to decide something.
-_Avoid_: preview, draft, test render, sample
+A deliberately cheap, deliberately undelivered render made only to decide something. It goes
+through the whole delivery chain, which is what makes it worth waiting for.
+_Avoid_: draft, test render, sample
+
+**Preview**:
+The still the interface shows while a control moves. It is not a render and not a proof: it covers
+the grade only — CST, look, tone, trims — and cannot show grain, the sharpener, the chroma
+denoise, the stabiliser or the dither, all of which are delivery-stage. The word was previously
+ruled out as a synonym for *proof*; it now has its own job and the two are not interchangeable.
+A proof answers "is this deliverable"; a preview answers "is this the grade".
+_Avoid_: using it for a proof, or for anything that has been through the delivery chain
 
 ## The grade
 
@@ -130,6 +139,11 @@ _Avoid_: oversaturated, clipped
 A landscape clip scaled into a vertical frame with no error and no warning. The batch failure
 that produces files which all look done.
 _Avoid_: stretched, wrong aspect
+
+**Engine**:
+The shell pipeline: `scripts/`, the LUTs and `look.json`. It owns the image. An interface sets its
+environment variables, spawns it and reads its events; it never builds a filter graph itself.
+_Avoid_: backend, core, the scripts
 
 ## Working
 
