@@ -1,0 +1,645 @@
+<title>Apple Log Grade Bench</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Committed single dark theme, deliberately: you cannot judge an image against a bright
+     interface — surrounding luminance biases colour perception, which is why grading suites are
+     dark. Every colour is painted explicitly so the page holds on either host ground. */
+  :root {
+    --ground: #15171b;
+    --panel: #1d2026;
+    --panel-2: #23272e;
+    --line: #2e333b;
+    --line-soft: #262a31;
+    --ink: #dde1e8;
+    --ink-dim: #9aa2b1;
+    --ink-faint: #6b7383;
+    --plate: #f3c300;   /* RAL 1021 — a reference the tool measures, used as its one accent */
+    --ok: #59d98b;
+    --warn: #f0b429;
+    --off: #f0716b;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--sans);
+         font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  .wrap { padding: 24px 20px 56px; max-width: 1340px; margin: 0 auto; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+  header { display: flex; flex-wrap: wrap; gap: 6px 20px; align-items: baseline;
+           border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 22px; }
+  h1 { font-size: 19px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--ink-dim); font-size: 13px; margin: 0; }
+  .clipid { font-family: var(--mono); font-size: 12px; color: var(--ink-faint);
+            margin-left: auto; letter-spacing: 0.02em; }
+
+  .bench { display: grid; grid-template-columns: minmax(0,1fr) 390px; gap: 24px; align-items: start; }
+  @media (max-width: 940px) {
+    .bench { grid-template-columns: 1fr; }
+    .viewer { top: 0; padding: 10px; gap: 8px; border-radius: 0 0 4px 4px; }
+    .viewer .hint { display: none; }
+    .stage { padding: 6px; }
+    #cv { max-height: 42vh; }
+  }
+
+  .viewer { background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+            padding: 14px; display: flex; flex-direction: column; gap: 12px;
+            /* stays put while the controls scroll — you cannot judge a slider you can't see */
+            position: sticky; top: 12px; z-index: 5; }
+  .stage { display: flex; justify-content: center; background: #0c0d10;
+           border: 1px solid var(--line-soft); border-radius: 2px; padding: 10px; position: relative; }
+  .stage.drop { border-color: var(--plate); }
+  .stage.picking { cursor: crosshair; }
+  canvas { max-width: 100%; height: auto; display: block; max-height: min(76vh, 920px);
+           width: auto; margin: 0 auto; }
+
+  .viewbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+  .seg button { background: transparent; border: 0; color: var(--ink-dim); font-family: var(--mono);
+                font-size: 12px; padding: 6px 11px; cursor: pointer; border-right: 1px solid var(--line); }
+  .seg button:last-child { border-right: 0; }
+  .seg button[aria-pressed="true"] { background: var(--panel-2); color: var(--ink); }
+  .btn { background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-dim);
+         font-family: var(--mono); font-size: 12px; padding: 6px 12px; border-radius: 3px; cursor: pointer; }
+  .btn:hover { color: var(--ink); }
+  .btn[aria-pressed="true"] { border-color: var(--plate); color: var(--plate); }
+  .btn.send { background: var(--plate); color: #171a12; border-color: var(--plate); font-weight: 500; }
+  .btn.send:hover { color: #000; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn:focus-visible, .seg button:focus-visible, input:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--plate); outline-offset: 1px; }
+  .hint { color: var(--ink-faint); font-size: 12px; }
+
+  .panel { display: flex; flex-direction: column; gap: 18px; }
+  .block { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 14px 15px; }
+  .block h2 { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+              color: var(--ink-faint); margin: 0 0 4px; }
+  .block .lede { color: var(--ink-faint); font-size: 12px; margin: 0 0 11px; }
+
+  .scope { display: grid; grid-template-columns: 12px 1fr auto auto; gap: 3px 9px; align-items: baseline;
+           padding: 7px 0; border-bottom: 1px solid var(--line-soft); }
+  .scope:last-of-type { border-bottom: 0; }
+  .scope .chip { width: 9px; height: 9px; border-radius: 2px; align-self: center; }
+  .scope .name { font-size: 13px; cursor: pointer; }
+  .scope .name[data-armed="1"] { color: var(--plate); }
+  .scope .val { font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .scope .spec { font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+                 font-variant-numeric: tabular-nums; }
+  .scope .bar { grid-column: 2 / -1; height: 3px; background: var(--line-soft); border-radius: 2px;
+                position: relative; overflow: hidden; margin-top: 3px; }
+  .scope .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; }
+  .v-ok { color: var(--ok); } .v-warn { color: var(--warn); } .v-off { color: var(--off); }
+  .b-ok { background: var(--ok); } .b-warn { background: var(--warn); } .b-off { background: var(--off); }
+  .v-none { color: var(--ink-faint); }
+
+  .ctl { margin-bottom: 13px; }
+  .ctl:last-child { margin-bottom: 0; }
+  .ctl-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .ctl label { font-size: 13px; }
+  .ctl output { font-family: var(--mono); font-size: 12px; color: var(--plate);
+                font-variant-numeric: tabular-nums; }
+  .ctl .note { font-size: 11px; color: var(--ink-faint); margin-top: 1px; }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 18px;
+                      background: transparent; margin: 4px 0 0; cursor: pointer; }
+  input[type=range]::-webkit-slider-runnable-track { height: 3px; background: var(--line); border-radius: 2px; }
+  input[type=range]::-moz-range-track { height: 3px; background: var(--line); border-radius: 2px; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 13px;
+      height: 13px; border-radius: 50%; background: var(--ink); margin-top: -5px; border: 0; }
+  input[type=range]::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%;
+      background: var(--ink); border: 0; }
+
+  input[type=text] { width: 100%; background: #0f1114; border: 1px solid var(--line); color: var(--ink);
+    font-family: var(--sans); font-size: 13px; padding: 7px 9px; border-radius: 3px; }
+  input[type=text]::placeholder { color: var(--ink-faint); }
+
+  pre { font-family: var(--mono); font-size: 11.5px; line-height: 1.65; background: #0f1114;
+        border: 1px solid var(--line-soft); border-radius: 3px; padding: 11px 12px; margin: 9px 0 0;
+        overflow-x: auto; color: var(--ink-dim); white-space: pre; }
+  pre b { color: var(--plate); font-weight: 400; }
+  .row { display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
+  .status { font-size: 12px; color: var(--ink-faint); font-family: var(--mono); }
+  .status.good { color: var(--ok); } .status.bad { color: var(--off); }
+  details summary { font-size: 12px; color: var(--ink-faint); cursor: pointer; margin-top: 12px; }
+  footer { margin-top: 26px; color: var(--ink-faint); font-size: 12px; border-top: 1px solid var(--line);
+           padding-top: 14px; max-width: 78ch; }
+  footer code { font-family: var(--mono); color: var(--ink-dim); }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Apple Log Grade Bench</h1>
+    <p class="sub">Tone stage on luma only, mirroring the ffmpeg chain.</p>
+    <span class="clipid" id="clipid">IMG_0609 · 4K24</span>
+  </header>
+
+  <div class="bench">
+    <section class="viewer">
+      <div class="stage" id="stage"><canvas id="cv"></canvas></div>
+      <div class="viewbar">
+        <div class="seg" id="frames" role="group" aria-label="Frame">
+          <button data-src="frame_1s.jpg" aria-pressed="true">01s</button>
+          <button data-src="frame_9s.jpg" aria-pressed="false">09s</button>
+          <button data-src="frame_18s.jpg" aria-pressed="false">18s</button>
+        </div>
+        <button class="btn" id="ab" aria-pressed="false">Hold to compare</button>
+        <button class="btn" id="reset">Reset</button>
+        <label class="btn" for="file" style="display:inline-block">Open frame…</label>
+        <input class="sr" type="file" id="file" accept="image/*">
+      </div>
+      <p class="hint">Any frame works — drop one in. Input should be post-CST, pre-tone.</p>
+    </section>
+
+    <aside class="panel">
+      <div class="block">
+        <h2>Reference samplers</h2>
+        <p class="lede">Click a name, then click that object in the frame. Standardised colours only —
+          Dutch plate, traffic signs. Grey samples neutrality.</p>
+        <div id="scopes"></div>
+      </div>
+
+      <div class="block">
+        <h2>Tone</h2>
+        <div id="tone"></div>
+      </div>
+
+      <div class="block">
+        <h2>Colour</h2>
+        <div id="colour"></div>
+      </div>
+
+      <div class="block">
+        <h2>Send to Claude</h2>
+        <label class="sr" for="note">Note</label>
+        <input type="text" id="note" placeholder="Optional — e.g. shadows still too heavy">
+        <div class="row">
+          <button class="btn send" id="send" disabled>Send grade</button>
+          <span class="status" id="status">connecting…</span>
+        </div>
+        <details>
+          <summary>load the current look.json</summary>
+          <p class="status">
+            Paste the repo's look.json here and press Load. The sliders start from the shipped
+            look, and the blocks this tool does not edit (grain, stabilisation, match) are carried
+            through unchanged instead of being dropped.
+          </p>
+          <textarea id="loadin" rows="6" spellcheck="false"
+                    style="width:100%;font:11px ui-monospace,monospace"></textarea>
+          <div class="row">
+            <button class="btn" id="load">Load</button>
+            <span class="status" id="loadstatus"></span>
+          </div>
+        </details>
+        <details>
+          <summary>look.json being sent</summary>
+          <pre id="out"></pre>
+          <div class="row"><button class="btn" id="copy">Copy look.json</button></div>
+        </details>
+      </div>
+    </aside>
+  </div>
+
+  <footer>
+    Curve maths is a port of <code>make-tone-lut.py</code>. The luma-only application mirrors
+    <code>mergeplanes=0x001112</code>: all three channels shift by the luma delta, chroma untouched —
+    which is what stops a contrast curve turning saturated signage neon. Sampler targets are RAL
+    specs (1021 plate yellow, 3020 traffic red, 5017 traffic blue); objects in shade read darker and
+    less saturated than spec, so read them as hue and ratio references, not absolute exposure.
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var SAMPLERS = [
+    { key: "plate", name: "Plate yellow", ral: "RAL 1021", swatch: "#f3c300", unit: "G/R",
+      spec: 0.80, tol: 0.08, max: 1.2,
+      pick: function (p) { return (p[0] + p[1]) / 2 - p[2]; }, frac: 0.3,
+      calc: function (c) { return c[0] ? c[1] / c[0] : 0; }, def: [46, 1029] },
+    { key: "red", name: "Traffic red", ral: "RAL 3020", swatch: "#cc0605", unit: "purity",
+      spec: 0.36, tol: 0.07, max: 0.8,
+      pick: function (p) { return p[0] - (p[1] + p[2]) / 2; }, frac: 0.2,
+      calc: function (c) { return c[0] ? (c[1] + c[2]) / 2 / c[0] : 0; }, def: [255, 843] },
+    { key: "blue", name: "Traffic blue", ral: "RAL 5017", swatch: "#063971", unit: "B/G",
+      spec: 1.98, tol: 0.12, max: 3.4,
+      pick: function (p) { return p[2] - (p[0] + p[1]) / 2; }, frac: 0.2,
+      calc: function (c) { return c[1] ? c[2] / c[1] : 0; }, def: [255, 782] },
+    { key: "grey", name: "Neutral", ral: "R−B ≈ 0", swatch: "#8b8f96", unit: "R−B",
+      spec: 0, tol: 4, max: 40,
+      pick: null, frac: 1,
+      calc: function (c) { return c[0] - c[2]; }, def: [405, 1300] }
+  ];
+
+  var TONE = [
+    { id: "gamma", label: "Midtone level", min: 1.0, max: 2.6, step: 0.01, val: 1.85,
+      note: "v = x^γ, applied first. Higher is darker." },
+    { id: "contrast", label: "Contrast", min: 0.8, max: 1.8, step: 0.01, val: 1.12,
+      note: "Slope at the pivot." },
+    { id: "pivot", label: "Pivot", min: 0.25, max: 0.65, step: 0.01, val: 0.45,
+      note: "Level held while contrast turns around it." },
+    { id: "shoulder", label: "Shoulder", min: 0, max: 0.8, step: 0.01, val: 0.30,
+      note: "Highlight rolloff instead of clipping to white." },
+    { id: "toe", label: "Toe", min: 0, max: 0.8, step: 0.01, val: 0.00,
+      note: "Shadow rolloff. Raising this is what sent the red neon." },
+    { id: "black", label: "Black point", min: -0.08, max: 0.08, step: 0.005, val: 0.00,
+      note: "Lift or crush, applied last." }
+  ];
+
+  var COLOUR = [
+    { id: "sat", label: "Saturation", min: 0.6, max: 1.6, step: 0.01, val: 1.00,
+      note: "Uniform — pushes signage off-spec fastest." },
+    { id: "warm", label: "Warmth", min: -0.12, max: 0.12, step: 0.005, val: 0.00,
+      note: "Red up / blue down." }
+  ];
+
+  var P = {}, DEFAULTS = {};
+  [].concat(TONE, COLOUR).forEach(function (c) { P[c.id] = c.val; DEFAULTS[c.id] = c.val; });
+
+  // Blocks look.json carries that this tool does not edit. Emitting a file without them is not a
+  // harmless omission: look() has no fallbacks, so every entry point ABORTS on the first missing
+  // key. Before this existed the Bench emitted tone and colour only, while the scripts asked for
+  // grain.strength, stabilisation.smoothing and match.reference_yavg — so the workflow the README
+  // describes ("the settings come back as look.json, the single source every stage reads") could
+  // not actually complete. They are carried through verbatim rather than re-declared here,
+  // because a second copy of a value is the drift look.json exists to prevent.
+  var PASSTHROUGH = null;
+
+  // The slider defaults above are a STARTING POINT for a new grade, not the shipped look, so the
+  // tool used to open on — and Reset back to — a grade nobody ships. Loading the real look.json
+  // seeds both.
+  function loadLook(text) {
+    var incoming = JSON.parse(text);
+    var seeded = 0;
+    [].concat(TONE, COLOUR).forEach(function (c) {
+      var block = c.id === "sat" || c.id === "warm" ? incoming.colour : incoming.tone;
+      var key = c.id === "sat" ? "saturation" : c.id === "warm" ? "warmth" : c.id;
+      if (block && typeof block[key] === "number") {
+        P[c.id] = DEFAULTS[c.id] = block[key];
+        if (c._input) { c._input.value = String(block[key]); c._sync(); }
+        seeded++;
+      }
+    });
+    PASSTHROUGH = {};
+    Object.keys(incoming).forEach(function (k) {
+      if (k !== "tone" && k !== "colour") { PASSTHROUGH[k] = incoming[k]; }
+    });
+    render();
+    writeOut();
+    return seeded;
+  }
+
+  var pos = {};
+  SAMPLERS.forEach(function (s) { pos[s.key] = s.def.slice(); });
+
+  var cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+  var work = document.createElement("canvas"), wctx = work.getContext("2d", { willReadFrequently: true });
+  var W = 810, H = 1440;
+  var srcData = null, showOriginal = false, armed = null, clipName = "IMG_0609";
+  var RADIUS = 9;
+
+  function soft(x, k) {
+    if (k <= 0) return x < 0 ? 0 : (x > 1 ? 1 : x);
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    return x + k * (x * x * (3 - 2 * x) - x);
+  }
+
+  // Port of make-tone-lut.py — keep in step with it.
+  function curveAt(x) {
+    var v = P.gamma !== 1 ? Math.pow(x, P.gamma) : x;
+    v = (v - P.pivot) * P.contrast + P.pivot;
+    if (v < P.pivot) {
+      var t = P.pivot > 0 ? v / P.pivot : 0;
+      v = soft(Math.max(0, t), P.toe) * P.pivot;
+    } else {
+      var span = 1 - P.pivot;
+      var u = span > 0 ? (v - P.pivot) / span : 0;
+      v = P.pivot + soft(Math.max(0, Math.min(1, u)), P.shoulder) * span;
+    }
+    v = v * (1 - P.black) + P.black;
+    return v < 0 ? 0 : (v > 1 ? 1 : v);
+  }
+
+  var processed = null;
+
+  function render() {
+    if (!srcData) return;
+    var out = wctx.createImageData(W, H);
+    var s = srcData.data, d = out.data, n = s.length;
+
+    if (showOriginal) {
+      d.set(s);
+    } else {
+      var lut = new Float32Array(256);
+      for (var k = 0; k < 256; k++) lut[k] = curveAt(k / 255) * 255;
+      var sat = P.sat, warm = P.warm * 255;
+      for (var i = 0; i < n; i += 4) {
+        var r = s[i], g = s[i + 1], b = s[i + 2];
+        // luma-only: shift every channel by the luma delta, leaving chroma alone
+        var y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        var dy = lut[y | 0] - y;
+        r += dy; g += dy; b += dy;
+        if (warm !== 0) { r += warm; b -= warm; }
+        if (sat !== 1) {
+          var y2 = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          r = y2 + (r - y2) * sat; g = y2 + (g - y2) * sat; b = y2 + (b - y2) * sat;
+        }
+        d[i] = r < 0 ? 0 : (r > 255 ? 255 : r);
+        d[i + 1] = g < 0 ? 0 : (g > 255 ? 255 : g);
+        d[i + 2] = b < 0 ? 0 : (b > 255 ? 255 : b);
+        d[i + 3] = 255;
+      }
+    }
+    processed = out;
+    wctx.putImageData(out, 0, 0);
+    ctx.drawImage(work, 0, 0);
+    drawMarkers();
+    measure(out);
+    writeOut();
+  }
+
+  function drawMarkers() {
+    SAMPLERS.forEach(function (s) {
+      var p = pos[s.key];
+      if (!p) return;
+      ctx.save();
+      ctx.strokeStyle = s.key === "grey" ? "#ffffff" : s.swatch;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(p[0] - RADIUS, p[1] - RADIUS, RADIUS * 2, RADIUS * 2);
+      ctx.strokeStyle = "#00000080";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(p[0] - RADIUS - 1, p[1] - RADIUS - 1, RADIUS * 2 + 2, RADIUS * 2 + 2);
+      ctx.restore();
+    });
+  }
+
+  function around(img, p) {
+    var px = [];
+    for (var y = p[1] - RADIUS; y <= p[1] + RADIUS; y++) {
+      if (y < 0 || y >= H) continue;
+      for (var x = p[0] - RADIUS; x <= p[0] + RADIUS; x++) {
+        if (x < 0 || x >= W) continue;
+        var i = (y * W + x) * 4;
+        px.push([img.data[i], img.data[i + 1], img.data[i + 2]]);
+      }
+    }
+    return px;
+  }
+
+  function avgTop(px, pick, frac) {
+    var list = px;
+    if (pick) {
+      list = px.slice().sort(function (a, b) { return pick(b) - pick(a); })
+               .slice(0, Math.max(1, Math.round(px.length * frac)));
+    }
+    var r = 0, g = 0, b = 0;
+    list.forEach(function (p) { r += p[0]; g += p[1]; b += p[2]; });
+    return [r / list.length, g / list.length, b / list.length];
+  }
+
+  function measure(img) {
+    SAMPLERS.forEach(function (s) {
+      var p = pos[s.key], e = els[s.key];
+      if (!e) return;
+      if (!p) { e.v.textContent = "—"; e.v.className = "val v-none"; e.b.style.width = "0"; return; }
+      var v = s.calc(avgTop(around(img, p), s.pick, s.frac));
+      var off = Math.abs(v - s.spec);
+      var cls = off <= s.tol ? "ok" : (off <= s.tol * 2.2 ? "warn" : "off");
+      e.v.textContent = v.toFixed(2);
+      e.v.className = "val v-" + cls;
+      e.b.className = "b-" + cls;
+      e.b.style.width = Math.max(2, Math.min(100, Math.abs(v) / s.max * 100)) + "%";
+    });
+    var lum = 0, step = 16, c = 0;
+    for (var i = 0; i < img.data.length; i += 4 * step) {
+      lum += 0.2126 * img.data[i] + 0.7152 * img.data[i + 1] + 0.0722 * img.data[i + 2]; c++;
+    }
+    document.getElementById("yavg").textContent = (lum / c * (1023 / 255)).toFixed(0);
+  }
+
+  var els = {};
+  (function buildScopes() {
+    var host = document.getElementById("scopes");
+    SAMPLERS.forEach(function (s) {
+      var row = document.createElement("div");
+      row.className = "scope";
+      row.innerHTML = '<span class="chip" style="background:' + s.swatch + '"></span>' +
+        '<span class="name" role="button" tabindex="0" data-key="' + s.key + '">' + s.name + '</span>' +
+        '<span class="val">—</span><span class="spec">' + s.unit + ' ' + s.spec + '</span>' +
+        '<span class="bar"><i></i></span>';
+      host.appendChild(row);
+      els[s.key] = { v: row.querySelector(".val"), b: row.querySelector(".bar i"),
+                     n: row.querySelector(".name") };
+    });
+    var lv = document.createElement("div");
+    lv.className = "scope";
+    lv.innerHTML = '<span class="chip" style="background:var(--line)"></span>' +
+      '<span class="name">Mid level</span><span class="val" id="yavg">—</span>' +
+      '<span class="spec">YAVG</span>';
+    host.appendChild(lv);
+  })();
+
+  function arm(key) {
+    armed = armed === key ? null : key;
+    SAMPLERS.forEach(function (s) {
+      els[s.key].n.setAttribute("data-armed", s.key === armed ? "1" : "0");
+    });
+    document.getElementById("stage").classList.toggle("picking", !!armed);
+  }
+  document.getElementById("scopes").addEventListener("click", function (e) {
+    var n = e.target.closest(".name[data-key]");
+    if (n) arm(n.dataset.key);
+  });
+  document.getElementById("scopes").addEventListener("keydown", function (e) {
+    var n = e.target.closest(".name[data-key]");
+    if (n && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); arm(n.dataset.key); }
+  });
+
+  cv.addEventListener("click", function (e) {
+    if (!armed) return;
+    var r = cv.getBoundingClientRect();
+    pos[armed] = [Math.round((e.clientX - r.left) / r.width * W),
+                  Math.round((e.clientY - r.top) / r.height * H)];
+    arm(null);
+    render();
+  });
+
+  function slider(host, c) {
+    var wrap = document.createElement("div");
+    wrap.className = "ctl";
+    wrap.innerHTML = '<div class="ctl-top"><label for="s-' + c.id + '">' + c.label + '</label>' +
+      '<output id="o-' + c.id + '"></output></div>' +
+      '<input type="range" id="s-' + c.id + '" min="' + c.min + '" max="' + c.max +
+      '" step="' + c.step + '" value="' + c.val + '">' +
+      '<div class="note">' + c.note + '</div>';
+    host.appendChild(wrap);
+    var input = wrap.querySelector("input"), out = wrap.querySelector("output");
+    function sync() {
+      P[c.id] = parseFloat(input.value);
+      out.textContent = P[c.id].toFixed(c.step < 0.01 ? 3 : 2);
+      render();
+    }
+    input.addEventListener("input", sync);
+    c._sync = sync; c._input = input;
+    sync();
+  }
+  TONE.forEach(function (c) { slider(document.getElementById("tone"), c); });
+  COLOUR.forEach(function (c) { slider(document.getElementById("colour"), c); });
+
+  function writeOut() {
+    // Emit look.json verbatim — the pipeline's single source for the look. A grade sent from here
+    // is copied into the repo's look.json as-is, so there is no translation step to get wrong.
+    // That only holds if the file is COMPLETE, which is why the non-edited blocks are carried
+    // through from a loaded file rather than omitted.
+    var look = {};
+    if (PASSTHROUGH && PASSTHROUGH._comment) { look._comment = PASSTHROUGH._comment; }
+    look.tone = {
+      gamma: +P.gamma.toFixed(3), pivot: +P.pivot.toFixed(3),
+      contrast: +P.contrast.toFixed(3), toe: +P.toe.toFixed(3),
+      shoulder: +P.shoulder.toFixed(3), black: +P.black.toFixed(4)
+    };
+    look.colour = { saturation: +P.sat.toFixed(3), warmth: +P.warm.toFixed(4) };
+    if (PASSTHROUGH) {
+      Object.keys(PASSTHROUGH).forEach(function (k) {
+        if (k !== "_comment") { look[k] = PASSTHROUGH[k]; }
+      });
+    }
+    var text = JSON.stringify(look, null, 2);
+    if (!PASSTHROUGH) {
+      // Fail loudly rather than hand over a file that stops every script on its first look() call.
+      text = "// INCOMPLETE — load the repo's look.json first (see the panel above).\n" +
+             "// Pasting this over look.json will abort every stage on a missing key.\n" + text;
+    }
+    document.getElementById("out").textContent = text;
+  }
+
+  function loadImage(srcUrl, name) {
+    var img = new Image();
+    img.onload = function () {
+      var ar = img.naturalWidth / img.naturalHeight;
+      H = 1440; W = Math.max(200, Math.round(H * ar));
+      if (W > 1200) { W = 1200; H = Math.round(W / ar); }
+      work.width = W; work.height = H; cv.width = W; cv.height = H;
+      cv.style.maxHeight = "";
+      wctx.drawImage(img, 0, 0, W, H);
+      srcData = wctx.getImageData(0, 0, W, H);
+      SAMPLERS.forEach(function (s) {
+        var p = pos[s.key];
+        if (p && (p[0] >= W || p[1] >= H)) pos[s.key] = [Math.round(W / 2), Math.round(H / 2)];
+      });
+      clipName = name;
+      document.getElementById("clipid").textContent = name;
+      render();
+    };
+    img.onerror = function () { setStatus("could not load image", "bad"); };
+    img.src = srcUrl;
+  }
+
+  document.getElementById("frames").addEventListener("click", function (e) {
+    var b = e.target.closest("button");
+    if (!b) return;
+    [].forEach.call(this.querySelectorAll("button"), function (x) {
+      x.setAttribute("aria-pressed", String(x === b));
+    });
+    loadImage(b.dataset.src, "IMG_0609 · " + b.textContent);
+  });
+
+  function readFile(f) {
+    if (!f || !/^image\//.test(f.type)) return;
+    var fr = new FileReader();
+    fr.onload = function () { loadImage(fr.result, f.name); };
+    fr.readAsDataURL(f);
+  }
+  document.getElementById("file").addEventListener("change", function () { readFile(this.files[0]); });
+  var stage = document.getElementById("stage");
+  ["dragenter", "dragover"].forEach(function (ev) {
+    stage.addEventListener(ev, function (e) { e.preventDefault(); stage.classList.add("drop"); });
+  });
+  ["dragleave", "drop"].forEach(function (ev) {
+    stage.addEventListener(ev, function (e) { e.preventDefault(); stage.classList.remove("drop"); });
+  });
+  stage.addEventListener("drop", function (e) {
+    if (e.dataTransfer && e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
+  });
+
+  var ab = document.getElementById("ab");
+  function hold(on) { showOriginal = on; ab.setAttribute("aria-pressed", String(on)); render(); }
+  ab.addEventListener("mousedown", function () { hold(true); });
+  ab.addEventListener("touchstart", function (e) { e.preventDefault(); hold(true); }, { passive: false });
+  ["mouseup", "mouseleave", "touchend", "touchcancel"].forEach(function (ev) {
+    ab.addEventListener(ev, function () { hold(false); });
+  });
+
+  document.getElementById("reset").addEventListener("click", function () {
+    [].concat(TONE, COLOUR).forEach(function (c) {
+      c._input.value = DEFAULTS[c.id]; P[c.id] = DEFAULTS[c.id]; c._sync();
+    });
+  });
+
+  document.getElementById("load").addEventListener("click", function () {
+    var status = document.getElementById("loadstatus");
+    var text = document.getElementById("loadin").value.trim();
+    if (!text) { status.textContent = "paste look.json first"; return; }
+    try {
+      var n = loadLook(text);
+      status.textContent = "loaded " + n + " values; other blocks will be carried through";
+    } catch (err) {
+      // Say what went wrong rather than half-applying it: a partial load would put the tool back
+      // in the state this panel exists to prevent.
+      PASSTHROUGH = null;
+      status.textContent = "could not parse that as look.json (" + err.message + ")";
+    }
+  });
+
+  document.getElementById("copy").addEventListener("click", function () {
+    var btn = this, txt = document.getElementById("out").textContent;
+    if (navigator.clipboard) navigator.clipboard.writeText(txt).then(function () {
+      btn.textContent = "Copied";
+      setTimeout(function () { btn.textContent = "Copy instead"; }, 1400);
+    }, function () { btn.textContent = "Select manually"; });
+  });
+
+  // ---- send to Claude -------------------------------------------------
+  var statusEl = document.getElementById("status"), sendBtn = document.getElementById("send");
+  function setStatus(t, cls) { statusEl.textContent = t; statusEl.className = "status " + (cls || ""); }
+
+  var db = null;
+  (function connect() {
+    if (!window.claude || !window.claude.use) { setStatus("not connected — use Copy", ""); return; }
+    window.claude.use("db").then(function (d) {
+      db = d;
+      if (db) { sendBtn.disabled = false; setStatus("ready", ""); }
+      else setStatus("unavailable — use Copy", "");
+    }, function () { setStatus("unavailable — use Copy", ""); });
+  })();
+
+  sendBtn.addEventListener("click", function () {
+    if (!db) return;
+    sendBtn.disabled = true;
+    setStatus("sending…", "");
+    var readings = {};
+    if (processed) SAMPLERS.forEach(function (s) {
+      if (pos[s.key]) readings[s.key] = +s.calc(avgTop(around(processed, pos[s.key]), s.pick, s.frac)).toFixed(3);
+    });
+    var id = String(Date.now());
+    db.doc("grades/" + id).set({
+      clip: clipName,
+      params: JSON.parse(JSON.stringify(P)),
+      look: JSON.parse(document.getElementById("out").textContent),
+      readings: readings,
+      note: document.getElementById("note").value || "",
+      at: new Date().toISOString()
+    }).then(function () {
+      setStatus("sent ✓", "good");
+      document.getElementById("note").value = "";
+      sendBtn.disabled = false;
+      setTimeout(function () { setStatus("ready", ""); }, 3000);
+    }, function (e) {
+      setStatus("failed: " + ((e && e.code) || "error"), "bad");
+      sendBtn.disabled = false;
+    });
+  });
+
+  loadImage("frame_1s.jpg", "IMG_0609 · 01s");
+})();
+</script>
