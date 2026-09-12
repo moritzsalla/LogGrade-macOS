@@ -29,6 +29,11 @@ than transcribed here. That is the point: this cannot drift from production, bec
 same builder production calls. The suite's "grade chain is built in exactly one place" test is what
 keeps that true.
 
+WHAT THIS DOES NOT COVER YET. The input-correction stage (scripts/make-correct-lut.py) has no
+counterpart in the Bench, so there is nothing to compare it against here. When the app's preview
+implements it, it gets a case of its own — and the probe has to become an Apple Log probe, because
+that stage runs before the conversion and a Rec.709 probe cannot exercise it.
+
 FRESHNESS IS BY CONTENT. The golden records a fingerprint of the chain string that produced it, and
 a chain edit that outruns its golden fails BY NAME. mtime cannot work: git does not preserve it, so
 on a fresh clone the committed golden always lands newer than lib.sh.

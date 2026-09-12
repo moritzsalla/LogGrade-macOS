@@ -500,16 +500,17 @@ fail() {
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
 	# A gamma nothing in the repo contains, so a pass can only come from reading this file.
-	cat > "$look" <<'JSON'
-{
-  "tone": { "gamma": 1.44, "pivot": 0.39, "contrast": 1.09,
-            "toe": 0.0, "shoulder": 0.1, "black": 0.025 },
-  "colour": { "saturation": 1.27, "warmth": 0.005 },
-  "grain": { "strength": 8 },
-  "stabilisation": { "smoothing": 30 },
-  "match": { "reference_yavg": 609 }
-}
-JSON
+	#
+	# DERIVED from the real look.json rather than written out here. look() has no fallbacks, so the
+	# key set is a contract — and a hand-written copy of it goes stale the moment a key is added,
+	# which is how adding the correction block turned this test red for a reason that had nothing
+	# to do with what it asserts.
+	python3 - "$BATS_TEST_DIRNAME/../look.json" "$look" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["tone"]["gamma"] = 1.44
+json.dump(d, open(sys.argv[2], "w"))
+PY
 	LOOK_FILE="$look" GRADE_WORK_DIR="$work" DRY=1 MATCH=0 STAB=0 \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ]
@@ -1140,16 +1141,14 @@ JSON
 	local work="$BATS_TEST_TMPDIR/badlook" look="$BATS_TEST_TMPDIR/hostile-look.json"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	cat > "$look" <<'JSON'
-{
-  "tone": { "gamma": 2.02, "pivot": 0.39, "contrast": 1.09,
-            "toe": 0.0, "shoulder": 0.1, "black": 0.025 },
-  "colour": { "saturation": "1.27,metadata=print:file=/tmp/pwned", "warmth": 0.005 },
-  "grain": { "strength": 8 },
-  "stabilisation": { "smoothing": 30 },
-  "match": { "reference_yavg": 609 }
-}
-JSON
+	# Derived, so this fails on the hostile VALUE rather than on a key the fixture forgot — which
+	# would leave the test green for the wrong reason the next time look.json grows.
+	python3 - "$BATS_TEST_DIRNAME/../look.json" "$look" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["colour"]["saturation"] = "1.27,metadata=print:file=/tmp/pwned"
+json.dump(d, open(sys.argv[2], "w"))
+PY
 	LOOK_FILE="$look" GRADE_WORK_DIR="$work" MATCH=0 STAB=0 \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -ne 0 ] || fail "rendered with a non-numeric saturation"
@@ -1701,4 +1700,114 @@ if t["conversion_floor_code_values"] > 2:
 print("ok")
 ' "$root/tests/fixtures/grade-golden.json"
 	[ "$status" -eq 0 ] || fail "$output"
+}
+
+# --- the input correction -----------------------------------------------------
+# Exposure, white balance and the CDL wheels, as one generated cube that runs BEFORE Apple's
+# conversion — in log, where twelve stops of headroom still exist. A neutral correction leaves the
+# filter out of the graph, which is what keeps the default render identical to the precursor's.
+
+@test "the correction generator round-trips Apple's published transfer function" {
+	# The formula is published, so this is exact rather than fitted. If it ever stops round-tripping,
+	# the maths has been edited rather than the parameters.
+	run python3 -c '
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("mc", sys.argv[1])
+mc = importlib.util.module_from_spec(spec); spec.loader.exec_module(mc)
+worst = max(abs(mc.encode(mc.decode(i/1000.0)) - i/1000.0) for i in range(1001))
+print("%.1e %.4f" % (worst, mc.decode(1.0)))
+' "$SCRIPTS/make-correct-lut.py"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	local worst headroom
+	worst="${output% *}"; headroom="${output#* }"
+	python3 -c "import sys; sys.exit(0 if float('$worst') < 1e-9 else 1)" \
+		|| fail "the transfer function no longer round-trips: $worst"
+	[ "$headroom" = "12.0000" ] || fail "decode(1.0) should be twelve stops, got $headroom"
+}
+
+@test "a neutral correction is reported as neutral, and any move as active" {
+	run "$SCRIPTS/make-correct-lut.py" --check-neutral
+	[ "$status" -eq 0 ]
+	[ "$output" = "neutral" ] || fail "defaults are not neutral: $output"
+	for arg in "--exposure 0.1" "--temp 0.1" "--tint 0.1" "--slope 1.1,1,1" \
+	           "--offset 0.01,0,0" "--power 1.1,1,1"; do
+		# shellcheck disable=SC2086
+		run "$SCRIPTS/make-correct-lut.py" --check-neutral $arg
+		[ "$output" = "active" ] || fail "$arg reported as $output"
+	done
+}
+
+@test "the correction cube is skipped entirely when it would do nothing" {
+	# The engine must not render every pixel through a lookup that returns it. This is also what
+	# holds conformance: the default graph has to be the one the precursor renders.
+	local work="$BATS_TEST_TMPDIR/neutral"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"correction:"* ]] || fail "announced a correction that does nothing: $output"
+	[ ! -f "$work/dist/.grade-work/correct.cube" ] || fail "generated a cube for a neutral correction"
+}
+
+@test "an active correction reaches the render and changes the picture" {
+	local work="$BATS_TEST_TMPDIR/active" look="$BATS_TEST_TMPDIR/warm.json"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	python3 - "$BATS_TEST_DIRNAME/../look.json" "$look" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["correct"]["exposure"] = 0.75
+json.dump(d, open(sys.argv[2], "w"))
+PY
+	LOOK_FILE="$look" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[[ "$output" == *"correction: exposure=0.75"* ]] || fail "said nothing about it: $output"
+	[ -s "$work/dist/.grade-work/correct.cube" ] || fail "no cube was generated"
+	# And it changed the picture. A string test cannot tell whether the filter did anything.
+	mv "$work/dist/frames/CLIP_t0s.png" "$work/corrected.png"
+	FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ]
+	! cmp -s "$work/corrected.png" "$work/dist/frames/CLIP_t0s.png" \
+		|| fail "a 0.75 stop exposure correction changed nothing"
+}
+
+@test "the correction precedes Apple's conversion in both graphs" {
+	# ORDER IS THE DECISION. Apple Log holds twelve stops that the Rec.709 cube lands on a display
+	# ceiling of 1.0, so a correction applied after it works on display-referred pixels and clips
+	# highlights the source still holds. Before it, the same move is the log-domain correction a
+	# colourist's wheels perform.
+	#
+	# A source assertion, like the one that pins the grade chain to one place: the built graph is
+	# not printed anywhere, and a render test can only show that the correction did something, not
+	# where it sat. Both the delivery graph and the preview must have it ahead of the conversion.
+	local n
+	n=$(grep -c "CORRECT_PREFIX}lut3d=file='\${CST}'" "$SCRIPTS/grade.sh" || true)
+	[ "$n" -eq 2 ] || fail "expected the correction ahead of the CST in both graphs, found $n"
+	# And nowhere after it.
+	! grep -q "CST}':interp=tetrahedral,\${CORRECT_PREFIX}" "$SCRIPTS/grade.sh" \
+		|| fail "a correction was placed after the conversion"
+}
+
+@test "the correction cube is regenerated by content, never by timestamp" {
+	# Same reasoning as the tone cube's TITLE: git does not preserve mtime, so a committed cube
+	# always lands newer than the file it came from and would be trusted forever.
+	local cube="$BATS_TEST_TMPDIR/c.cube"
+	run "$SCRIPTS/make-correct-lut.py" "$cube" --exposure 0.5 --size 5
+	[ "$status" -eq 0 ]
+	run "$SCRIPTS/make-correct-lut.py" "$cube" --exposure 0.5 --size 5
+	[[ "$output" == *"already current"* ]] || fail "rewrote a cube that already matched: $output"
+	run "$SCRIPTS/make-correct-lut.py" "$cube" --exposure 0.6 --size 5
+	[[ "$output" != *"already current"* ]] || fail "kept a cube built at a different exposure"
+	grep -q 'exposure=0.6' "$cube" || fail "the cube does not record what it was built at"
+}
+
+@test "the correction generator refuses a malformed wheel" {
+	run "$SCRIPTS/make-correct-lut.py" --stdout --slope "1,2"
+	[ "$status" -ne 0 ] || fail "accepted a two-value wheel"
+	run "$SCRIPTS/make-correct-lut.py" --stdout --power "0,1,1"
+	[ "$status" -ne 0 ] || fail "accepted a zero power, which is a division by zero"
+	run "$SCRIPTS/make-correct-lut.py" --stdout --size 200
+	[ "$status" -ne 0 ] || fail "accepted an absurd cube size"
 }

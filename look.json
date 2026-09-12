@@ -8,6 +8,12 @@
     "from them: 02-grade.sh regenerates it whenever this file is newer, so the .cube can never",
     "silently disagree with the numbers recorded here.",
     "",
+    "correct.* is the input-correction stage, which runs BEFORE Apple's conversion and therefore",
+    "in log: exposure and white balance in linear (decoded and re-encoded with Apple's published",
+    "transfer function), then an ASC CDL — slope, offset, power, which is what lift, gamma and gain",
+    "wheels are. At the values below it does NOTHING, and a neutral correction leaves the filter",
+    "out of the graph rather than rendering every pixel through a lookup that returns it.",
+    "",
     "look.lut names the film-emulation cube by its stem in luts/looks/, or \"none\" for no look at",
     "all. It lives here rather than in a script because it is a look value, and because the tone",
     "block below was tuned WITH this cube in the chain: the two belong to each other.",
@@ -22,6 +28,15 @@
     "window gets the same look rather than the same curve. It lives here because it is a",
     "measurement of the grade, not a knob: change it only if the look is re-tuned on another frame."
   ],
+  "correct": {
+    "exposure": 0.0,
+    "temp": 0.0,
+    "tint": 0.0,
+    "slope": "1,1,1",
+    "offset": "0,0,0",
+    "power": "1,1,1",
+    "lum_mix": 1.0
+  },
   "look": {
     "lut": "kodak_portra_400_nc"
   },

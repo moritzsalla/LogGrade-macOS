@@ -17,6 +17,8 @@
 #   HEIGHT=<px>       output height (default 1920). Width follows the deliverable's aspect.
 #   FPS_OUT=<n>       output frame rate. Default is the source's. Only an integer relation is
 #                     accepted — anything needing retiming is refused rather than interpolated.
+#   CORRECT_SIZE=<n>  points per axis in the correction cube (default 33; see its header for
+#                     the measured cost and error at 17, 33 and 65)
 #   LOOK=<name|none>  which film-emulation cube to use, by stem from luts/looks/, or none for a
 #                     neutral grade. Overrides look.json's .look.lut for this run.
 #   FRAME=<seconds>   render ONE frame at that timecode through the grade chain to a PNG and
@@ -111,6 +113,33 @@ CACHE="$WORK/dist/.grade-work"
 # The look LUT is a look value like any other, so it comes from look.json. LOOK=<name|none|path>
 # overrides it for one run; the app sets it per render.
 LOOK_LUT="$(resolve_look_lut "${LOOK:-$(look .look.lut)}" "$ROOT")"
+
+# --- the input correction ---------------------------------------------------------------
+# Exposure, white balance and the CDL wheels, generated into one cube that runs BEFORE Apple's
+# conversion. Before, because Apple Log carries twelve stops of headroom that the Rec.709 cube
+# lands on a display ceiling of 1.0: a correction applied after it works on display-referred
+# pixels and clips highlights the source still holds. scripts/make-correct-lut.py carries the
+# maths, the published transfer function it decodes with, and the measurements behind its size.
+#
+# A NEUTRAL correction leaves the filter out of the graph entirely. That is not only cheaper: it
+# is what keeps the default render byte-identical to the engine this was forked from, which
+# tests/conformance.sh measures. The generator owns that rule, so it is not restated here.
+CORRECT_EXPOSURE="$(require_number exposure "$(look .correct.exposure)")"
+CORRECT_TEMP="$(require_number temp "$(look .correct.temp)")"
+CORRECT_TINT="$(require_number tint "$(look .correct.tint)")"
+CORRECT_LUM_MIX="$(require_number lum_mix "$(look .correct.lum_mix)")"
+CORRECT_SLOPE="$(look .correct.slope)"
+CORRECT_OFFSET="$(look .correct.offset)"
+CORRECT_POWER="$(look .correct.power)"
+CORRECT_SIZE="$(require_number CORRECT_SIZE "${CORRECT_SIZE:-33}")"
+# The triples are not validated here: they never reach a filter graph, only this generator's argv,
+# and it refuses a malformed one itself. Validate where a value is READ.
+correct_args() {
+	printf '%s' "--exposure $CORRECT_EXPOSURE --temp $CORRECT_TEMP --tint $CORRECT_TINT"
+	printf '%s' " --slope $CORRECT_SLOPE --offset $CORRECT_OFFSET --power $CORRECT_POWER"
+	printf '%s' " --lum-mix $CORRECT_LUM_MIX --size $CORRECT_SIZE"
+}
+CORRECT_PREFIX=""
 SAT="$(require_number SAT "$(look .colour.saturation)")"
 WARM="$(require_number WARM "$(look .colour.warmth)")"
 G_PIVOT="$(require_number pivot "$(look .tone.pivot)")"
@@ -188,8 +217,17 @@ say() {
 	fi
 }
 
+# shellcheck disable=SC2046  # deliberate split: correct_args is a flag list, not one argument
+if [ "$("$SCRIPT_DIR/make-correct-lut.py" --check-neutral $(correct_args))" = "active" ]; then
+	CORRECT_LUT="$CACHE/correct.cube"
+	# shellcheck disable=SC2046
+	"$SCRIPT_DIR/make-correct-lut.py" "$CORRECT_LUT" $(correct_args) >/dev/null
+	CORRECT_PREFIX="lut3d=file='${CORRECT_LUT}':interp=tetrahedral,"
+fi
+
 say "grade run $(date '+%Y-%m-%d %H:%M:%S')  —  ${#CLIPS[@]} clip(s)"
 say "look: sat=$SAT warm=$WARM grain=$GRAIN_STRENGTH stab=$STAB exposure-match=$MATCH"
+[ -z "$CORRECT_PREFIX" ] || say "correction: exposure=$CORRECT_EXPOSURE temp=$CORRECT_TEMP tint=$CORRECT_TINT slope=$CORRECT_SLOPE offset=$CORRECT_OFFSET power=$CORRECT_POWER lum_mix=$CORRECT_LUM_MIX (${CORRECT_SIZE}-point cube)"
 say ""
 emit run_start clips "${#CLIPS[@]}" saturation "$SAT" warmth "$WARM" \
 	grain "$GRAIN_STRENGTH" stabilisation "$STAB" exposure_match "$MATCH" \
@@ -301,7 +339,7 @@ for SRC in "${CLIPS[@]}"; do
 		# resample; no dither, because nothing here reduces to 8 bits.
 		if ffmpeg -v error -y -ss "$FRAME" -i "$SRC" -frames:v 1 -filter_complex \
 "[0:v]$(grade_chain "$TONE" "$SAT" "$WARM" \
-  "lut3d=file='${CST}':interp=tetrahedral,"),scale=-2:${FRAME_HEIGHT}:flags=lanczos[o]" \
+  "${CORRECT_PREFIX}lut3d=file='${CST}':interp=tetrahedral,"),scale=-2:${FRAME_HEIGHT}:flags=lanczos[o]" \
 			-map "[o]" -pix_fmt rgb48be "$frame_out"; then
 			say "      -> $(basename "$frame_out")  (grade only, no delivery stage)"
 			emit frame clip "$CLIP" path "$frame_out" at "$FRAME" height "$FRAME_HEIGHT"
@@ -338,7 +376,7 @@ for SRC in "${CLIPS[@]}"; do
 		render_delivery "$out" "$suffix encode" \
 			-y -i "$SRC" -f lavfi -i "$(grain_plate "$w" "$h" "$FPS")" -filter_complex \
 "[0:v]$(grade_chain "$TONE" "$SAT" "$WARM" \
-  "lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},"),\
+  "${CORRECT_PREFIX}lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},"),\
 $(delivery_image_chain "$w" "$h" "$SFX" "$crop")${FPS_FILTER}[b];\
 [1:v]$(delivery_grain_branch "$w" "$h" "$GRAIN_STRENGTH")[g];\
 [b][g]${DELIVERY_BLEND}[o]" \
