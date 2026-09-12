@@ -32,6 +32,14 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/engine"
 cp "$BIN" "$APP/Contents/MacOS/LogGrade"
 
+# The icon is DRAWN from the shipped tone curve, not stored, so a re-grade changes it. A second
+# here rather than a PNG in the tree that nobody remembers to redraw. See app/make-icon.swift.
+if swift "$ROOT/app/make-icon.swift" >/dev/null; then
+	cp "$ROOT/dist/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+else
+	echo "WARNING: could not draw the icon; the app will use the generic one" >&2
+fi
+
 # The engine, vendored. ffmpeg comes too: a launched app inherits no useful PATH, and this
 # machine's ffmpeg lives in ~/.local/bin, which nothing in a GUI environment knows about.
 cp -R "$ROOT/scripts" "$ROOT/luts" "$ROOT/look.json" "$APP/Contents/Resources/engine/"
@@ -52,6 +60,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 	<key>CFBundleExecutable</key><string>LogGrade</string>
 	<key>CFBundleIdentifier</key><string>local.loggrade</string>
 	<key>CFBundleName</key><string>LogGrade</string>
+	<key>CFBundleIconFile</key><string>AppIcon</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>0.1</string>
 	<key>LSMinimumSystemVersion</key><string>13.0</string>

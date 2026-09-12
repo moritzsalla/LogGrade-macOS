@@ -24,57 +24,86 @@ struct InspectorView: View {
             VStack(alignment: .leading, spacing: 0) {
                 presetRow
                 stage("Apple Log to Rec.709", mark: .locked) {
-                    Text("Apple's own conversion. Its colour is more accurate than anything "
-                         + "hand-rolled here, and the cube carries a display rendering Apple has "
-                         + "not published.")
+                    Text("Turns the flat log picture into a viewable one. Always on, and not "
+                         + "adjustable: it is Apple's own conversion and it is more accurate "
+                         + "than anything this app could do instead.")
                         .modifier(Note())
                 }
-                stage("correct", mark: .editable,
-                      note: "before the conversion, where the log still holds twelve stops") {
+                stage("correct the shot", mark: .editable,
+                      note: "fix the exposure and the white balance before any look goes on") {
                     control("exposure", $model.look.correct.exposure, -3...3, format: "%+.2f")
                     control("temperature", $model.look.correct.temp, -1...1)
                     control("tint", $model.look.correct.tint, -1...1)
                     control("luminance mix", $model.look.correct.lumMix, 0...1)
-                    Text(model.look.correct.isNeutral
-                         ? "neutral, so the filter is left out of the graph"
-                         : "active, as a 33-point cube")
+                    Text("These run before the conversion, on the log, so an exposure move keeps "
+                         + "the highlights instead of clipping them. That is also why the "
+                         + "picture cannot follow them while you drag: it updates when you let "
+                         + "go.")
                         .modifier(Note())
+                    if model.look.correct.lumMix < 1 {
+                        Text("Luminance mix only does something once a colour wheel is in play, "
+                             + "and no wheel is exposed yet.")
+                            .modifier(Note())
+                    }
                 }
-                stage("look", mark: .editable) {
+                stage("look", mark: .editable, note: "the film stock, as a lookup") {
                     Picker("", selection: $model.look.lookLUT) {
                         Text("none").tag("none")
                         ForEach(model.availableLooks, id: \.self) { Text($0).tag($0) }
                     }
                     .labelsHidden()
                     .onChange(of: model.look.lookLUT) { _ in model.renderPreview() }
-                    Text("the tone below was tuned with this cube in the chain, so the two belong "
-                         + "to each other")
+                    Text("The tone curve below was set with this cube already in the chain, so "
+                         + "changing one without the other is a different grade rather than "
+                         + "another stock. Switch them together with a preset.")
                         .modifier(Note())
                 }
-                stage("tone", mark: .editable, note: "on the luma plane, chroma untouched") {
+                stage("tone", mark: .editable,
+                      note: "brightness and contrast, without touching the colour") {
                     control("midtone", $model.look.tone.gamma, 1...2.6)
+                    appliedGammaNote
                     control("contrast", $model.look.tone.contrast, 0.8...1.8)
                     control("pivot", $model.look.tone.pivot, 0.25...0.65)
                     control("shoulder", $model.look.tone.shoulder, 0...0.8)
                     control("toe", $model.look.tone.toe, 0...0.8)
                     control("black", $model.look.tone.black, -0.08...0.08, format: "%+.3f")
-                    Text("the curve, beside the picture, is the engine's own table — generated on "
-                         + "each change rather than copied from its maths")
+                    Text("The graph beside the picture is this curve. Higher midtone is darker, "
+                         + "because it is a gamma.")
                         .modifier(Note())
                 }
-                stage("trims", mark: .editable) {
+                stage("trims", mark: .editable, note: "the last small moves, after the curve") {
                     control("saturation", $model.look.colour.saturation, 0.6...1.6)
                     control("warmth", $model.look.colour.warmth, -0.12...0.12, format: "%+.3f")
+                    Text("Warmth acts on the midtones only, so it barely moves a bright sky or a "
+                         + "deep shadow.")
+                        .modifier(Note())
                 }
-                stage("delivery", mark: .unpreviewed, note: "a still cannot show these", last: true) {
+                stage("delivery", mark: .unpreviewed,
+                      note: "applied to the video, never to the preview", last: true) {
                     control("grain", $model.look.grainStrength, 0...20, format: "%.0f")
                     control("stabiliser", $model.look.stabilisationSmoothing, 0...60, format: "%.0f")
+                    Text("Both need moving footage to judge, so the preview leaves them out "
+                         + "rather than showing a version of them that is not what renders.")
+                        .modifier(Note())
                 }
             }
             .padding(.vertical, 18)
             .padding(.trailing, 16)
         }
         .background(Palette.panel)
+    }
+
+    /// THE SLIDER IS NOT THE NUMBER THAT RENDERS, and the interface has to say so rather than
+    /// print a value nothing applies. Exposure matching solves a gamma per clip from this one, so
+    /// that every clip in a shoot gets the same look instead of the same curve.
+    @ViewBuilder private var appliedGammaNote: some View {
+        if let applied = model.appliedGamma,
+           abs(applied - model.look.tone.gamma) > 0.005 {
+            Text(String(format: "This clip renders at %.3f. The slider sets the midtone for the "
+                        + "shoot; each clip is solved from its own brightness so they match.",
+                        applied))
+                .modifier(Note())
+        }
     }
 
     /// The preset: a look cube with its tone and trims, switched as one. Above the chain, because

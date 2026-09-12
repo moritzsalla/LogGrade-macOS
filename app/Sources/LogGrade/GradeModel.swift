@@ -73,6 +73,14 @@ final class GradeModel: ObservableObject {
     /// True while the base is being rendered. Without it, a tone drag in that window reports the
     /// correction message, which is not what is happening.
     @Published private var isPreparingLive = false
+    /// The gamma the engine will apply to this clip, once it has measured the clip. The midtone
+    /// slider holds the REFERENCE gamma, and the two are different numbers on every clip that was
+    /// not shot at the exposure the look was tuned at — so the interface shows both rather than
+    /// letting the readout claim a value nothing applies.
+    @Published var appliedGamma: Double?
+    /// Whether `status` is a failure. It used to be inferred from the message's first word, which
+    /// meant rewording a message silently changed its colour.
+    @Published var statusIsFailure = false
 
     /// The tone curve is the engine's own table, so it is regenerated rather than evaluated here.
     /// Throttled: generating costs about a tenth of a second and a drag does not need a new one
@@ -115,7 +123,8 @@ final class GradeModel: ObservableObject {
         // happened, so the controls have nothing to move against.
         guard baseImage != nil, baseClip == clip.url, baseSeconds == previewSeconds else { return }
         if isPreparingLive {
-            status = "preparing the live preview…"
+            status = "Setting up the live preview…"
+            statusIsFailure = false
             return
         }
         if signature(of: look) != baseSignature {
@@ -123,7 +132,8 @@ final class GradeModel: ObservableObject {
             // conversion can show it. The render on release is what shows it, and it is already
             // scheduled, so this says what is true rather than asking for a button press.
             isLive = false
-            status = "corrections run before the conversion — they appear on release"
+            status = "Exposure and white balance run before the conversion. They appear when you let go."
+            statusIsFailure = false
             return
         }
         if Date().timeIntervalSince(lastCurveAt) > 0.12 {
@@ -144,7 +154,8 @@ final class GradeModel: ObservableObject {
                                                              height: graded.height))
         scopes = Scopes.measure(graded)
         isLive = true
-        status = "live — the render will confirm it"
+        status = "Live preview. Letting go renders the exact frame."
+        statusIsFailure = false
     }
 
     /// Renders the base the live tier grades from: the same chain with the tone stage neutral.
@@ -219,9 +230,11 @@ final class GradeModel: ObservableObject {
                                                    referenceYAVG: reference,
                                                    referenceGamma: tone.gamma)
             }
+            let applied = tone.gamma
             let curve = try? ToneCurve.generate(using: generator, tone: tone)
             DispatchQueue.main.async {
                 self.curve = curve
+                self.appliedGamma = applied
                 if self.isLive { self.applyLive() }
             }
         }
@@ -399,7 +412,8 @@ final class GradeModel: ObservableObject {
         let needsBase = baseSignature != baseSig || baseClip != clip.url || baseSeconds != seconds
 
         isRendering = true
-        status = "rendering…"
+        status = "Rendering…"
+        statusIsFailure = false
         queue.async { [weak self] in
             guard let self else { return }
             do {
@@ -422,7 +436,8 @@ final class GradeModel: ObservableObject {
                     self.renderedLook = look
                     self.isRendering = false
                     self.isLive = false
-                    self.status = "grade only — no grain, sharpening, denoise, stabiliser or dither"
+                    self.status = "This is the grade. Grain, sharpening, denoise, the stabiliser and dither are added when you convert."
+                    self.statusIsFailure = false
                     // The FIRST render of a clip is the one that measures its mean, so until it
                     // lands there is no solved gamma and the graph beside the sliders is drawing
                     // the reference curve. Regenerate now that the answer exists.
@@ -441,6 +456,7 @@ final class GradeModel: ObservableObject {
                     guard generation == self.previewGeneration else { return }
                     self.isRendering = false
                     self.status = String(describing: error)
+                    self.statusIsFailure = true
                 }
             }
         }

@@ -19,8 +19,8 @@ struct DeliveryPanel: View {
                 .foregroundColor(Palette.ink)
 
             HStack(spacing: 14) {
-                Toggle("reels 9:16", isOn: $model.project.delivery.reels)
-                Toggle("feed 4:5", isOn: $model.project.delivery.feed)
+                Toggle("reels, full frame", isOn: $model.project.delivery.reels)
+                Toggle("feed, cropped to 4:5", isOn: $model.project.delivery.feed)
             }
             .toggleStyle(.checkbox)
             .font(.system(size: 11))
@@ -28,7 +28,7 @@ struct DeliveryPanel: View {
 
             // Labels get room rather than wrapping mid-word, which is what "heig / ht" was.
             HStack(spacing: 8) {
-                Text("size").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
+                Text("height").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
                     .fixedSize()
                 Picker("", selection: $model.project.delivery.height) {
                     Text("1080p").tag(1920)
@@ -49,10 +49,16 @@ struct DeliveryPanel: View {
 
             if model.project.delivery.feed {
                 cropRow
+            } else {
+                Text("Tick feed to place the 4:5 crop. Reels keeps the whole frame, so it needs "
+                     + "no crop.")
+                    .font(.system(size: 10))
+                    .foregroundColor(Palette.inkTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: 8) {
-                Text("to").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
+                Text("save to").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
                     .fixedSize()
                 Text(model.outputDirectory.map { $0.path } ?? "drop a clip first")
                     .font(.system(size: 10, design: .monospaced))
@@ -77,11 +83,15 @@ struct DeliveryPanel: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("a rate that is not an integer relation to the source needs retiming, which "
-                 + "judders, so the engine refuses it rather than interpolating")
-                .font(.system(size: 10))
-                .foregroundColor(Palette.inkTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            // Only when a rate has been chosen. Shown always, it read as a warning about a
+            // setting nobody had touched.
+            if model.project.delivery.fps != nil {
+                Text("A frame rate that does not divide the source evenly would have to be "
+                     + "retimed, which judders. Those are refused before the render starts.")
+                    .font(.system(size: 10))
+                    .foregroundColor(Palette.inkTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(16)
         .background(Palette.panel)
@@ -89,14 +99,17 @@ struct DeliveryPanel: View {
 
     private var cropRow: some View {
         HStack(spacing: 10) {
-            Text("crop offset").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
+            Text("4:5 crop").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
             if let geometry = model.cropGeometry {
                 if let offset = model.cropOffset {
-                    Readout(text: "\(offset) of \(geometry.maximumOffset) px")
+                    Readout(text: "\(offset) of \(geometry.maximumOffset) px from the top")
                     Button("clear") { model.cropOffset = nil }
                         .buttonStyle(.borderless).font(.system(size: 10.5))
                 } else {
-                    Text("undecided — drag the box on the picture")
+                    // Named as an action, because it is one and nothing else will do it: the
+                    // framing is a composition call per clip and the engine will not render a
+                    // feed without it.
+                    Text("drag the picture to place it")
                         .font(.system(size: 10.5)).foregroundColor(Palette.lamp)
                 }
             } else {
@@ -123,6 +136,13 @@ struct CropOverlay: View {
     @ObservedObject var model: GradeModel
     let geometry: CropGeometry
 
+    /// Where the box was when this drag started.
+    ///
+    /// A DragGesture reports translation cumulatively from where the finger went down, so adding
+    /// it to the box's CURRENT position adds it again on every event and the box runs off the
+    /// frame after a few pixels of travel. It has to be added to where the box was.
+    @State private var startedAt: Int?
+
     var body: some View {
         GeometryReader { geo in
             let height = geo.size.height * geometry.windowFraction
@@ -143,15 +163,25 @@ struct CropOverlay: View {
                     .strokeBorder(Palette.plate, lineWidth: 1)
                     .frame(height: height)
                     .offset(y: offset)
-                    .gesture(
-                        DragGesture()
-                            .onChanged { value in
-                                let top = offset + value.translation.height
-                                model.cropOffset = geometry.offset(
-                                    forFraction: top / geo.size.height)
-                            }
-                    )
             }
+            // THE WHOLE PICTURE IS THE HANDLE. The gesture used to live on the box's own outline,
+            // and `strokeBorder` draws nothing but that outline, so the only draggable part of the
+            // crop picker was a one-point line — findable by accident and by nothing else. Sitting
+            // on the overlay with an explicit content shape makes the whole frame drag the window,
+            // which is also how a crop behaves in a grading suite: you move the picture under the
+            // window rather than hunting for a handle.
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let from = startedAt ?? model.cropOffset ?? 0
+                        if startedAt == nil { startedAt = from }
+                        let travelled = value.translation.height / geo.size.height
+                        model.cropOffset = geometry.offset(
+                            forFraction: geometry.fraction(forOffset: from) + travelled)
+                    }
+                    .onEnded { _ in startedAt = nil }
+            )
         }
     }
 }

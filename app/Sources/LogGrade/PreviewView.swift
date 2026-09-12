@@ -38,8 +38,8 @@ struct PreviewView: View {
                     .padding(10)
                 } else {
                     Text(model.selectedClip == nil
-                         ? "drop a clip to start"
-                         : "press preview to render a still through the real chain")
+                         ? "drop Apple Log clips here to start"
+                         : "press preview for a still from this clip, graded as it will render")
                         .font(.system(size: 12))
                         .foregroundColor(Palette.inkTertiary)
                 }
@@ -66,27 +66,28 @@ struct PreviewView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(model.selectedClip == nil || model.isRendering)
-                Text("hold C to compare")
+                Text("hold C for the picture before this change")
                     .font(.system(size: 11))
                     .foregroundColor(model.comparisonImage == nil ? Palette.inkTertiary
                                                                    : Palette.inkSecondary)
                 Spacer()
                 if comparing {
-                    Readout(text: "previous")
+                    Readout(text: "before")
                 } else if model.isLive {
-                    Readout(text: "live — the render confirms it")
+                    Readout(text: "live")
                 } else if model.isStale {
-                    Readout(text: "controls moved since this render")
+                    Readout(text: "out of date")
                 }
             }
 
             // Said every time, not only on failure: a preview that quietly omits half the chain is
             // output that looks done, which is the failure this whole labelling exists to prevent.
             Text(model.status.isEmpty
-                 ? "grade only. no grain, sharpening, denoise, stabiliser or dither."
+                 ? "This is the grade. Grain, sharpening, denoise, the stabiliser and dither are "
+                   + "added when you convert."
                  : model.status)
                 .font(.system(size: 10.5))
-                .foregroundColor(model.status.hasPrefix("the ") ? Palette.lamp : Palette.inkTertiary)
+                .foregroundColor(model.statusIsFailure ? Palette.lamp : Palette.inkTertiary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
