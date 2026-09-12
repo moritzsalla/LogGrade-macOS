@@ -17,6 +17,12 @@
 #
 # Run:  bats tests/
 
+# `run --separate-stderr` is how the event-stream tests assert that stdout carries machine-readable
+# output and NOTHING else, which is the contract the app depends on. Flags on `run` arrived in bats
+# 1.5, and without this declaration bats warns on every such call rather than failing — so the
+# requirement is stated here instead of being discovered from the noise.
+bats_require_minimum_version 1.5.0
+
 setup_file() {
 	command -v ffmpeg >/dev/null || skip "ffmpeg not installed"
 	export FIXTURES="$BATS_FILE_TMPDIR/fixtures"
@@ -1159,4 +1165,112 @@ JSON
 		[ "$status" -ne 0 ] || fail "$s.sh accepted an empty clip name"
 		[[ "$output" == *"usage:"* ]] || fail "$s.sh did not say what it wanted: $output"
 	done
+}
+
+# --- the event stream ---------------------------------------------------------
+# The app drives this engine, and it cannot parse prose written for a person: the human lines are
+# deliberately reworded whenever the wording is wrong, which is exactly what a consumer must not
+# depend on. So JSON=1 emits one object per line and every refusal names a code on stderr.
+#
+# What these tests pin is the CONTRACT, not the wording: stdout is machine-readable and nothing
+# else, the report still contains the human lines, and each refusal is named.
+
+@test "JSON=1 puts nothing but parseable objects on stdout" {
+	local work="$BATS_TEST_TMPDIR/json-dry"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	JSON=1 DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" \
+		run --separate-stderr "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ]
+	[ -n "$output" ] || fail "JSON=1 produced no events at all"
+	# Every line, or the stream is not a stream. python3 rather than a grep for braces: a shape
+	# test would pass on `{"event":"x",}`.
+	printf '%s\n' "$output" | python3 -c '
+import json, sys
+for i, line in enumerate(sys.stdin.read().splitlines(), 1):
+    if not line.strip(): continue
+    try: json.loads(line)
+    except Exception as e: sys.exit("line %d is not JSON (%s): %s" % (i, e, line))
+' || fail "stdout was not one JSON object per line:$output"
+	[[ "$output" == *'"event":"run_start"'* ]] || fail "no run_start event: $output"
+	[[ "$output" == *'"event":"clip_planned"'* ]] || fail "no clip_planned event: $output"
+	[[ "$output" == *'"event":"run_done"'* ]] || fail "no run_done event: $output"
+}
+
+@test "JSON=1 keeps the human lines in the report rather than dropping them" {
+	# The report is what a person reads afterwards, so it is never the half that gets dropped. This
+	# is the property that lets a consumer own stdout without anything being lost.
+	local work="$BATS_TEST_TMPDIR/json-report"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	JSON=1 DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" \
+		run --separate-stderr "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"clip(s)"* ]] || fail "a human line reached stdout under JSON=1: $output"
+	local report
+	report=$(ls "$work"/dist/reports/run-*.txt | head -1)
+	grep -q "clip(s)" "$report" || fail "the report lost its header line"
+	grep -q "gamma=" "$report" || fail "the report lost the per-clip plan"
+}
+
+@test "the YAVG placeholder does not produce invalid JSON" {
+	# MATCH=0 leaves YAVG as a literal "-", which a laxer numeric test emits bare as `"yavg":-`.
+	# One path, invalid on that path only, and nothing else in the suite would have run it.
+	local work="$BATS_TEST_TMPDIR/json-dash"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	JSON=1 DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" \
+		run --separate-stderr "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[[ "$output" == *'"yavg":"-"'* ]] || fail "expected a quoted placeholder: $output"
+}
+
+@test "every refusal names a code on stderr, beside the human sentence" {
+	local work="$BATS_TEST_TMPDIR/codes"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/A.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/B.mov"
+
+	# A Feed crop across several clips: the offset is a per-clip framing call.
+	FEED=1 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/A.mov" "$work/src/B.mov"
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"GRADE_CODE=REFUSE_FEED_NO_CROP_Y"* ]] || fail "unnamed refusal: $output"
+	[[ "$output" == *"REFUSING: FEED=1"* ]] || fail "the human sentence was replaced, not kept"
+
+	# A missing argument, and no arguments at all.
+	GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/NOPE.mov"
+	[[ "$output" == *"GRADE_CODE=REFUSE_NOT_FOUND"* ]] || fail "unnamed not-found: $output"
+	GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh"
+	[[ "$output" == *"GRADE_CODE=REFUSE_NO_ARGS"* ]] || fail "unnamed usage error: $output"
+}
+
+@test "a skipped clip and a missing transform are both named" {
+	local work="$BATS_TEST_TMPDIR/codes2"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/landscape_tagged.mov" "$work/src/WIDE.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/TALL.mov"
+	# STAB=1 with no transform is the degraded state the engine already prints about; a wrapper has
+	# to be able to surface it, because it is the one decision that costs ~65s per clip to get
+	# wrong and it used to be made silently.
+	DRY=1 MATCH=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"GRADE_CODE=REFUSE_NOT_PORTRAIT"* ]] || fail "unnamed skip: $output"
+	[[ "$output" == *"GRADE_CODE=NO_TRANSFORM"* ]] || fail "unnamed missing transform: $output"
+}
+
+@test "the event stream accounts for every clip in the run" {
+	# A wrapper drives a queue off these events, so a dropped one shows up as a clip that never
+	# finishes. One skipped and one planned, from a folder argument.
+	local work="$BATS_TEST_TMPDIR/json-batch"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/landscape_tagged.mov" "$work/src/WIDE.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/TALL.mov"
+	JSON=1 DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" \
+		run --separate-stderr "$SCRIPTS/grade.sh" "$work/src"
+	[ "$status" -eq 0 ]
+	local planned skipped
+	planned=$(printf '%s\n' "$output" | grep -c '"event":"clip_planned"' || true)
+	skipped=$(printf '%s\n' "$output" | grep -c '"event":"clip_skipped"' || true)
+	[ "$planned" -eq 1 ] || fail "expected 1 clip_planned, got $planned:$output"
+	[ "$skipped" -eq 1 ] || fail "expected 1 clip_skipped, got $skipped:$output"
+	[[ "$output" == *'"skipped":1'* ]] || fail "run_done did not count the skip: $output"
 }

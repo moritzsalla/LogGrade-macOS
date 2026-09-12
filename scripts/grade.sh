@@ -14,6 +14,9 @@
 #   GRAIN_STRENGTH=<n>  override look.json's grain strength
 #   PROOF=<seconds>   render this many seconds through the real chain into dist/proofs/
 #   DRY=1             plan only, render nothing
+#   JSON=1            emit one machine-readable event per line on stdout instead of the human
+#                     lines, which then go only to the run report. Named codes go to stderr
+#                     either way. This is what the app drives the engine through.
 #
 # WHY ONE PASS. The staged pipeline (01-baseline -> 02-grade -> 03-final) writes two ~2.5GB ProRes
 # intermediates per clip and decodes the footage three times. Those intermediates existed so the
@@ -96,9 +99,19 @@ for arg in "$@"; do
 	if [ -d "$arg" ]; then
 		while IFS= read -r f; do CLIPS+=("$f"); done < <(find "$arg" -maxdepth 1 -name '*.mov' | sort)
 	elif [ -f "$arg" ]; then CLIPS+=("$arg")
-	else echo "not found: $arg" >&2; exit 1; fi
+	else
+		echo "not found: $arg" >&2
+		emit_code REFUSE_NOT_FOUND
+		emit refused code REFUSE_NOT_FOUND argument "$arg"
+		exit 1
+	fi
 done
-[ "${#CLIPS[@]}" -gt 0 ] || { echo "usage: grade <folder|clip.mov> [...]" >&2; exit 1; }
+if [ "${#CLIPS[@]}" -eq 0 ]; then
+	echo "usage: grade <folder|clip.mov> [...]" >&2
+	emit_code REFUSE_NO_ARGS
+	emit refused code REFUSE_NO_ARGS
+	exit 1
+fi
 
 # The Feed crop is a per-clip judgement — 750 is IMG_0609's composition, chosen to drop the
 # parking-ceiling strip at the top. Applied to a batch it silently reframes 18 other clips, and
@@ -109,6 +122,8 @@ if [ "$FEED" = "1" ] && [ "${#CLIPS[@]}" -gt 1 ] && [ -z "${CROP_Y:-}" ]; then
 	echo "REFUSING: FEED=1 across ${#CLIPS[@]} clips with no CROP_Y." >&2
 	echo "  The 4:5 crop offset is a per-clip framing call; the default 750 is IMG_0609's." >&2
 	echo "  Either run one clip at a time, or pass CROP_Y=<pixels> to accept one offset for all." >&2
+	emit_code REFUSE_FEED_NO_CROP_Y
+	emit refused code REFUSE_FEED_NO_CROP_Y clips "${#CLIPS[@]}"
 	exit 1
 fi
 
@@ -124,11 +139,22 @@ check_disk_space "$WORK/dist" 10
 mkdir -p "$OUT_DIR" "$REPORT_DIR" "$CACHE"
 REPORT="$REPORT_DIR/run-$(date +%Y%m%d-%H%M%S).txt"
 : > "$REPORT"
-say() { echo "$*" | tee -a "$REPORT"; }
+# Under JSON=1 the human line still lands in the report and leaves stdout to the event stream.
+# The report is the thing a person reads afterwards, so it is never the half that gets dropped.
+say() {
+	if [ "$JSON" = "1" ]; then
+		printf '%s\n' "$*" >> "$REPORT"
+	else
+		printf '%s\n' "$*" | tee -a "$REPORT"
+	fi
+}
 
 say "grade run $(date '+%Y-%m-%d %H:%M:%S')  —  ${#CLIPS[@]} clip(s)"
 say "look: sat=$SAT warm=$WARM grain=$GRAIN_STRENGTH stab=$STAB exposure-match=$MATCH"
 say ""
+emit run_start clips "${#CLIPS[@]}" saturation "$SAT" warmth "$WARM" \
+	grain "$GRAIN_STRENGTH" stabilisation "$STAB" exposure_match "$MATCH" \
+	proof "${PROOF:-0}" dry "$DRY" report "$REPORT" out_dir "$OUT_DIR"
 
 OK=0; SKIPPED=0; FAILED=0
 for SRC in "${CLIPS[@]}"; do
@@ -140,6 +166,8 @@ for SRC in "${CLIPS[@]}"; do
 	# producing a confidently wrong file; require_portrait decodes a frame and measures it.
 	if ! require_portrait "$SRC" 2>/dev/null; then
 		say "SKIP  $CLIP — not portrait. Fix the source orientation, then retry."
+		emit_code REFUSE_NOT_PORTRAIT
+		emit clip_skipped clip "$CLIP" code REFUSE_NOT_PORTRAIT source "$SRC"
 		SKIPPED=$((SKIPPED+1)); continue
 	fi
 
@@ -177,18 +205,27 @@ for SRC in "${CLIPS[@]}"; do
 		if transform_is_fresh "$TRF" "$SRC"; then
 			SFX="$(stab_prefix "$TRF" "$SMOOTHING")"
 			say "      stabilising from $TRF (smoothing=${SMOOTHING})"
+			emit stabilisation clip "$CLIP" state fresh transform "$TRF" smoothing "$SMOOTHING"
 		elif [ -f "$TRF" ]; then
 			say "      stale transform at $TRF — older than the source, rendering unstabilised"
 			say "      re-run 00-stabilise-detect.sh for $CLIP to refresh it"
+			emit_code STALE_TRANSFORM
+			emit stabilisation clip "$CLIP" state stale transform "$TRF"
 		else
 			# Worth saying out loud: this is the one decision in a dry run that costs ~65s per
 			# clip to get wrong, and it used to be made silently.
 			say "      no transform at $TRF — will render unstabilised"
+			emit_code NO_TRANSFORM
+			emit stabilisation clip "$CLIP" state none transform "$TRF"
 		fi
 	fi
 
 	FPS="$(source_fps "$SRC")"
 	say "$CLIP  post-CST YAVG=${YAVG}  gamma=${GAMMA}$([ "$GAMMA" != "$G_GAMMA_REF" ] && echo " (matched)")"
+	# matched is 1/0 rather than true/false: emit() writes a bare number or a quoted string, and a
+	# JSON boolean would need a third case for one field.
+	emit clip_planned clip "$CLIP" source "$SRC" yavg "$YAVG" gamma "$GAMMA" \
+		matched "$([ "$GAMMA" != "$G_GAMMA_REF" ] && echo 1 || echo 0)" fps "$FPS"
 	[ "$DRY" = "1" ] && continue
 
 	# Generated AFTER the dry-run exit, not before: DRY=1 is documented as "plan only, render
@@ -232,7 +269,9 @@ $(delivery_image_chain "$w" "$h" "$SFX" "$crop")[b];\
 		# `|| return 1` above is load-bearing now that the caller invokes render() inside an `if`:
 		# that suppresses `set -e` for this whole body, so without it a failed render would fall
 		# through to `stat` on a file that was never written.
-		say "      -> $(basename "$out")  $(( $(stat -f%z "$out") / 1048576 ))MB"
+		local bytes; bytes=$(stat -f%z "$out")
+		say "      -> $(basename "$out")  $(( bytes / 1048576 ))MB"
+		emit output clip "$CLIP" deliverable "$suffix" path "$out" bytes "$bytes"
 	}
 
 	# A FAILED CLIP MUST NOT TAKE THE BATCH WITH IT. render_delivery leaves the previous deliverable
@@ -248,6 +287,8 @@ $(delivery_image_chain "$w" "$h" "$SFX" "$crop")[b];\
 		OK=$((OK+1))
 	else
 		say "FAIL  $CLIP — render failed, previous output left as it was. Continuing."
+		emit_code RENDER_FAILED
+		emit clip_failed clip "$CLIP" source "$SRC"
 		FAILED=$((FAILED+1))
 	fi
 done
@@ -255,4 +296,5 @@ done
 say ""
 say "done: $OK rendered, $SKIPPED skipped, $FAILED failed"
 say "report: $REPORT"
+emit run_done rendered "$OK" skipped "$SKIPPED" failed "$FAILED" report "$REPORT"
 [ "$FAILED" -eq 0 ] || exit 1

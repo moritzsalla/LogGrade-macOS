@@ -184,6 +184,62 @@ require_clip_name() {  # require_clip_name <name>
 	printf '%s\n' "$1"
 }
 
+# --- machine-readable events --------------------------------------------------
+# The app this repo exists for has to know what a run is doing without reading prose written for a
+# person. So every state the pipeline already prints gets a second, stable expression next to it.
+#
+#   JSON=1   puts one JSON object per line on stdout, and moves the human lines to the report file
+#            only — so a consumer reads ONE format per stream rather than sniffing which line is
+#            which. The report is unchanged either way; that is what the test pins.
+#   codes    a named code on stderr beside the human text, always, JSON or not. stderr is where a
+#            wrapper looks for why a run stopped, and every refusal already goes there while never
+#            reaching the report.
+#
+# Codes are NAMED rather than matched out of message text, because a message is prose and gets
+# reworded. That already broke a test in the precursor silently: it asserted on wording that was
+# later renamed, and stayed green against the guard it no longer checked.
+JSON="${JSON:-0}"
+
+# Escapes a value for a JSON string: the two characters that break the grammar, plus newline and
+# tab, which would break the one-object-per-line contract that makes the stream readable at all.
+# What reaches this is clip names, paths and numbers — not arbitrary text.
+json_str() {
+	printf '%s' "$1" | tr '\n\t' '  ' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+# Emitted bare (as a JSON number) only for something that really is one: at least one digit and
+# nothing a number cannot contain. "-" is the YAVG placeholder when MATCH=0 and must stay a string,
+# which a laxer test would have emitted as `"yavg":-` — invalid JSON, and only on that one path.
+_json_is_num() {
+	case "$1" in
+		''|*[!0-9.eE+-]*) return 1;;
+		*[0-9]*) return 0;;
+		*) return 1;;
+	esac
+}
+
+# emit <event> [key value]...  — one object per line on stdout, only under JSON=1.
+# Positional pairs because macOS ships bash 3.2, which has no associative arrays.
+emit() {
+	[ "$JSON" = "1" ] || return 0
+	local event="$1" k v; shift
+	printf '{"event":"%s"' "$(json_str "$event")"
+	while [ "$#" -gt 1 ]; do
+		k="$1"; v="$2"; shift 2
+		if _json_is_num "$v"; then
+			printf ',"%s":%s' "$(json_str "$k")" "$v"
+		else
+			printf ',"%s":"%s"' "$(json_str "$k")" "$(json_str "$v")"
+		fi
+	done
+	printf '}\n'
+}
+
+# emit_code <NAME> — the machine half of a refusal or a degraded state, BESIDE the human text
+# rather than instead of it. Always on stderr: a consumer that never sets JSON=1 still needs to
+# know why a clip was skipped, and the human sentence is the thing that gets reworded.
+emit_code() { printf 'GRADE_CODE=%s\n' "$1" >&2; }
+
 # --- the look -----------------------------------------------------------------
 # One source for every look value: look.json at the repo root. Nothing else may hardcode one.
 # Before this existed, `SAT=1.27` was written out in two scripts and had already started to drift
