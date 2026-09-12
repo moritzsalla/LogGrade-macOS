@@ -8,7 +8,9 @@ import SwiftUI
 /// so the gap is real and worth naming.
 struct PreviewView: View {
     @ObservedObject var model: GradeModel
-    @State private var comparing = false
+
+    /// Held on the keyboard, not clicked. The window's key monitor sets this.
+    private var comparing: Bool { model.isComparing }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -44,20 +46,26 @@ struct PreviewView: View {
                 }
             }
 
-            ScopesView(scopes: model.scopes)
+            HStack(alignment: .top, spacing: 10) {
+                ScopesView(scopes: model.scopes)
+                // The curve lives with the picture rather than with its sliders, because the
+                // inspector scrolls and a readout you cannot see while you adjust is not a readout.
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("curve").font(.system(size: 10)).foregroundColor(Palette.inkTertiary)
+                    CurveView(curve: model.curve)
+                        .frame(width: 78, height: 78)
+                }
+            }
 
             HStack(spacing: 12) {
                 Button(model.isStale ? "preview (out of date)" : "preview") { model.renderPreview() }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(model.selectedClip == nil || model.isRendering)
-                Text("hold to compare")
+                Text("hold C to compare")
                     .font(.system(size: 11))
                     .foregroundColor(model.previousImage == nil ? Palette.inkTertiary
                                                                 : Palette.inkSecondary)
-                    .onLongPressGesture(minimumDuration: 0.01,
-                                        pressing: { comparing = $0 && model.previousImage != nil },
-                                        perform: {})
                 Spacer()
                 if comparing {
                     Readout(text: "previous")

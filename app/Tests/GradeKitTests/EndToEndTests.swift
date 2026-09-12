@@ -91,3 +91,101 @@ final class EndToEndTests: XCTestCase {
         return first
     }
 }
+
+/// A whole delivery, through the app's own queue, to the file that would be uploaded.
+///
+/// Everything else tests a piece. This is the app doing the thing it exists for: a clip in, a
+/// deliverable out, with its colour tags verified — because an encoder writing the wrong tags is
+/// the failure this pipeline's whole retag pass exists for, and it has happened on two different
+/// encoders here.
+final class DeliveryTests: XCTestCase {
+    func testTheQueueDeliversATaggedFile() throws {
+        let here = URL(fileURLWithPath: #filePath)
+        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
+            throw XCTSkip("no engine checkout")
+        }
+        try XCTSkipIf(!engine.preflight().isEmpty, "engine preflight not clean")
+        let clips = (try? FileManager.default.contentsOfDirectory(
+            at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil)) ?? []
+        guard let clip = clips.first(where: { $0.pathExtension.lowercased() == "mov" }) else {
+            throw XCTSkip("no footage in src/")
+        }
+
+        let work = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: work) }
+
+        let look = try Look(data: try Data(contentsOf: engine.lookFile))
+        let lookFile = work.appendingPathComponent("look.json")
+        try look.write(to: lookFile)
+
+        var project = Project(presets: [.init(name: "shipped", look: look)],
+                              activePreset: "shipped",
+                              delivery: .init(reels: true, feed: false, height: 640))
+        let stem = clip.deletingPathExtension().lastPathComponent
+        project.clips[stem] = .init(stabilise: false)
+
+        let queue = RenderQueue(engine: engine)
+        queue.concurrency = 1
+        queue.enqueue([(clip, stem, nil)])
+
+        let done = expectation(description: "delivered")
+        DispatchQueue.global().async {
+            queue.start(environment: { name in
+                var env = project.environment(for: name, lookFile: lookFile)
+                env["GRADE_WORK_DIR"] = work.path
+                env["PROOF"] = "0.3"   // a short one: this is about the path, not the runtime
+                return env
+            })
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 600)
+        let settled = expectation(description: "settled")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { settled.fulfill() }
+        wait(for: [settled], timeout: 5)
+
+        XCTAssertEqual(queue.jobs.first?.state, .done, "the queue said: \(queue.jobs)")
+        // WHERE IT LANDED. A deliverable rendered into a scratch directory is one macOS may
+        // delete, and that is what this app did until it was given somewhere to put things.
+        //
+        // The prefix, not the exact folder: this render is a proof so it lands in dist/proofs by
+        // design, and proofs are deliberately not deliverables. What is asserted is that the
+        // engine wrote inside the directory it was pointed at.
+        let written = try XCTUnwrap(queue.jobs.first?.outputs.first).standardizedFileURL.path
+        XCTAssertTrue(written.hasPrefix(work.standardizedFileURL.path),
+                      "the file landed outside the chosen directory: \(written)")
+        XCTAssertFalse(written.contains("loggrade-preview"),
+                       "a deliverable landed in the preview scratch directory: \(written)")
+        let outputs = try XCTUnwrap(queue.jobs.first?.outputs)
+        XCTAssertEqual(outputs.count, 1, "one shape was asked for, got \(outputs)")
+        let delivered = try XCTUnwrap(outputs.first)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: delivered.path),
+                      "the queue named a file that is not there: \(delivered.path)")
+        let size = try FileManager.default.attributesOfItem(atPath: delivered.path)[.size] as? Int
+        XCTAssertGreaterThan(size ?? 0, 10_000, "that is not a rendered clip")
+
+        // The tags, because an encoder writing the wrong ones is how a correct image gets
+        // double-transformed by anything that trusts them — CONTEXT.md calls that bleached.
+        let ffprobe = try XCTUnwrap(EngineLocation.resolveTool("ffprobe"))
+        let probe = Process()
+        probe.executableURL = ffprobe
+        probe.arguments = ["-v", "error", "-select_streams", "v:0", "-show_entries",
+                           "stream=color_primaries,color_transfer,color_space",
+                           "-of", "default=nw=1:nk=1", delivered.path]
+        let pipe = Pipe()
+        probe.standardOutput = pipe
+        try probe.run()
+        let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        probe.waitUntilExit()
+        let fields = text.split(separator: "\n").map(String.init)
+        XCTAssertTrue(fields.allSatisfy { $0 == "bt709" },
+                      "the delivered file is not tagged Rec.709: \(fields)")
+
+        // And nothing half-written was left next to it.
+        let leftovers = (try? FileManager.default.contentsOfDirectory(
+            at: delivered.deletingLastPathComponent(), includingPropertiesForKeys: nil)) ?? []
+        XCTAssertFalse(leftovers.contains { $0.lastPathComponent.contains(".partial.") },
+                       "a staging file was left in the delivery folder")
+    }
+}

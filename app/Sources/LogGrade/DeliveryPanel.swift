@@ -1,3 +1,4 @@
+import AppKit
 import GradeKit
 import SwiftUI
 
@@ -48,6 +49,25 @@ struct DeliveryPanel: View {
 
             if model.project.delivery.feed {
                 cropRow
+            }
+
+            HStack(spacing: 8) {
+                Text("to").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
+                    .fixedSize()
+                Text(model.outputDirectory.map { $0.path } ?? "drop a clip first")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(Palette.inkTertiary)
+                    .lineLimit(1).truncationMode(.head)
+                Button("choose") {
+                    let panel = NSOpenPanel()
+                    panel.canChooseDirectories = true
+                    panel.canChooseFiles = false
+                    panel.prompt = "deliver here"
+                    if panel.runModal() == .OK, let url = panel.url {
+                        model.chooseOutputDirectory(url)
+                    }
+                }
+                .buttonStyle(.borderless).font(.system(size: 10.5))
             }
 
             ForEach(model.blockers.indices, id: \.self) { i in

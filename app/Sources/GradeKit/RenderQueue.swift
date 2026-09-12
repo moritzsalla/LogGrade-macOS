@@ -16,10 +16,19 @@ public final class RenderQueue: ObservableObject {
         /// Frames rendered so far, from the engine's progress events. Nil until it says.
         public var frame: Int?
         public var outputs: [URL] = []
+        /// How many frames this clip has, when it could be measured. Without it a frame count is a
+        /// number with no scale, which is what "rendering, frame 412" was.
+        public var totalFrames: Int?
 
-        public init(clip: URL, stem: String) {
+        public var fractionDone: Double? {
+            guard let frame, let totalFrames, totalFrames > 0 else { return nil }
+            return min(1, Double(frame) / Double(totalFrames))
+        }
+
+        public init(clip: URL, stem: String, totalFrames: Int? = nil) {
             self.clip = clip
             self.stem = stem
+            self.totalFrames = totalFrames
         }
     }
 
@@ -56,9 +65,9 @@ public final class RenderQueue: ObservableObject {
 
     public init(engine: EngineLocation) { self.engine = engine }
 
-    public func enqueue(_ clips: [(url: URL, stem: String)]) {
+    public func enqueue(_ clips: [(url: URL, stem: String, frames: Int?)]) {
         for clip in clips where !jobs.contains(where: { $0.stem == clip.stem && !$0.state.isFinished }) {
-            jobs.append(Job(clip: clip.url, stem: clip.stem))
+            jobs.append(Job(clip: clip.url, stem: clip.stem, totalFrames: clip.frames))
         }
     }
 

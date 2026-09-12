@@ -230,3 +230,94 @@ final class LookEngineIntegrationTests: XCTestCase {
                       "the real engine put prose on stdout: \(outcome.malformed)")
     }
 }
+
+/// Presets and the project file, exercised through the model's own operations rather than the UI.
+final class PresetTests: XCTestCase {
+    private func aLook(gamma: Double = 2.02) throws -> Look {
+        let json = #"""
+        {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
+         "power":"1,1,1","lum_mix":1},"look":{"lut":"kodak_portra_400_nc"},
+         "tone":{"gamma":GAMMA,"pivot":0.39,"contrast":1.09,"toe":0,"shoulder":0.1,"black":0.025},
+         "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8},
+         "stabilisation":{"smoothing":30},"match":{"reference_yavg":609}}
+        """#.replacingOccurrences(of: "GAMMA", with: String(gamma))
+        return try Look(data: Data(json.utf8))
+    }
+
+    func testAPresetCarriesTheLookAndTheTrimsTogether() throws {
+        var project = Project(presets: [.init(name: "shipped", look: try aLook())],
+                              activePreset: "shipped")
+        var neutral = try aLook(gamma: 1.4)
+        neutral.lookLUT = "none"
+        neutral.colour.saturation = 1.0
+        project.presets.append(.init(name: "neutral", look: neutral))
+
+        // Switching replaces the whole grade, not just the cube: the curve was tuned with its cube
+        // in the chain, so half a switch is a grade nobody chose.
+        let chosen = try XCTUnwrap(project.presets.first { $0.name == "neutral" })
+        XCTAssertEqual(chosen.look.lookLUT, "none")
+        XCTAssertEqual(chosen.look.tone.gamma, 1.4)
+        XCTAssertEqual(chosen.look.colour.saturation, 1.0)
+        // And the other preset is untouched by that.
+        XCTAssertEqual(project.presets[0].look.tone.gamma, 2.02)
+    }
+
+    func testAProjectSurvivesBeingSavedAndReopened() throws {
+        var project = Project(presets: [.init(name: "shipped", look: try aLook())],
+                              activePreset: "shipped",
+                              delivery: .init(reels: true, feed: true, height: 2560, fps: 24))
+        project.clips["IMG_0609"] = .init(cropOffset: 812, previewSeconds: 4, stabilise: false)
+        project.clips["IMG_0610"] = .init(cropOffset: nil)
+
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try project.serialised().write(to: url)
+
+        // The crop offsets are the point: they are the one thing in this pipeline that cannot be
+        // guessed, and without a project file they live only as long as a window is open.
+        let reopened = try Project(data: try Data(contentsOf: url))
+        XCTAssertEqual(reopened.clips["IMG_0609"]?.cropOffset, 812)
+        XCTAssertNil(reopened.clips["IMG_0610"]?.cropOffset, "undecided must stay undecided")
+        XCTAssertEqual(reopened.clips["IMG_0609"]?.previewSeconds, 4)
+        XCTAssertEqual(reopened.delivery.height, 2560)
+        XCTAssertEqual(reopened.delivery.fps, 24)
+        XCTAssertEqual(reopened.presets.map(\.name), ["shipped"])
+        XCTAssertEqual(reopened.active?.look.tone.gamma, 2.02)
+    }
+
+    func testSavingUnderAnExistingNameReplacesIt() throws {
+        var project = Project(presets: [.init(name: "shipped", look: try aLook())],
+                              activePreset: "shipped")
+        let adjusted = try aLook(gamma: 1.77)
+        if let i = project.presets.firstIndex(where: { $0.name == "shipped" }) {
+            project.presets[i] = .init(name: "shipped", look: adjusted)
+        }
+        XCTAssertEqual(project.presets.count, 1, "saving over a name should not add a second")
+        XCTAssertEqual(project.active?.look.tone.gamma, 1.77)
+    }
+}
+
+
+final class OutputDestinationTests: XCTestCase {
+    /// The rule, stated as a test because the app shipped for a day without it: a preview is
+    /// scratch and belongs in a temp directory, a deliverable is the thing the app exists to
+    /// produce and must not.
+    func testAProjectRemembersWhereToDeliver() throws {
+        let json = #"""
+        {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
+         "power":"1,1,1","lum_mix":1},"look":{"lut":"none"},
+         "tone":{"gamma":1,"pivot":0.5,"contrast":1,"toe":0,"shoulder":0,"black":0},
+         "colour":{"saturation":1,"warmth":0},"grain":{"strength":8},
+         "stabilisation":{"smoothing":30},"match":{"reference_yavg":609}}
+        """#
+        var project = Project(presets: [.init(name: "p", look: try Look(data: Data(json.utf8)))],
+                              activePreset: "p")
+        project.outputDirectory = URL(fileURLWithPath: "/Users/someone/Footage/shoot")
+        let reread = try Project(data: try project.serialised())
+        XCTAssertEqual(reread.outputDirectory?.path, "/Users/someone/Footage/shoot",
+                       "a chosen destination has to survive the project file")
+        XCTAssertFalse(reread.outputDirectory?.path.contains("/var/folders") ?? true,
+                       "nothing should default into a scratch directory")
+    }
+}

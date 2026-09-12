@@ -57,7 +57,23 @@ struct RootView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 14)
+            .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
+
+            if let grade {
+                HStack(spacing: 10) {
+                    Button("open project") { openProject(grade) }
+                        .buttonStyle(.borderless).font(.system(size: 11))
+                    Button("save project") { saveProject(grade) }
+                        .buttonStyle(.borderless).font(.system(size: 11))
+                    if let url = grade.projectURL {
+                        Text(url.lastPathComponent)
+                            .font(.system(size: 9.5, design: .monospaced))
+                            .foregroundColor(Palette.inkTertiary)
+                            .lineLimit(1).truncationMode(.head)
+                    }
+                }
+                .padding(.horizontal, 16).padding(.bottom, 12)
+            }
 
             dropZone.padding(.horizontal, 16)
 
@@ -150,6 +166,25 @@ struct RootView: View {
         .overlay(Rectangle().fill(Palette.hairline).frame(height: 1), alignment: .bottom)
     }
 
+    /// A shoot is the unit of work, so it is saved and reopened as one: presets, delivery, and
+    /// every clip's crop offset. Without this the crop decisions — the one thing that cannot be
+    /// guessed — live only as long as the window is open.
+    private func saveProject(_ grade: GradeModel) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = grade.projectURL?.lastPathComponent ?? "shoot.loggrade.json"
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do { try grade.saveProject(to: url) } catch { NSSound.beep() }
+    }
+
+    private func openProject(_ grade: GradeModel) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do { try grade.openProject(at: url) } catch { NSSound.beep() }
+    }
+
     /// Drop a clip and it is the one being graded. Making someone click "select" first is a step
     /// with no decision in it, and the whole app is shaped around the drop.
     private func selectIfNothingSelected(_ entry: ClipList.Entry) {
@@ -211,7 +246,10 @@ window.title = "LogGrade"
 window.appearance = NSAppearance(named: .darkAqua)
 window.titlebarAppearsTransparent = true
 window.backgroundColor = NSColor(red: 0.098, green: 0.098, blue: 0.098, alpha: 1)
-window.center()
+// Remembered between launches: where the window was, and what was open. Setting the frame
+// autosave name makes macOS keep the size and position; the rest is a handful of defaults.
+window.setFrameAutosaveName("LogGradeMain")
+if window.frame.origin == .zero { window.center() }
 let clipList = ClipList(probe: EngineLocation.resolveTool("ffprobe").map(ClipProbe.init))
 
 // The look the app opens on is the engine's own look.json: the shipped grade, which is a look
@@ -219,9 +257,53 @@ let clipList = ClipList(probe: EngineLocation.resolveTool("ffprobe").map(ClipPro
 let gradeModel: GradeModel? = engine.flatMap { e in
     (try? Look(data: Data(contentsOf: e.lookFile))).map { GradeModel(engine: e, look: $0) }
 }
+// THE KEYBOARD. A grading tool lives under the fingers: you look, you nudge, you compare, you move
+// to the next clip, and reaching for a mouse between each of those is the difference between a tool
+// and a form. A local monitor rather than a menu because this app has no menu bar to hang
+// shortcuts on, and because C has to be held rather than pressed.
+NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
+    guard let grade = gradeModel else { return event }
+    // A key pressed while typing in a field belongs to the field.
+    if window.firstResponder is NSTextView { return event }
+    let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+    if event.type == .keyUp {
+        if key == "c" { grade.isComparing = false }
+        return event
+    }
+    switch key {
+    case "c":
+        grade.isComparing = grade.previousImage != nil
+        return nil
+    case "p", " ":
+        grade.renderPreview()
+        return nil
+    case "[":
+        grade.step(-1, in: clipList.usable)
+        return nil
+    case "]":
+        grade.step(1, in: clipList.usable)
+        return nil
+    default:
+        return event
+    }
+}
+
+let renderQueue = RenderQueue(engine: engine ?? EngineLocation(root: URL(fileURLWithPath: "/")))
+
+// Reopen the last project, so a shoot in progress is still in progress tomorrow. Its crop offsets
+// are the part that cannot be recovered by guessing.
+if let grade = gradeModel,
+   let remembered = UserDefaults.standard.url(forKey: "lastProject"),
+   FileManager.default.fileExists(atPath: remembered.path) {
+    try? grade.openProject(at: remembered)
+}
+// A stored zero means "never set", not "none at once": integer(forKey:) cannot tell those apart,
+// and taking it literally quietly halved the default.
+let storedConcurrency = UserDefaults.standard.integer(forKey: "concurrency")
+renderQueue.concurrency = storedConcurrency > 0 ? storedConcurrency : 2
+
 let delegate = AppDelegate(clips: clipList, grade: gradeModel)
 app.delegate = delegate
-let renderQueue = RenderQueue(engine: engine ?? EngineLocation(root: URL(fileURLWithPath: "/")))
 window.contentView = NSHostingView(rootView: RootView(engine: engine, problems: problems,
                                                       clips: clipList, queue: renderQueue,
                                                       grade: gradeModel))

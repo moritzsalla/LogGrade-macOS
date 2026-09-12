@@ -57,7 +57,11 @@ struct QueuePanel: View {
     private func describe(_ job: RenderQueue.Job) -> String {
         switch job.state {
         case .waiting: return "waiting"
-        case .running: return job.frame.map { "rendering, frame \($0)" } ?? "rendering"
+        case .running:
+            if let fraction = job.fractionDone {
+                return "rendering, \(Int(fraction * 100))%"
+            }
+            return job.frame.map { "rendering, frame \($0)" } ?? "rendering"
         case .done:
             let names = job.outputs.map(\.lastPathComponent)
             return names.isEmpty ? "done" : "done: " + names.joined(separator: ", ")
@@ -76,6 +80,10 @@ struct QueuePanel: View {
     }
 
     private var concurrencyBinding: Binding<Int> {
-        Binding(get: { queue.concurrency }, set: { queue.concurrency = $0 })
+        Binding(get: { queue.concurrency },
+                set: {
+                    queue.concurrency = $0
+                    UserDefaults.standard.set($0, forKey: "concurrency")
+                })
     }
 }

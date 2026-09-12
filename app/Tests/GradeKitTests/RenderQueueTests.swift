@@ -55,9 +55,9 @@ final class RenderQueueTests: XCTestCase {
 
         let queue = RenderQueue(engine: engine)
         queue.concurrency = 1
-        queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A"),
-                       (URL(fileURLWithPath: "/tmp/BAD.mov"), "BAD"),
-                       (URL(fileURLWithPath: "/tmp/C.mov"), "C")])
+        queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A", nil),
+                       (URL(fileURLWithPath: "/tmp/BAD.mov"), "BAD", nil),
+                       (URL(fileURLWithPath: "/tmp/C.mov"), "C", 48)])
         waitForQueue(queue)
 
         XCTAssertEqual(queue.jobs.map(\.stem), ["A", "BAD", "C"])
@@ -81,7 +81,7 @@ final class RenderQueueTests: XCTestCase {
         """)
         defer { try? FileManager.default.removeItem(at: engine.root) }
         let queue = RenderQueue(engine: engine)
-        queue.enqueue([(URL(fileURLWithPath: "/tmp/WIDE.mov"), "WIDE")])
+        queue.enqueue([(URL(fileURLWithPath: "/tmp/WIDE.mov"), "WIDE", nil)])
         waitForQueue(queue)
         XCTAssertEqual(queue.jobs[0].state, .skipped(.notPortrait))
     }
@@ -96,7 +96,7 @@ final class RenderQueueTests: XCTestCase {
         """)
         defer { try? FileManager.default.removeItem(at: engine.root) }
         let queue = RenderQueue(engine: engine)
-        queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A")])
+        queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A", 48)])
         waitForQueue(queue)
         XCTAssertEqual(queue.jobs[0].frame, 48)
         XCTAssertEqual(queue.jobs[0].outputs.map(\.lastPathComponent), ["A_reels.mp4"])
@@ -125,7 +125,7 @@ final class RenderQueueTests: XCTestCase {
             try? FileManager.default.removeItem(at: pidFile)
         }
         let queue = RenderQueue(engine: engine)
-        queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A")])
+        queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A", 48)])
 
         let finished = expectation(description: "queue")
         DispatchQueue.global().async {
@@ -177,5 +177,32 @@ final class RenderQueueTests: XCTestCase {
         XCTAssertEqual(queue.concurrency, 4, "more than four fight for memory bandwidth")
         queue.concurrency = 0
         XCTAssertEqual(queue.concurrency, 1, "zero would be a queue that never runs")
+    }
+}
+
+final class ProgressTests: XCTestCase {
+    func testAFrameCountMeansNothingWithoutATotal() {
+        var job = RenderQueue.Job(clip: URL(fileURLWithPath: "/tmp/A.mov"), stem: "A")
+        job.frame = 412
+        XCTAssertNil(job.fractionDone, "412 of what? that is the whole problem")
+        job.totalFrames = 824
+        XCTAssertEqual(job.fractionDone ?? 0, 0.5, accuracy: 1e-9)
+        // A render that overruns its estimate should not report 130%.
+        job.frame = 900
+        XCTAssertEqual(job.fractionDone ?? 0, 1.0, accuracy: 1e-9)
+    }
+
+    func testTheFrameCountComesFromTheMeasuredClip() {
+        let fields = ClipProbe.Fields(codec: "prores", pixelFormat: "yuv422p10le",
+                                      primaries: "bt2020", transfer: "unknown",
+                                      width: 3840, height: 2160,
+                                      duration: 26.5, frameRate: 24)
+        XCTAssertEqual(fields.frameCount, 636)
+        // And it says nothing rather than guessing when ffprobe did not answer.
+        let unmeasured = ClipProbe.Fields(codec: "prores", pixelFormat: "yuv422p10le",
+                                          primaries: "bt2020", transfer: "unknown",
+                                          width: 3840, height: 2160,
+                                          duration: nil, frameRate: 24)
+        XCTAssertNil(unmeasured.frameCount)
     }
 }

@@ -132,3 +132,22 @@ final class ClipFieldsSummaryTests: XCTestCase {
                       "and the container really does say landscape for a vertical clip")
     }
 }
+
+final class ClipDurationTests: XCTestCase {
+    func testRealFootageReportsItsLengthAndRate() throws {
+        let here = URL(fileURLWithPath: #filePath)
+        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
+            throw XCTSkip("no engine checkout")
+        }
+        let clips = (try? FileManager.default.contentsOfDirectory(
+            at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil)) ?? []
+        guard let clip = clips.first(where: { $0.pathExtension.lowercased() == "mov" }),
+              let ffprobe = EngineLocation.resolveTool("ffprobe") else {
+            throw XCTSkip("no footage or no ffprobe")
+        }
+        let fields = try XCTUnwrap(ClipProbe(ffprobe: ffprobe).fields(of: clip))
+        XCTAssertNotNil(fields.duration, "a queue cannot show progress without a length")
+        XCTAssertEqual(fields.frameRate ?? 0, 24, accuracy: 0.01, "this shoot is 4K24")
+        XCTAssertGreaterThan(fields.frameCount ?? 0, 24, "less than a second of footage?")
+    }
+}

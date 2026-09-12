@@ -31,6 +31,13 @@ you don't trip it; the measurement is in `docs/PIPELINE.md`, which is the only p
 
 - **`eq` is banned.** It silently negotiates an 8-bit format, so the chain quietly stops being
   10-bit. Check any new filter with `-v debug | grep "picking yuv"`.
+- **`lut1d` cannot take a YUV plane.** ffmpeg converts to `gbrp10le` around it, so the tone curve
+  is applied per RGB channel and only its luma is merged back. The rule above about checking
+  `-v debug | grep picking` is the one that catches this, and it was never run on `lut1d`. Run it
+  on every filter, not only the ones already suspected.
+- **`colorbalance` cannot either**, and its midtone window is not where its documentation suggests:
+  measured on a ramp, it is zero below level 27, peaks at 0.70 around level 63, and is gone by 100.
+  The shipped warmth of 0.005 therefore moves at most one code value, only in the shadows.
 - **`colorlevels` produces a flat frame** on this input. Use `curves`.
 - **Only `zscale` dithers** the 10→8 bit reduction. `format=yuv420p` and `-sws_dither ed` are
   byte-identical, i.e. neither does anything.

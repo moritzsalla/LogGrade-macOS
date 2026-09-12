@@ -168,6 +168,18 @@ expense of another.
   regardless — feeding it high quality just means less of what it does have to throw away.
   Same color-tag verification as every other stage.
 
+## The tone stage is not literally luma-only
+
+`lut1d` cannot process a YUV plane: ffmpeg converts to `gbrp10le` around it and the curve is
+applied per RGB channel, after which `mergeplanes` takes that image's luma and merges the original
+chroma. Measured on one patch: the luma plane came out at 243 of 1023, where curving the luma
+predicts 141.5 and curving each channel predicts 241.4, and ffmpeg's debug output says `picking
+gbrp10le out of 26 ref:yuv444p10le`.
+
+The chroma really is untouched, so the neon failure this stage exists to prevent is still
+prevented. What is not true is the description. docs/adr/0003 carries the correction and why the
+graph is not being changed to match it.
+
 ## Mistakes made (kept here so they don't repeat)
 
 - **Never chain a command that can fail into an unconditional `mv`.** Twice in this pipeline a

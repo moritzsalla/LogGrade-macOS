@@ -25,6 +25,16 @@ public struct ClipProbe {
         public var transfer: String
         public var width: Int
         public var height: Int
+        /// Seconds, and the frame rate as a rational, so a queue can turn "frame 412" into a
+        /// fraction of the work. Nil when ffprobe does not answer, which it sometimes does not.
+        public var duration: Double?
+        public var frameRate: Double?
+
+        /// How many frames a render of this clip has to get through.
+        public var frameCount: Int? {
+            guard let duration, let frameRate, frameRate > 0 else { return nil }
+            return Int((duration * frameRate).rounded())
+        }
 
         /// One line for the interface. Built here rather than interpolated in a view, because
         /// SwiftUI formats an interpolated Int with the locale's separators — so 3840 rendered as
@@ -91,11 +101,19 @@ public struct ClipProbe {
               let pix = field("pix_fmt", of: url),
               let w = field("width", of: url).flatMap(Int.init),
               let h = field("height", of: url).flatMap(Int.init) else { return nil }
+        var rate: Double?
+        if let raw = field("r_frame_rate", of: url) {
+            let parts = raw.split(separator: "/").compactMap { Double($0) }
+            if parts.count == 2, parts[1] != 0 { rate = parts[0] / parts[1] }
+            else if parts.count == 1 { rate = parts[0] }
+        }
         return Fields(codec: codec,
                       pixelFormat: pix,
                       primaries: field("color_primaries", of: url) ?? "unknown",
                       transfer: field("color_transfer", of: url) ?? "unknown",
-                      width: w, height: h)
+                      width: w, height: h,
+                      duration: field("duration", of: url).flatMap(Double.init),
+                      frameRate: rate)
     }
 
     /// A SIGNATURE, not proof, and the interface says so. What it rules out is the case that

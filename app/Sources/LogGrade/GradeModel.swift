@@ -19,6 +19,9 @@ final class GradeModel: ObservableObject {
     @Published var isRendering = false
     @Published var selectedClip: ClipList.Entry?
     @Published var previewSeconds: Double = 1
+    /// Held down rather than clicked. A colourist compares by holding a key and letting go, which
+    /// is what the Bench does too; a long press on a label was undiscoverable and awkward.
+    @Published var isComparing = false
     /// The look the visible frame was rendered from. Comparing it with the live one is how the
     /// panel knows the reading is out of date — which matters because this renders on release,
     /// not continuously, so the gap is real.
@@ -36,6 +39,11 @@ final class GradeModel: ObservableObject {
 
     /// The cubes on disk, read once: the interface offers what is there.
     let availableLooks: [String]
+
+    /// Which preview request is current. A render that finishes after a newer one was asked for
+    /// is answering a question nobody is still asking.
+    private var previewGeneration = 0
+    private var previewProcess: Process?
 
     let workDirectory: URL
 
@@ -71,29 +79,115 @@ final class GradeModel: ObservableObject {
     /// ON RELEASE, not on every movement. The exact preview is a render through the real chain,
     /// which takes a second or two: firing it per pixel of slider travel would queue work nobody
     /// is waiting for any more. This is the scanner's preview-scan gesture — adjust, then look.
+    // MARK: - presets and the project file
+
+    /// Switches to a preset, which replaces the whole grade: a look cube together with its tone
+    /// and trims. They are switched as a pair because the shipped curve was tuned with its cube in
+    /// the chain, so swapping one alone is a different grade rather than another film stock.
+    func apply(preset name: String) {
+        guard let preset = project.presets.first(where: { $0.name == name }) else { return }
+        project.activePreset = name
+        look = preset.look
+        refreshCurve()
+        renderPreview()
+    }
+
+    /// Keeps the current grade under a name. A new name adds one; an existing name replaces it,
+    /// which is how you save over a preset you have been adjusting.
+    func savePreset(named name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        if let index = project.presets.firstIndex(where: { $0.name == trimmed }) {
+            project.presets[index] = .init(name: trimmed, look: look)
+        } else {
+            project.presets.append(.init(name: trimmed, look: look))
+        }
+        project.activePreset = trimmed
+    }
+
+    /// The grade differs from the preset it came from. Worth showing: an unsaved adjustment that
+    /// looks like a preset is how a shoot ends up rendered with something nobody chose.
+    var hasUnsavedChanges: Bool {
+        guard let active = project.active else { return true }
+        return active.look != look
+    }
+
+    func saveProject(to url: URL) throws {
+        var copy = project
+        copy.outputDirectory = project.outputDirectory
+        try copy.serialised().write(to: url, options: .atomic)
+        projectURL = url
+        UserDefaults.standard.set(url, forKey: "lastProject")
+    }
+
+    func openProject(at url: URL) throws {
+        project = try Project(data: try Data(contentsOf: url))
+        projectURL = url
+        UserDefaults.standard.set(url, forKey: "lastProject")
+        if let active = project.active {
+            look = active.look
+            refreshCurve()
+            renderPreview()
+        }
+    }
+
+    /// WHERE DELIVERABLES GO, which is not the same place previews go.
+    ///
+    /// A preview is scratch and belongs in a temp directory. A deliverable is the thing the whole
+    /// app exists to produce, and rendering it into a temp directory — which is what this did —
+    /// means macOS is free to delete your shoot. The engine writes `dist/` inside whatever work
+    /// directory it is given, so choosing an output folder is choosing that.
+    ///
+    /// The default is the folder the clips came from, so a shoot's output lands beside it rather
+    /// than somewhere nobody chose. ADR 0006 in the engine's own docs makes the same argument
+    /// about defaults that work with no configuration.
+    var outputDirectory: URL? {
+        if let chosen = project.outputDirectory { return chosen }
+        return clipEntries?.first?.url.deletingLastPathComponent()
+    }
+
+    func chooseOutputDirectory(_ url: URL) {
+        project.outputDirectory = url
+    }
+
     /// Renders every clip in the list, through the engine, with the project's own settings. The
     /// look is written to a file per run and handed over with LOOK_FILE, so a render never edits
     /// the checkout's own look.json.
     func convert(queue: RenderQueue) {
         guard let clips = clipEntries else { return }
         queue.clearFinished()
-        queue.enqueue(clips.map { (url: $0.url, stem: $0.stem) })
+        queue.enqueue(clips.map { (url: $0.url, stem: $0.stem, frames: $0.fields?.frameCount) })
         let project = self.project
         let look = self.look
+        // The look file is scratch and stays in the scratch directory; the RENDER goes where the
+        // person said, or beside their footage.
         let work = self.workDirectory
+        guard let destination = outputDirectory else { return }
         queue.enqueue([])
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
             let lookFile = work.appendingPathComponent("render-look.json")
             try? FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
             try? look.write(to: lookFile)
+            try? FileManager.default.createDirectory(at: destination,
+                                                      withIntermediateDirectories: true)
             queue.start(environment: { stem in
                 var env = project.environment(for: stem, lookFile: lookFile)
-                env["GRADE_WORK_DIR"] = work.path
+                env["GRADE_WORK_DIR"] = destination.path
                 return env
             })
             _ = self
         }
+    }
+
+    /// Steps through the clips in the list, which is what a shoot is worked through as.
+    func step(_ direction: Int, in clips: [ClipList.Entry]) {
+        guard !clips.isEmpty else { return }
+        let current = clips.firstIndex(where: { $0.stem == selectedClip?.stem }) ?? -1
+        let next = max(0, min(clips.count - 1, current + direction))
+        guard next != current else { return }
+        selectedClip = clips[next]
+        renderPreview()
     }
 
     func cancel(queue: RenderQueue) {
@@ -103,6 +197,9 @@ final class GradeModel: ObservableObject {
 
     /// The clips the interface is holding, set by the window when the list changes.
     var clipEntries: [ClipList.Entry]?
+
+    /// Where the project was opened from or last saved to.
+    @Published var projectURL: URL?
 
     /// The crop offset for the selected clip, in master pixels. Nil means undecided, which is not
     /// zero: the engine refuses a Feed render across clips without one, because one clip's framing
@@ -138,16 +235,31 @@ final class GradeModel: ObservableObject {
         guard let clip = selectedClip, clip.isUsable else { return }
         let look = self.look
         let seconds = previewSeconds
+
+        // A NEWER REQUEST CANCELS THE ONE IN FLIGHT. Moving three controls in a row used to mean
+        // waiting for three renders in sequence, the first two answering questions nobody was
+        // still asking. The generation counter discards their results; stopping the process stops
+        // the work rather than merely ignoring it.
+        previewGeneration += 1
+        let generation = previewGeneration
+        if let running = previewProcess, running.isRunning {
+            EngineRun.stop(running)
+        }
+
         isRendering = true
         status = "rendering…"
         queue.async { [weak self] in
             guard let self else { return }
             do {
-                let frame = try self.renderer.render(clip: clip.url, seconds: seconds, look: look)
+                let frame = try self.renderer.render(
+                    clip: clip.url, seconds: seconds, look: look,
+                    onStart: { [weak self] process in self?.previewProcess = process })
+                guard generation == self.previewGeneration else { return }
                 let image = NSImage(contentsOf: frame.url)
                 let measured = image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
                     .map { Scopes.measure($0) }
                 DispatchQueue.main.async {
+                    guard generation == self.previewGeneration else { return }
                     self.previousImage = self.previewImage
                     self.previewImage = image
                     self.scopes = measured
@@ -156,7 +268,9 @@ final class GradeModel: ObservableObject {
                     self.status = "grade only — no grain, sharpening, denoise, stabiliser or dither"
                 }
             } catch {
+                guard generation == self.previewGeneration else { return }
                 DispatchQueue.main.async {
+                    guard generation == self.previewGeneration else { return }
                     self.isRendering = false
                     self.status = String(describing: error)
                 }

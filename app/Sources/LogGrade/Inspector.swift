@@ -22,6 +22,7 @@ struct InspectorView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                presetRow
                 stage("Apple Log to Rec.709", mark: .locked) {
                     Text("Apple's own conversion. Its colour is more accurate than anything "
                          + "hand-rolled here, and the cube carries a display rendering Apple has "
@@ -51,19 +52,14 @@ struct InspectorView: View {
                         .modifier(Note())
                 }
                 stage("tone", mark: .editable, note: "on the luma plane, chroma untouched") {
-                    HStack(alignment: .top, spacing: 12) {
-                        VStack(spacing: 5) {
-                            control("midtone", $model.look.tone.gamma, 1...2.6)
-                            control("contrast", $model.look.tone.contrast, 0.8...1.8)
-                            control("pivot", $model.look.tone.pivot, 0.25...0.65)
-                            control("shoulder", $model.look.tone.shoulder, 0...0.8)
-                            control("toe", $model.look.tone.toe, 0...0.8)
-                            control("black", $model.look.tone.black, -0.08...0.08, format: "%+.3f")
-                        }
-                        CurveView(curve: model.curve).frame(width: 104, height: 104)
-                    }
-                    Text("the curve is the engine's own table, generated on each change, not a "
-                         + "copy of its maths")
+                    control("midtone", $model.look.tone.gamma, 1...2.6)
+                    control("contrast", $model.look.tone.contrast, 0.8...1.8)
+                    control("pivot", $model.look.tone.pivot, 0.25...0.65)
+                    control("shoulder", $model.look.tone.shoulder, 0...0.8)
+                    control("toe", $model.look.tone.toe, 0...0.8)
+                    control("black", $model.look.tone.black, -0.08...0.08, format: "%+.3f")
+                    Text("the curve, beside the picture, is the engine's own table — generated on "
+                         + "each change rather than copied from its maths")
                         .modifier(Note())
                 }
                 stage("trims", mark: .editable) {
@@ -79,6 +75,42 @@ struct InspectorView: View {
             .padding(.trailing, 16)
         }
         .background(Palette.panel)
+    }
+
+    /// The preset: a look cube with its tone and trims, switched as one. Above the chain, because
+    /// it is what the chain starts from.
+    @State private var newPresetName = ""
+
+    private var presetRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("preset").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
+                Picker("", selection: Binding(
+                    get: { model.project.activePreset },
+                    set: { model.apply(preset: $0) })) {
+                    ForEach(model.project.presets.map(\.name), id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden().frame(width: 150)
+                if model.hasUnsavedChanges {
+                    Text("adjusted").font(.system(size: 10)).foregroundColor(Palette.plate)
+                }
+            }
+            HStack(spacing: 6) {
+                TextField("save the grade as…", text: $newPresetName)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11))
+                    .frame(width: 160)
+                    .onSubmit { model.savePreset(named: newPresetName); newPresetName = "" }
+                Button("save") {
+                    model.savePreset(named: newPresetName.isEmpty ? model.project.activePreset
+                                                                  : newPresetName)
+                    newPresetName = ""
+                }
+                .buttonStyle(.borderless).font(.system(size: 11))
+            }
+        }
+        .padding(.leading, 37)
+        .padding(.bottom, 18)
     }
 
     /// One stage, with its dot on the rail. The rail continues through the row, so the chain reads

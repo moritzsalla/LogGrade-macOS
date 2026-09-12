@@ -330,18 +330,58 @@
   //
   // Reads P and takes the 256-entry luma LUT built from curveAt, the way curveAt itself reads P —
   // the extractor in grade-parity.py relies on both being free variables.
+  // colorbalance's midtone window, MEASURED rather than taken from its documented constants,
+  // which do not predict it. A grey ramp through `colorbalance=rm=0.1` moves nothing below level
+  // 27, rises linearly to 0.70 at 59, holds to 64, falls linearly to nothing at 100. So the
+  // window is centred near level 63 rather than at mid grey — which means the shipped warmth of
+  // 0.005 moves at most one code value, and only in the shadows.
+  function midtoneWeight(l) {
+    if (l <= 0.1059 || l >= 0.3922) return 0;
+    if (l < 0.2314) return (l - 0.1059) / (0.2314 - 0.1059) * 0.6999;
+    if (l <= 0.2510) return 0.6999;
+    return (0.3922 - l) / (0.3922 - 0.2510) * 0.6999;
+  }
+
   function gradePixel(r, g, b, lut, out) {
-    // luma-only: shift every channel by the luma delta, leaving chroma alone. This mirrors
-    // mergeplanes=0x001112 and is what stops a contrast curve turning saturated signage neon.
+    // WHAT THE RENDERER ACTUALLY DOES, which is not what "tone on luma only" describes.
+    //
+    // `lut1d` cannot process a YUV plane: ffmpeg auto-inserts a scaler and picks gbrp10le, so the
+    // curve is applied to R, G and B INDEPENDENTLY. mergeplanes then takes the luma of that
+    // per-channel-curved image and merges the ORIGINAL chroma back. So the chroma really is
+    // untouched — that half of the intent holds, and saturated colour is not amplified — but the
+    // luma that lands is the luma of a per-channel curve, not the curved luma.
+    //
+    // Measured, not guessed: for 242.9/55.4/64.8 the renderer's luma plane came out at 243 of
+    // 1023. Curving the luma predicts 141.5. Curving each channel and taking the luma predicts
+    // 241.4. ffmpeg's own debug output says `picking gbrp10le out of 26 ref:yuv444p10le`.
     var y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    var dy = lut[y | 0] - y;
-    r += dy; g += dy; b += dy;
-    var warm = P.warm * 255;
-    if (warm !== 0) { r += warm; b -= warm; }
-    if (P.sat !== 1) {
-      var y2 = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      r = y2 + (r - y2) * P.sat; g = y2 + (g - y2) * P.sat; b = y2 + (b - y2) * P.sat;
+    var cb = (b - y) / 1.8556, cr = (r - y) / 1.5748;
+
+    var lr = lut[r < 0 ? 0 : (r > 255 ? 255 : r) | 0];
+    var lg = lut[g < 0 ? 0 : (g > 255 ? 255 : g) | 0];
+    var lb = lut[b < 0 ? 0 : (b > 255 ? 255 : b) | 0];
+    var ny = 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
+
+    // hue=s scales the chroma planes, exactly: measured at 1.27 it moved the offsets from
+    // -68/+375 to -86/+476 against -86.4/+476.2 predicted.
+    if (P.sat !== 1) { cb *= P.sat; cr *= P.sat; }
+
+    // CLAMPED IN THE PLANE, not in RGB. The planes are 10-bit and saturate there, which is a
+    // different thing from clipping the reconstructed channels afterwards — and it is where the
+    // remaining error at high saturation lived.
+    if (ny < 0) ny = 0; else if (ny > 255) ny = 255;
+    if (cb < -128) cb = -128; else if (cb > 127) cb = 127;
+    if (cr < -128) cr = -128; else if (cr > 127) cr = 127;
+
+    r = ny + 1.5748 * cr;
+    g = ny - (0.2126 * 1.5748 / 0.7152) * cr - (0.0722 * 1.8556 / 0.7152) * cb;
+    b = ny + 1.8556 * cb;
+
+    if (P.warm !== 0) {
+      r += P.warm * 255 * midtoneWeight(ny / 255);
+      b -= P.warm * 255 * midtoneWeight(ny / 255);
     }
+
     out[0] = r < 0 ? 0 : (r > 255 ? 255 : r);
     out[1] = g < 0 ? 0 : (g > 255 ? 255 : g);
     out[2] = b < 0 ? 0 : (b > 255 ? 255 : b);

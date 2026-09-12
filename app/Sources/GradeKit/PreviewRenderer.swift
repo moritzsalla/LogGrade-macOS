@@ -25,7 +25,8 @@ public final class PreviewRenderer {
 
     /// Renders a still for one clip at one timecode with one look. Synchronous: the caller decides
     /// which queue it wants to wait on, and the interface debounces rather than pipelining.
-    public func render(clip: URL, seconds: Double, look: Look, height: Int = 1440) throws -> Frame {
+    public func render(clip: URL, seconds: Double, look: Look, height: Int = 1440,
+                       onStart: ((Process) -> Void)? = nil) throws -> Frame {
         let lookFile = workDirectory.appendingPathComponent("preview-look.json")
         try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
         try look.write(to: lookFile)
@@ -36,7 +37,8 @@ public final class PreviewRenderer {
                           "FRAME_HEIGHT": String(height),
                           "LOOK_FILE": lookFile.path,
                           "GRADE_WORK_DIR": workDirectory.path,
-                          "MATCH": "1"])
+                          "MATCH": "1"],
+            onStart: onStart)
         guard outcome.succeeded else {
             throw Failure.engineRefused(outcome.codes, outcome.stderrText)
         }

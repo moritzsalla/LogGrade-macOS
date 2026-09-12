@@ -51,3 +51,25 @@ So the preview is the render. One frame, through the real chain, on release.
   model. With a cause in hand, the GPU tier becomes ordinary work with the golden as its gate.
 - **The CPU reference twin is not built either**, for the same reason: it would be a reference to a
   model that has not been established.
+
+## The cause was found, and this decision now rests on something smaller
+
+Measuring the intermediate planes rather than fitting another model to the output answered it in
+three commands. `lut1d` cannot process a YUV plane, so ffmpeg converts to `gbrp10le` and the tone
+curve is applied per RGB channel; `mergeplanes` then takes the luma of that and merges the original
+chroma. The Bench modelled the description instead of the behaviour. Modelling the behaviour, plus
+clamping in the plane rather than in RGB and using colorbalance's measured midtone window, moves
+the shipped look from 29 code values to **1.6** — and the tone case alone to 1.5.
+
+So the reason given above is spent. What is left is narrower and worth stating exactly:
+
+- The **shipped grade** is modelled to about 1.6 code values, which is within the conversion floor
+  of a round trip plus rounding.
+- Cases at the **extremes of warmth**, ±0.12 against the shipped 0.005, still diverge by about 20.
+  colorbalance's window was measured at one amount on a grey ramp, and whether it weights by luma
+  or by each channel's own level is not yet established.
+
+That is now an ordinary piece of work with a harness that can hold it, rather than an unexplained
+gap. A GPU preview is buildable when someone wants one; this record no longer refuses it, it only
+says the trims are not finished. The exact preview stays the default regardless, because it costs a
+second and cannot be wrong.

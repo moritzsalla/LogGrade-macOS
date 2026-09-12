@@ -287,7 +287,15 @@ def render_case(params, sat, warm, probe_path, look="real"):
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             sys.exit("make-tone-lut.py failed:\n" + r.stderr)
-        graph = "[0:v]%s,format=rgb48le[o]" % chain_string(cube, str(sat), str(warm), look)
+        # TELL ffmpeg WHAT THE PROBE IS. An untagged RGB input is converted to YUV with BT.601 at
+        # LIMITED range — swscale's default — while the Bench models 709 full. Measured on one
+        # patch: ffmpeg's luma plane held 112.67 where 709 full says 95.94 and 601 limited says
+        # 112.65, and its chroma matched 601 limited to two decimal places. That conversion is not
+        # one production performs: its source arrives already in YUV. So the probe is tagged, with
+        # the same setparams the engine uses on its own synthesised branches, and what is left to
+        # measure is the maths rather than an artefact of an untagged PNG.
+        tag = "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=pc,"
+        graph = "[0:v]%s%s,format=rgb48le[o]" % (tag, chain_string(cube, str(sat), str(warm), look))
         r = subprocess.run(["ffmpeg", "-v", "error", "-i", probe_path,
                             "-filter_complex", graph, "-map", "[o]",
                             "-f", "rawvideo", "-pix_fmt", "rgb48le", "-"],
@@ -364,7 +372,7 @@ var out = %s.map(function (p) {
   return [px[0], px[1], px[2]];
 });
 console.log(JSON.stringify(out));
-""" % (extract_js(("soft", "curveAt", "gradePixel")), json.dumps(p), json.dumps(inputs8)))
+""" % (extract_js(("soft", "curveAt", "midtoneWeight", "gradePixel")), json.dumps(p), json.dumps(inputs8)))
 
 
 def py_curve(params, xs):
