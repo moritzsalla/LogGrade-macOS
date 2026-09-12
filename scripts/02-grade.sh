@@ -24,6 +24,8 @@ source "$SCRIPT_DIR/lib.sh"
 # `${1:-}` so a no-argument run says what it wanted — see 00-stabilise-detect.sh.
 CLIP="${1:-}"
 [ -n "$CLIP" ] || { echo "usage: ./02-grade.sh IMG_XXXX" >&2; exit 1; }
+# ...and then the name itself: it becomes a path component AND reaches the filter graph.
+CLIP="$(require_clip_name "$CLIP")"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(resolve_work_dir "$ROOT")"
 BASELINE="$WORK/dist/01-baseline/${CLIP}_baseline.mov"
@@ -41,8 +43,9 @@ TONE="$ROOT/luts/tone/shipped.cube"
 # Worth keeping from that copy: `toe` was measured to do NOTHING at pivot 0.39 — identical
 # percentiles at 0.07 and 0.00 — so it is zeroed rather than left as a decorative knob. The black
 # point is the live shadow control here.
-SAT="$(look .colour.saturation)"
-WARM="$(look .colour.warmth)"
+# Both are spliced into the filter graph; see require_number in lib.sh.
+SAT="$(require_number SAT "$(look .colour.saturation)")"
+WARM="$(require_number WARM "$(look .colour.warmth)")"
 OUT="$WORK/dist/02-graded/${CLIP}_graded.mov"
 
 [ -f "$BASELINE" ] || { echo "baseline not found: $BASELINE — run 01-baseline.sh first" >&2; exit 1; }

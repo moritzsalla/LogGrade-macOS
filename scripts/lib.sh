@@ -131,6 +131,59 @@ check_disk_space() {
 	echo "disk OK: ${avail_gb}GB available in $dir"
 }
 
+# --- validating what reaches a filter graph -----------------------------------
+# ffmpeg filter descriptions are a LANGUAGE, not a format string. `,` and `;` separate filters and
+# chains, `'` quotes a value, `[` `]` delimit labels. Every look value below is spliced into one by
+# printf, so a value carrying any of those ADDS FILTERS rather than being read as a number — and
+# ffmpeg filters can write files (`metadata=print:file=`) and read them (`movie=`). There is no
+# eval anywhere in this pipeline, so this is not shell injection; the ceiling is ffmpeg doing file
+# I/O as whoever ran the script. That is still not a thing to leave open.
+#
+# WHY THIS IS NOT PARANOIA ABOUT YOUR OWN TYPING. look.json is not hand-authored. Per 02-grade.sh's
+# header the grade is "sent back through the artifact db" from the Bench — a shared, multi-writer
+# store — and transcribed here. Nothing checked what came back. A clip FILENAME is the other input
+# nobody types: it arrives from the camera or from whoever handed you the card.
+#
+# Validate where a value is READ, not where it is used. There are five readers and a dozen uses.
+require_number() {  # require_number <label> <value>  -> echoes the value, or fails
+	case "$2" in
+		''|*[!0-9.eE+-]*)
+			echo "$1 must be numeric: got '$2'" >&2
+			return 1;;
+	esac
+	printf '%s\n' "$2"
+}
+
+# Clip names become path components AND reach the filter graph, via the per-clip tone LUT
+# (`lut1d=file='<cache>/<clip>_tone.cube'`) and the transform (`vidstabtransform=input='...'`).
+#
+# Two refusals, for two different failures:
+#   - `/` makes the name a path. Stage outputs are built as "$WORK/dist/<stage>/${CLIP}_x.mov", and
+#     since the stages started calling `mkdir -p "$(dirname "$OUT")"` — needed once the work dir
+#     stopped being the repo — a traversing name is no longer stopped by the directory not
+#     existing. It gets created.
+#   - A quote or a filter separator closes ffmpeg's `file='...'` quoting from the inside.
+#
+# Refuse rather than sanitise. Rewriting someone's argument into a different one silently renders
+# the wrong clip, which is the fail-open shape this whole file exists to avoid.
+require_clip_name() {  # require_clip_name <name>
+	case "$1" in
+		'')
+			echo "REFUSING: empty clip name." >&2
+			return 1;;
+		*/*)
+			echo "REFUSING: clip name '$1' contains '/'." >&2
+			echo "  Clip names are not paths — they name a file inside the work dir's src/." >&2
+			return 1;;
+		*[\'\"\,\;\[\]\\]*|*:*)
+			echo "REFUSING: clip name '$1' contains a character ffmpeg reads as filter syntax." >&2
+			echo "  It would reach the filter graph through the tone-LUT and transform paths." >&2
+			echo "  Rename the clip, then retry." >&2
+			return 1;;
+	esac
+	printf '%s\n' "$1"
+}
+
 # --- the look -----------------------------------------------------------------
 # One source for every look value: look.json at the repo root. Nothing else may hardcode one.
 # Before this existed, `SAT=1.27` was written out in two scripts and had already started to drift

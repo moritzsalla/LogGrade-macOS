@@ -43,6 +43,11 @@ WORK="$(resolve_work_dir "$ROOT")"
 
 CST="$ROOT/luts/apple/AppleLogToRec709-v1.0.cube"
 PROOF="${PROOF:-}"        # PROOF=<seconds> renders a short proof; see the note below
+# Validated because it is spliced UNQUOTED below (`-t $PROOF`) so that an empty value disappears
+# instead of becoming an empty argument — bash 3.2 cannot expand an empty array under `set -u`.
+# That split means whitespace in PROOF becomes extra ffmpeg OPTIONS, and `-f mp4 <path>` would
+# append a second output file, walking straight past render_delivery's staging.
+[ -z "$PROOF" ] || PROOF="$(require_number PROOF "$PROOF")"
 # Proofs are not deliverables and must never land where someone uploads from.
 if [ -n "$PROOF" ]; then
 	OUT_DIR="$WORK/dist/proofs"
@@ -63,13 +68,19 @@ CACHE="$WORK/dist/.grade-work"
 # script kept rendering the previous tone. That is the two-copies-one-edited failure look() was
 # written to end, one layer up. No fallbacks on purpose: a missing value must stop the run, not
 # quietly substitute a different look.
-SAT="$(look .colour.saturation)"; WARM="$(look .colour.warmth)"
-G_PIVOT="$(look .tone.pivot)";       G_CONTRAST="$(look .tone.contrast)"
-G_TOE="$(look .tone.toe)";           G_SHOULDER="$(look .tone.shoulder)"
-G_BLACK="$(look .tone.black)"
-G_GAMMA_REF="$(look .tone.gamma)"        # gamma the look was tuned at...
-Y_REF="$(look .match.reference_yavg)"    # ...against this post-CST mean (10-bit), on IMG_0609
-GRAIN_STRENGTH="${GRAIN_STRENGTH:-$(look .grain.strength)}"; SMOOTHING="${SMOOTHING:-$(look .stabilisation.smoothing)}"
+# Every one of these is spliced into an ffmpeg filter graph, and look.json is transcribed from the
+# Bench's artifact db rather than typed here — see require_number in lib.sh for why that matters.
+SAT="$(require_number SAT "$(look .colour.saturation)")"
+WARM="$(require_number WARM "$(look .colour.warmth)")"
+G_PIVOT="$(require_number pivot "$(look .tone.pivot)")"
+G_CONTRAST="$(require_number contrast "$(look .tone.contrast)")"
+G_TOE="$(require_number toe "$(look .tone.toe)")"
+G_SHOULDER="$(require_number shoulder "$(look .tone.shoulder)")"
+G_BLACK="$(require_number black "$(look .tone.black)")"
+G_GAMMA_REF="$(require_number gamma "$(look .tone.gamma)")"   # gamma the look was tuned at...
+Y_REF="$(require_number reference_yavg "$(look .match.reference_yavg)")"  # ...against this mean
+GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain.strength)}")"
+SMOOTHING="$(require_number SMOOTHING "${SMOOTHING:-$(look .stabilisation.smoothing)}")"
 STAB="${STAB:-1}"; FEED="${FEED:-0}"; MATCH="${MATCH:-1}"; DRY="${DRY:-0}"
 # PROOF=<seconds> renders that many seconds through the REAL chain, into dist/proofs/ rather than
 # dist/03-final/. Two reasons it exists. docs/BATCH_RUNBOOK.md makes a proof a required sign-off
@@ -105,6 +116,10 @@ fi
 # `./grade.sh` with no arguments made the output directories and an empty run-*.txt, then printed
 # usage and exited 1 — a usage error leaving litter in the folder someone delivers from, and one
 # stray report per suite run.
+# Resolved once, here, rather than inside the render loop: it is spliced into
+# `crop=2160:2700:0:` and a comma in it would open a second filter.
+CROP_Y_OK="$(require_number CROP_Y "${CROP_Y:-750}")"
+
 check_disk_space "$WORK/dist" 10
 mkdir -p "$OUT_DIR" "$REPORT_DIR" "$CACHE"
 REPORT="$REPORT_DIR/run-$(date +%Y%m%d-%H%M%S).txt"
@@ -117,7 +132,9 @@ say ""
 
 OK=0; SKIPPED=0; FAILED=0
 for SRC in "${CLIPS[@]}"; do
-	CLIP="$(basename "${SRC%.*}")"
+	# The clip name becomes a path component AND reaches the filter graph, through the per-clip
+	# tone LUT and the transform path. It is the one input nobody types.
+	CLIP="$(require_clip_name "$(basename "${SRC%.*}")")"
 
 	# Orientation is the source's business. Refuse a clip that would render sideways rather than
 	# producing a confidently wrong file; require_portrait decodes a frame and measures it.
@@ -226,7 +243,7 @@ $(delivery_image_chain "$w" "$h" "$SFX" "$crop")[b];\
 	# this gives the render path the same treatment, and the exit status below makes sure a run with
 	# failures in it can never be read as a clean one.
 	if render 1080 1920 "reels-stories_9x16" \
-		&& { [ "$FEED" != "1" ] || render 1080 1350 "feed_4x5" "crop=2160:2700:0:${CROP_Y:-750},"; }
+		&& { [ "$FEED" != "1" ] || render 1080 1350 "feed_4x5" "crop=2160:2700:0:${CROP_Y_OK},"; }
 	then
 		OK=$((OK+1))
 	else

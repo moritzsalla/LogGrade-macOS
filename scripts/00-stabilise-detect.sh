@@ -30,6 +30,8 @@ source "$SCRIPT_DIR/lib.sh"
 # so it could not see it. grade.sh was the only entry point that got this right.
 CLIP="${1:-}"
 [ -n "$CLIP" ] || { echo "usage: ./00-stabilise-detect.sh IMG_XXXX" >&2; exit 1; }
+# ...and then the name itself: it becomes a path component AND reaches the filter graph.
+CLIP="$(require_clip_name "$CLIP")"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(resolve_work_dir "$ROOT")"
 IN="$WORK/dist/02-graded/${CLIP}_graded.mov"

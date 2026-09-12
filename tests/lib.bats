@@ -1014,3 +1014,149 @@ JSON
 	done
 	[ -z "$missing" ] || fail "referenced but not present:$missing"
 }
+
+# --- what reaches the filter graph --------------------------------------------
+# An ffmpeg filter description is a LANGUAGE: `,` and `;` separate filters and chains, `'` quotes a
+# value, `[` `]` delimit labels. Every look value is spliced into one by string interpolation, so a
+# value carrying any of those ADDS FILTERS rather than being read as a number — and ffmpeg filters
+# can write files (`metadata=print:file=`) and read them (`movie=`). There is no eval anywhere here,
+# so this is not shell injection; the ceiling is ffmpeg doing file I/O as whoever ran the script.
+#
+# It matters because neither input is hand-typed. look.json is transcribed from the Bench's artifact
+# db, which is shared and multi-writer, and a clip FILENAME arrives from the camera or from whoever
+# handed over the card. Nothing on the read side checked either one.
+#
+# Ported from a branch of the precursor that never landed, because it predates the chain dedupe and
+# would have reinstated an inlined copy of the graph. See PROVENANCE.md.
+
+@test "require_number accepts a number and rejects a filter fragment" {
+	run require_number SAT 1.27
+	[ "$status" -eq 0 ]
+	[ "$output" = "1.27" ]
+
+	run require_number BLACK "-0.08"
+	[ "$status" -eq 0 ]
+
+	run require_number SAT "1.27,metadata=print:file=/tmp/x"
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"must be numeric"* ]] || fail "unhelpful message: $output"
+
+	run require_number SAT ""
+	[ "$status" -ne 0 ]
+}
+
+@test "require_clip_name refuses a path and refuses filter syntax" {
+	run require_clip_name IMG_0609
+	[ "$status" -eq 0 ]
+	[ "$output" = "IMG_0609" ]
+
+	run require_clip_name "../../escaped"
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"clip name"* ]] || fail "gave no reason: $output"
+
+	run require_clip_name "IMG_0609'"
+	[ "$status" -ne 0 ]
+
+	run require_clip_name ""
+	[ "$status" -ne 0 ]
+}
+
+@test "grade.sh refuses a SMOOTHING that would splice a filter into the graph" {
+	local work="$BATS_TEST_TMPDIR/inj-smooth" marker="$BATS_TEST_TMPDIR/smooth-written"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	SMOOTHING="30,metadata=print:file=$marker" GRADE_WORK_DIR="$work" MATCH=0 \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -ne 0 ]
+	# Assert the GUARD's verdict, not just a non-zero exit: a synthetic fixture fails this graph
+	# for its own reasons, so `status != 0` stayed true with the guard removed and the test read as
+	# coverage while covering nothing. Found by mutation.
+	[[ "$output" == *"SMOOTHING must be numeric"* ]] || fail "not refused by the guard: $output"
+	[ ! -f "$marker" ] || fail "the spliced filter ran and wrote $marker"
+}
+
+@test "grade.sh refuses a PROOF that would append ffmpeg arguments" {
+	# PROOF is spliced UNQUOTED on purpose (-t $PROOF), so whitespace in it becomes extra ffmpeg
+	# options rather than a duration. `-f mp4 <path>` then appends a second output file, which
+	# walks straight past render_delivery's staging.
+	local work="$BATS_TEST_TMPDIR/inj-proof" injected="$BATS_TEST_TMPDIR/injected.mp4"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	PROOF="1 -f mp4 $injected" GRADE_WORK_DIR="$work" MATCH=0 STAB=0 \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"PROOF"* ]] || fail "did not name the offending variable: $output"
+	[ ! -f "$injected" ] || fail "ffmpeg wrote the injected output $injected"
+}
+
+@test "03-final.sh refuses a non-numeric crop offset" {
+	local work="$BATS_TEST_TMPDIR/inj-crop" marker="$BATS_TEST_TMPDIR/crop-written"
+	mkdir -p "$work/src" "$work/dist/02-graded"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
+	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP feed "750,metadata=print:file=$marker"
+	[ "$status" -ne 0 ]
+	[ ! -f "$marker" ] || fail "the spliced filter ran and wrote $marker"
+}
+
+@test "every stage refuses a clip argument that escapes the work dir" {
+	# The clip name is used raw as a path component. `mkdir -p "$(dirname "$OUT")"` — added when the
+	# stages stopped relying on the checked-in dist/*/.gitkeep markers — is what turns a traversal
+	# argument into a successful write: before it, the absent directory stopped the render.
+	local work="$BATS_TEST_TMPDIR/escape" s
+	mkdir -p "$work/src" "$work/dist/01-baseline" "$work/dist/02-graded"
+	for s in 00-stabilise-detect 01-baseline 02-grade 03-final; do
+		GRADE_WORK_DIR="$work" run "$SCRIPTS/$s.sh" "../../escaped"
+		[ "$status" -ne 0 ] || fail "$s.sh accepted a traversing clip name"
+		[[ "$output" == *"clip name"* ]] || fail "$s.sh gave no reason: $output"
+	done
+	[ ! -d "$BATS_TEST_TMPDIR/escaped" ] || fail "a stage created a directory outside the work dir"
+}
+
+@test "grade.sh refuses a clip whose FILENAME would break the filter graph" {
+	# The clip name reaches lut1d=file='...' and vidstabtransform=input='...' via the tone-LUT and
+	# transform paths, so a quote in it closes ffmpeg's quoting from the inside.
+	local work="$BATS_TEST_TMPDIR/quotename"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/IMG_0609'.mov"
+	GRADE_WORK_DIR="$work" MATCH=0 STAB=0 run "$SCRIPTS/grade.sh" "$work/src/IMG_0609'.mov"
+	[ "$status" -ne 0 ] || fail "accepted a clip name containing a quote"
+	[[ "$output" == *"clip name"* ]] || fail "gave no reason: $output"
+}
+
+@test "a look.json value that is not a number is refused, not rendered" {
+	local work="$BATS_TEST_TMPDIR/badlook" look="$BATS_TEST_TMPDIR/hostile-look.json"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	cat > "$look" <<'JSON'
+{
+  "tone": { "gamma": 2.02, "pivot": 0.39, "contrast": 1.09,
+            "toe": 0.0, "shoulder": 0.1, "black": 0.025 },
+  "colour": { "saturation": "1.27,metadata=print:file=/tmp/pwned", "warmth": 0.005 },
+  "grain": { "strength": 8 },
+  "stabilisation": { "smoothing": 30 },
+  "match": { "reference_yavg": 609 }
+}
+JSON
+	LOOK_FILE="$look" GRADE_WORK_DIR="$work" MATCH=0 STAB=0 \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -ne 0 ] || fail "rendered with a non-numeric saturation"
+	[[ "$output" == *"must be numeric"* ]] || fail "gave no reason: $output"
+}
+
+@test "every stage says what it wanted when given no clip at all" {
+	# This pins the USAGE guard specifically, and asserts the usage wording rather than accepting
+	# either message. Written the loose way it survived the removal of both guards that can refuse
+	# an empty name — each was individually redundant, so neither was covered. require_clip_name's
+	# own empty branch is covered by its unit test above.
+	#
+	# Without the usage guard an empty argument becomes "$WORK/src/.mov" and the stage fails later
+	# with a confusing not-found, or writes a transform named ".trf".
+	local work="$BATS_TEST_TMPDIR/noarg" s
+	mkdir -p "$work/src" "$work/dist/01-baseline" "$work/dist/02-graded"
+	for s in 00-stabilise-detect 01-baseline 02-grade 03-final; do
+		GRADE_WORK_DIR="$work" run "$SCRIPTS/$s.sh"
+		[ "$status" -ne 0 ] || fail "$s.sh accepted an empty clip name"
+		[[ "$output" == *"usage:"* ]] || fail "$s.sh did not say what it wanted: $output"
+	done
+}

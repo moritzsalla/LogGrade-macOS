@@ -15,6 +15,8 @@ source "$SCRIPT_DIR/lib.sh"
 # `${1:-}` so a no-argument run says what it wanted — see 00-stabilise-detect.sh.
 CLIP="${1:-}"
 [ -n "$CLIP" ] || { echo "usage: ./01-baseline.sh IMG_XXXX" >&2; exit 1; }
+# ...and then the name itself: it becomes a path component AND reaches the filter graph.
+CLIP="$(require_clip_name "$CLIP")"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(resolve_work_dir "$ROOT")"
 SRC="$WORK/src/${CLIP}.mov"

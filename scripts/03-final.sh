@@ -23,11 +23,15 @@ source "$SCRIPT_DIR/lib.sh"
 # `${1:-}` so a no-argument run says what it wanted — see 00-stabilise-detect.sh.
 CLIP="${1:-}"
 [ -n "$CLIP" ] || { echo "usage: ./03-final.sh IMG_XXXX [reels|feed] [CROP_Y]" >&2; exit 1; }
+# ...and then the name itself: it becomes a path component AND reaches the filter graph.
+CLIP="$(require_clip_name "$CLIP")"
 TARGET="${2:-reels}"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(resolve_work_dir "$ROOT")"
-SMOOTHING="${SMOOTHING:-$(look .stabilisation.smoothing)}"  # frames of camera-path lowpass
-GRAIN_STRENGTH="${GRAIN_STRENGTH:-$(look .grain.strength)}"
+# Both are spliced into the filter graph, and look.json is transcribed from the Bench's artifact
+# db rather than typed here — see require_number in lib.sh.
+SMOOTHING="$(require_number SMOOTHING "${SMOOTHING:-$(look .stabilisation.smoothing)}")"  # lowpass
+GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain.strength)}")"
 
 case "$TARGET" in
 	reels)
@@ -36,7 +40,7 @@ case "$TARGET" in
 		;;
 	feed)
 		W=1080; H=1350
-		CROP="crop=2160:2700:0:${3:-750},"
+		CROP="crop=2160:2700:0:$(require_number CROP_Y "${3:-750}"),"
 		SUFFIX="feed_4x5"
 		;;
 	*)
