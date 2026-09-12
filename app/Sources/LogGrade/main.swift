@@ -13,6 +13,7 @@ struct RootView: View {
     let engine: EngineLocation?
     let problems: [EngineLocation.Problem]
     @ObservedObject var clips: ClipList
+    @ObservedObject var queue: RenderQueue
     var grade: GradeModel?
 
     var body: some View {
@@ -73,6 +74,8 @@ struct RootView: View {
             if let grade {
                 Divider().overlay(Palette.hairline)
                 DeliveryPanel(model: grade)
+                Divider().overlay(Palette.hairline)
+                QueuePanel(model: grade, queue: queue)
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -99,6 +102,7 @@ struct RootView: View {
                                 selectIfNothingSelected(added)
                             }
                             grade?.clipNames = clips.usable.map(\.stem)
+                            grade?.clipEntries = clips.usable
                         }
                     }
                 }
@@ -183,6 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 grade.renderPreview()
             }
             grade?.clipNames = clips.usable.map(\.stem)
+            grade?.clipEntries = clips.usable
         }
     }
 
@@ -216,8 +221,10 @@ let gradeModel: GradeModel? = engine.flatMap { e in
 }
 let delegate = AppDelegate(clips: clipList, grade: gradeModel)
 app.delegate = delegate
+let renderQueue = RenderQueue(engine: engine ?? EngineLocation(root: URL(fileURLWithPath: "/")))
 window.contentView = NSHostingView(rootView: RootView(engine: engine, problems: problems,
-                                                      clips: clipList, grade: gradeModel))
+                                                      clips: clipList, queue: renderQueue,
+                                                      grade: gradeModel))
 window.makeKeyAndOrderFront(nil)
 app.activate(ignoringOtherApps: true)
 app.run()

@@ -35,6 +35,8 @@ final class GradeModel: ObservableObject {
     /// The cubes on disk, read once: the interface offers what is there.
     let availableLooks: [String]
 
+    let workDirectory: URL
+
     private let engine: EngineLocation
     private let renderer: PreviewRenderer
     private let queue = DispatchQueue(label: "loggrade.preview")
@@ -47,6 +49,7 @@ final class GradeModel: ObservableObject {
                                activePreset: "shipped")
         let work = FileManager.default.temporaryDirectory
             .appendingPathComponent("loggrade-preview", isDirectory: true)
+        self.workDirectory = work
         self.renderer = PreviewRenderer(engine: engine, workDirectory: work)
         refreshCurve()
     }
@@ -66,6 +69,39 @@ final class GradeModel: ObservableObject {
     /// ON RELEASE, not on every movement. The exact preview is a render through the real chain,
     /// which takes a second or two: firing it per pixel of slider travel would queue work nobody
     /// is waiting for any more. This is the scanner's preview-scan gesture — adjust, then look.
+    /// Renders every clip in the list, through the engine, with the project's own settings. The
+    /// look is written to a file per run and handed over with LOOK_FILE, so a render never edits
+    /// the checkout's own look.json.
+    func convert(queue: RenderQueue) {
+        guard let clips = clipEntries else { return }
+        queue.clearFinished()
+        queue.enqueue(clips.map { (url: $0.url, stem: $0.stem) })
+        let project = self.project
+        let look = self.look
+        let work = self.workDirectory
+        queue.enqueue([])
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let lookFile = work.appendingPathComponent("render-look.json")
+            try? FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+            try? look.write(to: lookFile)
+            queue.start(environment: { stem in
+                var env = project.environment(for: stem, lookFile: lookFile)
+                env["GRADE_WORK_DIR"] = work.path
+                return env
+            })
+            _ = self
+        }
+    }
+
+    func cancel(queue: RenderQueue) {
+        queue.cancel()
+        RenderQueue.sweepStagingFiles(in: workDirectory)
+    }
+
+    /// The clips the interface is holding, set by the window when the list changes.
+    var clipEntries: [ClipList.Entry]?
+
     /// The crop offset for the selected clip, in master pixels. Nil means undecided, which is not
     /// zero: the engine refuses a Feed render across clips without one, because one clip's framing
     /// applied to eighteen others produces files that all look done.

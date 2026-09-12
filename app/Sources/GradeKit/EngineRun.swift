@@ -20,6 +20,47 @@ public final class EngineRun {
         public var succeeded: Bool { exitCode == 0 }
     }
 
+    /// Stops a running engine and everything it spawned.
+    ///
+    /// TERMINATING THE SHELL IS NOT ENOUGH. `grade.sh` spends its time inside ffmpeg, which is a
+    /// child process in the same group: kill the shell alone and the encode carries on, writing to
+    /// a staging file nobody is waiting for any more. So the descendants go first, and the shell
+    /// after them.
+    public static func stop(_ process: Process) {
+        // THE WHOLE TREE, deepest first. `grade.sh` runs ffmpeg, and ffmpeg is a grandchild once a
+        // subshell is involved — killing only the direct children leaves the encode running, and
+        // it keeps the stdout pipe open, so the run does not even return. Found by a test that
+        // asked whether the child was still alive rather than watching for a file it would write
+        // later.
+        for pid in descendants(of: process.processIdentifier).reversed() {
+            kill(pid, SIGTERM)
+        }
+        process.terminate()
+    }
+
+    /// Every process under this one, breadth-first, so the caller can end them from the leaves up.
+    private static func descendants(of pid: Int32) -> [Int32] {
+        var found: [Int32] = []
+        var frontier = [pid]
+        while let parent = frontier.first {
+            frontier.removeFirst()
+            let probe = Process()
+            probe.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+            probe.arguments = ["-P", String(parent)]
+            let pipe = Pipe()
+            probe.standardOutput = pipe
+            probe.standardError = Pipe()
+            guard (try? probe.run()) != nil else { continue }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            probe.waitUntilExit()
+            let children = String(decoding: data, as: UTF8.self)
+                .split(separator: "\n").compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
+            found.append(contentsOf: children)
+            frontier.append(contentsOf: children)
+        }
+        return found
+    }
+
     public enum Failure: Error, CustomStringConvertible {
         case cannotRun(EngineLocation.Problem)
         case spawnFailed(String)
@@ -57,6 +98,7 @@ public final class EngineRun {
     @discardableResult
     public func run(arguments: [String],
                     environment: [String: String] = [:],
+                    onStart: ((Process) -> Void)? = nil,
                     onEvent: ((EngineEvent) -> Void)? = nil,
                     onCode: ((EngineCode) -> Void)? = nil) throws -> Outcome {
         let problems = engine.preflight()
@@ -128,11 +170,19 @@ public final class EngineRun {
 
         do {
             try process.run()
+            onStart?(process)
         } catch {
             throw Failure.spawnFailed(String(describing: error))
         }
         process.waitUntilExit()
-        group.wait()
+        // BOUNDED, because a reader blocks until every holder of the pipe's write end is gone —
+        // and an orphan that survived a kill is exactly such a holder. Without a bound, cancelling
+        // a render would hang the queue until an encode nobody wants finishes.
+        if group.wait(timeout: .now() + 5) == .timedOut {
+            out.fileHandleForReading.closeFile()
+            err.fileHandleForReading.closeFile()
+            _ = group.wait(timeout: .now() + 2)
+        }
 
         lock.lock()
         let outcome = Outcome(exitCode: process.terminationStatus, events: events, codes: codes,
