@@ -1567,3 +1567,75 @@ PY
 	! cmp -s "$work/with-look.png" "$work/dist/frames/CLIP_t0s.png" \
 		|| fail "LOOK=none produced the same pixels as the shipped look"
 }
+
+# --- delivery shape -----------------------------------------------------------
+# The output sizes were two literals in the render calls and the crop window was a third. The app
+# offers height, aspect and frame rate as choices, so they are computed — and the two that can be
+# asked for impossibly are refused before a render starts rather than failing inside ffmpeg.
+
+@test "crop_prefix computes the window from the source rather than assuming 2160x3840" {
+	run crop_prefix 2160 3840 4 5 750
+	[ "$status" -eq 0 ]
+	[ "$output" = "crop=2160:2700:0:750," ] || fail "wrong window: $output"
+	# A different source width must move the window with it.
+	run crop_prefix 1080 1920 4 5 100
+	[ "$status" -eq 0 ]
+	[ "$output" = "crop=1080:1350:0:100," ] || fail "window did not follow the source: $output"
+}
+
+@test "crop_prefix refuses an offset past the frame edge, before any render starts" {
+	# 03-final.sh claimed the portrait guard covered this. It does not: that guard only compares
+	# width against height. Unvalidated, the offset failed inside ffmpeg seconds into a render.
+	run crop_prefix 2160 3840 4 5 1141
+	[ "$status" -ne 0 ] || fail "accepted an offset one pixel past the edge"
+	[[ "$output" == *"0..1140"* ]] || fail "did not say what the bound is: $output"
+	run crop_prefix 2160 3840 4 5 -1
+	[ "$status" -ne 0 ] || fail "accepted a negative offset"
+	run crop_prefix 2160 3840 4 5 1140
+	[ "$status" -eq 0 ] || fail "refused the last valid offset: $output"
+}
+
+@test "the sharpener's radius follows the output height" {
+	# Its 5x5 was measured at 1080x1920 and the radius is in PIXELS, so at another height it
+	# sharpens a different real-world detail size.
+	run delivery_image_chain 1080 1920 "" ""
+	[[ "$output" == *"unsharp=5:5:0.4"* ]] || fail "1920 should be the measured radius: $output"
+	run delivery_image_chain 2160 3840 "" ""
+	[[ "$output" == *"unsharp=11:11:0.4"* ]] || fail "radius did not scale: $output"
+	# unsharp rejects a radius below 3, so a small output must not ask for one.
+	run delivery_image_chain 360 640 "" ""
+	[[ "$output" == *"unsharp=3:3:0.4"* ]] || fail "radius went below the floor: $output"
+}
+
+@test "fps_filter accepts an integer relation and refuses retiming" {
+	run fps_filter 24/1 24
+	[ "$status" -eq 0 ]
+	[ -z "$output" ] || fail "the same rate should need no filter: $output"
+	run fps_filter 24/1 12
+	[ "$status" -eq 0 ]
+	[ "$output" = ",fps=12" ] || fail "halving should drop whole frames: $output"
+	run fps_filter 24/1 48
+	[ "$status" -eq 0 ]
+	[ "$output" = ",fps=48" ] || fail "doubling should repeat whole frames: $output"
+	# The case that tempts people and the one that judders.
+	run fps_filter 24/1 30
+	[ "$status" -ne 0 ] || fail "accepted 24 to 30, which needs retiming"
+	[[ "$output" == *"judder"* ]] || fail "gave no reason: $output"
+}
+
+@test "a frame rate that needs retiming skips the clip rather than delivering judder" {
+	local work="$BATS_TEST_TMPDIR/fps"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	FPS_OUT=30 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[[ "$output" == *"GRADE_CODE=REFUSE_FPS_RETIME"* ]] || fail "unnamed refusal: $output"
+	[[ "$output" == *"needs retiming"* ]] || fail "said nothing useful: $output"
+	[ -z "$(ls -A "$work/dist/03-final" 2>/dev/null)" ] || fail "delivered anyway"
+}
+
+@test "require_portrait hands back the size it measured" {
+	# So a caller that needs the source's dimensions does not decode a second frame to ask again.
+	run require_portrait "$FIXTURES/portrait_tagged.mov"
+	[ "$status" -eq 0 ]
+	[ "$output" = "64 128" ] || fail "expected the measured size, got: $output"
+}

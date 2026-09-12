@@ -14,6 +14,9 @@
 #   GRAIN_STRENGTH=<n>  override look.json's grain strength
 #   PROOF=<seconds>   render this many seconds through the real chain into dist/proofs/
 #   DRY=1             plan only, render nothing
+#   HEIGHT=<px>       output height (default 1920). Width follows the deliverable's aspect.
+#   FPS_OUT=<n>       output frame rate. Default is the source's. Only an integer relation is
+#                     accepted — anything needing retiming is refused rather than interpolated.
 #   LOOK=<name|none>  which film-emulation cube to use, by stem from luts/looks/, or none for a
 #                     neutral grade. Overrides look.json's .look.lut for this run.
 #   FRAME=<seconds>   render ONE frame at that timecode through the grade chain to a PNG and
@@ -67,6 +70,12 @@ FRAME="${FRAME:-}"
 [ -z "$FRAME" ] || FRAME="$(require_number FRAME "$FRAME")"
 FRAME_HEIGHT="$(require_number FRAME_HEIGHT "${FRAME_HEIGHT:-1440}")"
 FRAME_DIR="$WORK/dist/frames"
+
+# Delivery shape. The sizes were 1080x1920 and 1080x1350 written into the render calls; they are
+# the deliverable's ASPECT plus one height now, because the app offers the height as a choice.
+HEIGHT="$(require_number HEIGHT "${HEIGHT:-1920}")"
+FPS_OUT="${FPS_OUT:-}"
+[ -z "$FPS_OUT" ] || FPS_OUT="$(require_number FPS_OUT "$FPS_OUT")"
 # Two modes that both mean "do not deliver" would otherwise silently pick one. Refuse instead: a
 # preview and a proof answer different questions and neither is a fallback for the other.
 if [ -n "$FRAME" ] && [ -n "$PROOF" ]; then
@@ -194,12 +203,13 @@ for SRC in "${CLIPS[@]}"; do
 
 	# Orientation is the source's business. Refuse a clip that would render sideways rather than
 	# producing a confidently wrong file; require_portrait decodes a frame and measures it.
-	if ! require_portrait "$SRC" 2>/dev/null; then
+	if ! SRC_SIZE="$(require_portrait "$SRC" 2>/dev/null)"; then
 		say "SKIP  $CLIP — not portrait. Fix the source orientation, then retry."
 		emit_code REFUSE_NOT_PORTRAIT
 		emit clip_skipped clip "$CLIP" code REFUSE_NOT_PORTRAIT source "$SRC"
 		SKIPPED=$((SKIPPED+1)); continue
 	fi
+	SRC_W="${SRC_SIZE% *}"; SRC_H="${SRC_SIZE#* }"
 
 	# --- exposure match: one cheap probe, not a full pass --------------------------------
 	GAMMA="$G_GAMMA_REF"; YAVG="-"
@@ -255,6 +265,19 @@ for SRC in "${CLIPS[@]}"; do
 	fi
 
 	FPS="$(source_fps "$SRC")"
+	# A frame rate change is either an integer relation — dropping or repeating whole frames — or
+	# it is retiming, which without motion compensation looks worse than not converting at all.
+	# 24 to 30 is the case that tempts people and the one that judders. Refused rather than
+	# silently interpolated; ffmpeg's `fps` filter would happily do it.
+	FPS_FILTER=""
+	if [ -n "$FPS_OUT" ]; then
+		if ! FPS_FILTER="$(fps_filter "$FPS" "$FPS_OUT")"; then
+			say "SKIP  $CLIP — $FPS_OUT fps from ${FPS} needs retiming."
+			emit_code REFUSE_FPS_RETIME
+			emit clip_skipped clip "$CLIP" code REFUSE_FPS_RETIME source "$SRC"
+			SKIPPED=$((SKIPPED+1)); continue
+		fi
+	fi
 	say "$CLIP  post-CST YAVG=${YAVG}  gamma=${GAMMA}$([ "$GAMMA" != "$G_GAMMA_REF" ] && echo " (matched)")"
 	# matched is 1/0 rather than true/false: emit() writes a bare number or a quoted string, and a
 	# JSON boolean would need a third case for one field.
@@ -316,7 +339,7 @@ for SRC in "${CLIPS[@]}"; do
 			-y -i "$SRC" -f lavfi -i "$(grain_plate "$w" "$h" "$FPS")" -filter_complex \
 "[0:v]$(grade_chain "$TONE" "$SAT" "$WARM" \
   "lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},"),\
-$(delivery_image_chain "$w" "$h" "$SFX" "$crop")[b];\
+$(delivery_image_chain "$w" "$h" "$SFX" "$crop")${FPS_FILTER}[b];\
 [1:v]$(delivery_grain_branch "$w" "$h" "$GRAIN_STRENGTH")[g];\
 [b][g]${DELIVERY_BLEND}[o]" \
 			-map "[o]" -map "0:a:0?" -shortest \
@@ -339,8 +362,14 @@ $(delivery_image_chain "$w" "$h" "$SFX" "$crop")[b];\
 	# silently costs the other 16. The non-portrait path a few lines up already skips and continues;
 	# this gives the render path the same treatment, and the exit status below makes sure a run with
 	# failures in it can never be read as a clean one.
-	if render 1080 1920 "reels-stories_9x16" \
-		&& { [ "$FEED" != "1" ] || render 1080 1350 "feed_4x5" "crop=2160:2700:0:${CROP_Y_OK},"; }
+	# Even widths: libx264 rejects an odd dimension, and it rejects it at encode time, after the
+	# graph has been built and the first frames decoded.
+	REELS_W=$(( HEIGHT * 9 / 16 )); REELS_W=$(( REELS_W - REELS_W % 2 ))
+	FEED_H=$(( HEIGHT * 1350 / 1920 )); FEED_H=$(( FEED_H - FEED_H % 2 ))
+	FEED_W=$(( FEED_H * 4 / 5 )); FEED_W=$(( FEED_W - FEED_W % 2 ))
+	if render "$REELS_W" "$HEIGHT" "reels-stories_9x16" \
+		&& { [ "$FEED" != "1" ] || render "$FEED_W" "$FEED_H" "feed_4x5" \
+			"$(crop_prefix "$SRC_W" "$SRC_H" 4 5 "$CROP_Y_OK")"; }
 	then
 		OK=$((OK+1))
 	else

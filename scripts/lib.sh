@@ -367,12 +367,18 @@ resolve_work_dir() {
 # So it decodes one frame and measures it, rather than reasoning about display matrices. ffmpeg
 # autorotates on decode, so this reflects what a viewer sees, and it does not care whether the
 # source was corrected by re-encoding or by fixing the matrix in Preview.
-require_portrait() {
+# Decodes one frame and measures it. Separated out of require_portrait because the crop bounds
+# need the same two numbers, and the alternative is decoding a second frame to ask again.
+#
+# It measures a DECODED frame rather than the container's dimensions, deliberately: this camera
+# carries rotation as a display-matrix flag, ffmpeg autorotates on decode, and the container's
+# width and height are therefore not what the filter graph will see. That is the whole reason
+# docs/adr/0005 exists.
+source_frame_size() {  # source_frame_size <file>  -> "W H"
 	local file="$1" stem tmp w h
 	# mktemp CREATES the file it names, and ".png" is appended to that name — so the file mktemp
-	# made is not the file that gets removed. Both have to go, or every call leaks one temp file
-	# and a 19-clip batch leaves 19 behind.
-	stem="$(mktemp -t portrait)"
+	# made is not the file that gets removed. Both have to go, or a 19-clip batch leaks 19.
+	stem="$(mktemp -t framesize)"
 	tmp="$stem.png"
 	if ! ffmpeg -v error -y -i "$file" -frames:v 1 "$tmp" 2>/dev/null; then
 		rm -f "$stem" "$tmp"; echo "could not decode a frame from $file" >&2; return 1
@@ -382,22 +388,92 @@ require_portrait() {
 	rm -f "$stem" "$tmp"
 
 	# Refuse what cannot be measured. A missing or non-numeric dimension makes `[ "$h" -le "$w" ]`
-	# ERROR, and an `if` reads an erroring condition as FALSE — so the guard used to accept the clip
-	# it had just failed to measure. That is the same fail-open shape as the trailing comma on this
-	# camera's csv output, which is the bug this guard exists to replace.
+	# ERROR, and an `if` reads an erroring condition as FALSE — so the caller used to accept the
+	# clip it had just failed to measure. Same fail-open shape as the trailing comma on this
+	# camera's csv output.
 	case "$w" in ''|*[!0-9]*) w="";; esac
 	case "$h" in ''|*[!0-9]*) h="";; esac
 	if [ -z "$w" ] || [ -z "$h" ]; then
+		echo "could not measure a decoded frame from $file" >&2
+		return 1
+	fi
+	printf '%s %s\n' "$w" "$h"
+}
+
+# Frame rate conversion, and only the kind that is not a lie. An integer relation drops or repeats
+# whole frames, which is honest and reversible in appearance. Anything else is retiming: without
+# motion compensation 24 to 30 judders, and ffmpeg's `fps` filter will do it without comment. So
+# this returns a filter for the first case and refuses the second.
+#
+# Rates arrive as rationals from ffprobe ("24/1"), so the comparison is done in integers rather
+# than by parsing a decimal.
+fps_filter() {  # fps_filter <source-rate> <target-rate>  -> ",fps=N" or "" or refuses
+	local src="$1" out="$2" num den
+	num="${src%%/*}"; den="${src#*/}"
+	[ "$den" != "$src" ] || den=1
+	case "$num$den" in ''|*[!0-9]*) echo "unreadable source rate: $src" >&2; return 1;; esac
+	# Equal rates need no filter at all.
+	if [ $(( num )) -eq $(( out * den )) ]; then
+		printf ''
+		return 0
+	fi
+	# Integer either way round: N source frames per output frame, or the reverse.
+	if [ $(( num % (out * den) )) -eq 0 ] || [ $(( (out * den) % num )) -eq 0 ]; then
+		printf ',fps=%s\n' "$out"
+		return 0
+	fi
+	echo "REFUSING: $out fps from $src is not an integer relation." >&2
+	echo "  Converting it means retiming, and without motion compensation that judders." >&2
+	echo "  Deliver at the source rate, or pick a rate that divides it." >&2
+	return 1
+}
+
+# The crop window, computed rather than hardcoded. It was `crop=2160:2700:0:$CROP_Y`, which assumes
+# both the source width and one aspect — true of this camera and of one deliverable, and wrong the
+# moment either changes.
+#
+# Bounds are checked HERE because the alternative is ffmpeg failing several seconds into a render
+# with a filter error, after the graph has already been built. An offset past the frame edge was
+# unvalidated and 03-final.sh claimed the portrait guard covered it; it does not, it only compares
+# width against height.
+crop_prefix() {  # crop_prefix <src-w> <src-h> <aspect-w> <aspect-h> <offset>  -> "crop=...," or ""
+	local sw="$1" sh="$2" aw="$3" ah="$4" y="$5" ch max
+	ch=$(( sw * ah / aw ))
+	# Even dimensions: libx264 cannot encode an odd one, and the failure arrives at encode time.
+	ch=$(( ch - ch % 2 ))
+	if [ "$ch" -gt "$sh" ]; then
+		echo "crop window ${sw}x${ch} is taller than the source ${sw}x${sh}" >&2
+		return 1
+	fi
+	max=$(( sh - ch ))
+	if [ "$y" -lt 0 ] || [ "$y" -gt "$max" ]; then
+		echo "REFUSING: crop offset $y is outside 0..$max for a ${sw}x${ch} window on ${sw}x${sh}." >&2
+		echo "  Past the edge ffmpeg fails mid-render, seconds in, with a filter error." >&2
+		return 1
+	fi
+	printf 'crop=%s:%s:0:%s,\n' "$sw" "$ch" "$y"
+}
+
+require_portrait() {
+	local file="$1" size w h
+	# mktemp CREATES the file it names, and ".png" is appended to that name — so the file mktemp
+	# made is not the file that gets removed. Both have to go, or every call leaks one temp file
+	# and a 19-clip batch leaves 19 behind.
+	if ! size="$(source_frame_size "$file")"; then
 		echo "REFUSING: could not measure a decoded frame from $file." >&2
 		echo "  Refusing rather than guessing — a wrong guess here squashes the delivery." >&2
 		return 1
 	fi
+	w="${size% *}"; h="${size#* }"
 
 	if [ "$h" -le "$w" ]; then
 		echo "REFUSING: $file decodes as ${w}x${h}, not portrait." >&2
 		echo "  Vertical delivery would squash it. Fix the source orientation, then retry." >&2
 		return 1
 	fi
+	# Hand the measurement back: the crop bounds need exactly these two numbers, and the
+	# alternative is decoding the frame again to ask the same question.
+	printf '%s %s\n' "$w" "$h"
 }
 
 require_nonempty() {
@@ -531,8 +607,19 @@ stab_prefix() {  # stab_prefix <trf> <smoothing>
 # colourspace metadata, so a zscale placed after `blend` has no input space to convert from and
 # dies with "code 3074". The plate is already 8-bit, so dithering it again bought nothing anyway.
 delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-prefix>
-	printf '%s%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=yuv420p,unsharp=5:5:0.4:5:5:0.0' \
-		"$3" "$DELIVERY_CHROMA" "$4" "$1" "$2"
+	# The sharpener's 5x5 was measured at 1080x1920, and its radius is in PIXELS — so at another
+	# output height it sharpens a different real-world detail size and the look changes. The radius
+	# scales with height and the amount does not, which is an ASSUMPTION rather than a measurement:
+	# only 1920 has been looked at. It is stated here so the next reader knows which of the two
+	# numbers has evidence behind it.
+	#
+	# unsharp needs odd sizes and rejects anything below 3.
+	local r
+	r=$(( 5 * $2 / 1920 ))
+	[ "$r" -ge 3 ] || r=3
+	[ $(( r % 2 )) -eq 1 ] || r=$(( r + 1 ))
+	printf '%s%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=yuv420p,unsharp=%s:%s:0.4:5:5:0.0' \
+		"$3" "$DELIVERY_CHROMA" "$4" "$1" "$2" "$r" "$r"
 }
 
 # CLUSTERED grain, not per-pixel, generated on a half-resolution plate and blended. Measured:
