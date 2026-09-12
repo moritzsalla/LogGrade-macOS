@@ -83,6 +83,17 @@ public struct EngineLocation {
         return nil
     }
 
+    /// The film-emulation cubes on disk, by stem, so the interface offers what is actually there
+    /// rather than a list someone has to remember to update. "none" is not in here: it is the
+    /// absence of a look, and the engine leaves the filter out of the graph for it.
+    public func availableLooks(fileManager: FileManager = .default) -> [String] {
+        let urls = (try? fileManager.contentsOfDirectory(at: lookCubes,
+                                                         includingPropertiesForKeys: nil)) ?? []
+        return urls.filter { $0.pathExtension == "cube" }
+            .map { $0.deletingPathExtension().lastPathComponent }
+            .sorted()
+    }
+
     /// Everything wrong with this engine, in the order a person would fix it. Empty means it runs.
     public func preflight(fileManager: FileManager = .default) -> [Problem] {
         var problems: [Problem] = []

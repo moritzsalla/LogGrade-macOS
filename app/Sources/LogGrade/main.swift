@@ -14,15 +14,28 @@ struct RootView: View {
     let problems: [EngineLocation.Problem]
     @ObservedObject var clips: ClipList
 
+    var grade: GradeModel?
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            header
-            dropZone
-            if !clips.entries.isEmpty { clipTable }
-            Spacer()
+        HSplitView {
+            VStack(alignment: .leading, spacing: 14) {
+                header
+                dropZone
+                if !clips.entries.isEmpty { clipTable }
+                Spacer()
+            }
+            .padding(16)
+            .frame(minWidth: 300)
+
+            if let grade {
+                PreviewView(model: grade).padding(16).frame(minWidth: 280)
+                InspectorView(model: grade).frame(minWidth: 330)
+            } else {
+                Text("no engine, so nothing to grade with")
+                    .foregroundStyle(.secondary).padding()
+            }
         }
-        .padding(20)
-        .frame(minWidth: 640, minHeight: 460, alignment: .topLeading)
+        .frame(minWidth: 1040, minHeight: 620)
     }
 
     private var header: some View {
@@ -59,6 +72,7 @@ struct RootView: View {
                         DispatchQueue.main.async {
                             for added in clips.add([url]) {
                                 clips.loadThumbnail(for: added.stem)
+                                selectIfNothingSelected(added)
                             }
                         }
                     }
@@ -89,12 +103,27 @@ struct RootView: View {
                             }
                         }
                         Spacer()
+                        if entry.isUsable {
+                            Button(grade?.selectedClip?.stem == entry.stem ? "selected" : "select") {
+                                grade?.selectedClip = entry
+                                grade?.renderPreview()
+                            }
+                            .buttonStyle(.borderless)
+                        }
                         Button("remove") { clips.remove(entry.stem) }.buttonStyle(.borderless)
                     }
                     Divider()
                 }
             }
         }
+    }
+
+    /// Drop a clip and it is the one being graded. Making someone click "select" first is a step
+    /// with no decision in it, and the whole app is shaped around the drop.
+    private func selectIfNothingSelected(_ entry: ClipList.Entry) {
+        guard let grade, grade.selectedClip == nil, entry.isUsable else { return }
+        grade.selectedClip = entry
+        grade.renderPreview()
     }
 
     private func thumbnail(_ entry: ClipList.Entry) -> some View {
@@ -115,11 +144,16 @@ struct RootView: View {
 /// message is a promise the app does not keep — the Finder accepted the drop and nothing happened.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let clips: ClipList
-    init(clips: ClipList) { self.clips = clips }
+    let grade: GradeModel?
+    init(clips: ClipList, grade: GradeModel?) { self.clips = clips; self.grade = grade }
 
     func application(_ sender: NSApplication, open urls: [URL]) {
         for added in clips.add(urls) {
             clips.loadThumbnail(for: added.stem)
+            if let grade, grade.selectedClip == nil, added.isUsable {
+                grade.selectedClip = added
+                grade.renderPreview()
+            }
         }
     }
 
@@ -140,10 +174,16 @@ let window = NSWindow(
 window.title = "LogGrade"
 window.center()
 let clipList = ClipList(probe: EngineLocation.resolveTool("ffprobe").map(ClipProbe.init))
-let delegate = AppDelegate(clips: clipList)
+
+// The look the app opens on is the engine's own look.json: the shipped grade, which is a look
+// that works rather than a set of generic defaults. The Bench learned that lesson first.
+let gradeModel: GradeModel? = engine.flatMap { e in
+    (try? Look(data: Data(contentsOf: e.lookFile))).map { GradeModel(engine: e, look: $0) }
+}
+let delegate = AppDelegate(clips: clipList, grade: gradeModel)
 app.delegate = delegate
 window.contentView = NSHostingView(rootView: RootView(engine: engine, problems: problems,
-                                                      clips: clipList))
+                                                      clips: clipList, grade: gradeModel))
 window.makeKeyAndOrderFront(nil)
 app.activate(ignoringOtherApps: true)
 app.run()
