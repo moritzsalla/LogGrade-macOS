@@ -1905,7 +1905,9 @@ if not any(json.loads(l)["event"] == "run_done" for l in lines):
 	local app="$BATS_TEST_DIRNAME/../dist/LogGrade.app"
 	# --debug on purpose. This test is about the bundle's SHAPE — an executable, an Info.plist, the
 	# engine vendored beside it — none of which optimisation affects, and a release build of the
-	# package costs twenty seconds of every suite run to prove nothing this test asserts.
+	# package costs twenty seconds of every suite run to prove nothing this test asserts. The
+	# release build IS exercised, by the next test, which is the one that matters because it is the
+	# configuration the app actually ships in.
 	run "$BATS_TEST_DIRNAME/../app/make-app.sh" --debug
 	[ "$status" -eq 0 ] || { echo "$output"; false; }
 	[ -x "$app/Contents/MacOS/LogGrade" ] || fail "no executable in the bundle"
@@ -1917,6 +1919,18 @@ if not any(json.loads(l)["event"] == "run_done" for l in lines):
 	# Drawn from the shipped curve by make-icon.swift. Without it macOS gives the app the generic
 	# document icon, which is how you tell at a glance that a build went wrong.
 	[ -f "$app/Contents/Resources/AppIcon.icns" ] || fail "the icon was not drawn into the bundle"
+}
+
+@test "the default build is the optimised one, because the live preview needs it" {
+	command -v swift >/dev/null || skip "no swift toolchain"
+	# THE CONFIGURATION MATTERS MORE THAN IT LOOKS. The live preview grades a whole frame per
+	# control change, and unoptimised that is 1.5 seconds against 12.7ms — a build that does not
+	# feel slow so much as broken. So the default has to stay release, and passing --release must
+	# not be what gets you there. This is the only test that compiles the app the way it ships.
+	run "$BATS_TEST_DIRNAME/../app/make-app.sh"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[[ "$output" == *"(release)"* ]] || fail "make-app.sh did not default to release: $output"
+	[ -x "$BATS_TEST_DIRNAME/../app/.build/release/LogGrade" ] || fail "no optimised binary"
 }
 
 @test "a measured exposure can be handed back instead of measured again" {

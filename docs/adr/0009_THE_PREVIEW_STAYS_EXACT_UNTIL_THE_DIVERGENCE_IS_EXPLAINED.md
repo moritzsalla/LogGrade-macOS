@@ -1,5 +1,10 @@
 # The preview stays exact; no GPU tier until the divergence is explained
 
+**Status: superseded by its own last two sections, which are the current design.** The title
+records what was decided when the divergence was unexplained. It was explained, the preview became
+live, and then the whole chain moved into the app. The filename is pinned by a test and is left
+alone; read the last two sections for what the app does today.
+
 The plan for this app had two preview tiers: an approximate one on the GPU that follows a slider
 continuously, and an exact one — a frame through the real chain — on release. Only the exact tier
 is built. The GPU tier is not deferred for time; it is refused on evidence.

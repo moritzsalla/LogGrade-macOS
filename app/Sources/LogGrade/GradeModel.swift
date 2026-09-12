@@ -18,8 +18,11 @@ final class GradeModel: ObservableObject {
     @Published var previousImage: NSImage?
     @Published var status: String = ""
     @Published var isRendering = false
-    @Published var selectedClip: ClipList.Entry?
-    @Published var previewSeconds: Double = 1
+    // ONE PLACE, not every call site. A clip becomes the selected one from a drop, a click, the
+    // arrow keys and an opened project, and the live tier needs its source frame however it got
+    // there. Hanging it off the property means a new path cannot forget.
+    @Published var selectedClip: ClipList.Entry? { didSet { prepareLivePreview() } }
+    @Published var previewSeconds: Double = 1 { didSet { prepareLivePreview() } }
     /// Held down rather than clicked. A colourist compares by holding a key and letting go, which
     /// is what the Bench does too; a long press on a label was undiscoverable and awkward.
     @Published var isComparing = false
@@ -103,6 +106,20 @@ final class GradeModel: ObservableObject {
         return cube
     }
 
+    /// Called when the selection or the preview timecode changes. Fetches the frame the live tier
+    /// grades, so the controls work before anything has been rendered.
+    func prepareLivePreview() {
+        guard let clip = selectedClip, clip.isUsable else { return }
+        guard sourceClip != clip.url || sourceSeconds != previewSeconds else { return }
+        guard !isFetchingSource else { return }
+        isFetchingSource = true
+        let seconds = previewSeconds
+        let look = self.look
+        queue.async { [weak self] in
+            self?.refreshSource(for: clip, seconds: seconds, look: look)
+        }
+    }
+
     /// A control went under the pointer.
     ///
     /// The render in flight is for a look nobody wants any more — the person is already moving
@@ -110,9 +127,13 @@ final class GradeModel: ObservableObject {
     /// this, letting go and immediately grabbing again gives three dead seconds.
     func beginDrag() {
         isDragging = true
-        // Unless it is the render that has not produced a source frame yet: cancelling that one
-        // leaves nothing to be live from.
-        if isRendering && sourceImage != nil {
+        // Unless nothing is live yet for THIS clip at THIS timecode. `sourceImage` alone is not
+        // that question: right after a clip switch it still holds the previous clip's frame, so
+        // checking it cancelled the very render that would have fetched the new one, and grabbing
+        // a control every couple of seconds kept live from ever starting.
+        let liveHere = sourceImage != nil && sourceClip == selectedClip?.url
+            && sourceSeconds == previewSeconds
+        if isRendering && liveHere {
             previewGeneration += 1
             if let running = previewProcess, running.isRunning { EngineRun.stop(running) }
             isRendering = false
@@ -171,10 +192,23 @@ final class GradeModel: ObservableObject {
         statusIsFailure = false
     }
 
-    /// Fetches the source frame for a clip. Once per clip and timecode, off the main thread.
-    private func refreshSource(for clip: ClipList.Entry, seconds: Double) {
+    /// Fetches the source frame for a clip, and the clip's exposure with it.
+    ///
+    /// ON SELECTION, not after the first exact render. The whole claim of this tier is that you
+    /// pick a clip, grab a control and see the picture move; waiting for a three-second render
+    /// before any of that works is the lag it exists to remove. The frame has no chain on it, so
+    /// it is quick, and `match: true` costs one probe — which is what the solved gamma needs, so
+    /// the curve is right on the first drag rather than after the first render.
+    ///
+    /// On the same serial queue as every other render, deliberately. Both write `preview-look.json`
+    /// and the per-clip tone cube into one work directory, and two ffmpeg processes racing over
+    /// those is the class of bug this repo keeps finding.
+    ///
+    /// `look` is passed in rather than read here: this runs off the main thread, and reading a
+    /// published property from one is the mistake CLAUDE.md names.
+    private func refreshSource(for clip: ClipList.Entry, seconds: Double, look: Look) {
         guard let frame = try? renderer.render(clip: clip.url, seconds: seconds, look: look,
-                                               height: 480, match: false, stage: .source),
+                                               height: 480, stage: .source),
               let image = NSImage(contentsOf: frame.url)?
                 .cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             DispatchQueue.main.async { self.isFetchingSource = false }
@@ -188,6 +222,13 @@ final class GradeModel: ObservableObject {
             // A new clip's pixels, so whatever was converted belongs to the old one.
             self.convertedFrame = nil
             self.convertedFor = nil
+            // The probe this render paid for. It is what the gamma solve needs, and recording it
+            // here means the curve is the rendered one from the first drag rather than from the
+            // first render.
+            if let yavg = frame.yavg {
+                self.measuredYAVG[clip.url] = yavg
+                self.refreshCurve()
+            }
         }
     }
 
@@ -451,7 +492,9 @@ final class GradeModel: ObservableObject {
                 // AFTER the exact frame is on screen. The source is only needed for the next drag,
                 // so fetching it first would add its second to the wait for a picture somebody is
                 // already looking at.
-                if needsSource { self.refreshSource(for: clip, seconds: seconds) }
+                // A fallback only: the source is normally fetched when the clip is selected. This
+                // covers a fetch that failed, so a preview still eventually restores live mode.
+                if needsSource { self.refreshSource(for: clip, seconds: seconds, look: look) }
             } catch {
                 guard generation == self.previewGeneration else { return }
                 DispatchQueue.main.async {
