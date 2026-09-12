@@ -12,49 +12,126 @@ import SwiftUI
 struct RootView: View {
     let engine: EngineLocation?
     let problems: [EngineLocation.Problem]
+    @ObservedObject var clips: ClipList
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("LogGrade").font(.largeTitle)
-            if let engine {
-                Text("engine: \(engine.root.path)")
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("no engine found").foregroundStyle(.red)
-            }
-            if engine == nil {
-                // NOT "ready". An empty problem list means nothing was checked when there is no
-                // engine to check, and reporting that as ready is the fail-open shape this whole
-                // preflight exists to avoid — it is what the first build of this window did.
-                Text("nothing to run: point LOGGRADE_ENGINE at a checkout, or rebuild the bundle")
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.orange)
-            } else if problems.isEmpty {
-                Text("preflight: ready").foregroundStyle(.green)
-            } else {
-                // Named, not summarised. "Could not render" is the message the preflight exists to
-                // replace, and the engine's own refusals cite the file that carries the reason.
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(problems.indices, id: \.self) { i in
-                        Text(problems[i].description)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.orange)
-                    }
-                }
-            }
+        VStack(alignment: .leading, spacing: 14) {
+            header
+            dropZone
+            if !clips.entries.isEmpty { clipTable }
             Spacer()
         }
-        .padding(24)
-        .frame(minWidth: 520, minHeight: 320, alignment: .topLeading)
+        .padding(20)
+        .frame(minWidth: 640, minHeight: 460, alignment: .topLeading)
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("LogGrade").font(.title)
+            if let engine {
+                Text(engine.root.path)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            if engine == nil {
+                Text("nothing to run: point LOGGRADE_ENGINE at a checkout, or rebuild the bundle")
+                    .font(.caption).foregroundStyle(.orange)
+            } else if !problems.isEmpty {
+                ForEach(problems.indices, id: \.self) { i in
+                    Text(problems[i].description).font(.caption).foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
+    private var dropZone: some View {
+        RoundedRectangle(cornerRadius: 10)
+            .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+            .foregroundStyle(.secondary)
+            .frame(height: 76)
+            .overlay(Text("drop Apple Log clips here").foregroundStyle(.secondary))
+            .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                // Real paths, which is the whole reason this is a native app: a browser drop hands
+                // over bytes, not a location, and the engine needs a location.
+                for provider in providers {
+                    _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                        guard let url else { return }
+                        DispatchQueue.main.async {
+                            for added in clips.add([url]) {
+                                clips.loadThumbnail(for: added.stem)
+                            }
+                        }
+                    }
+                }
+                return true
+            }
+    }
+
+    private var clipTable: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(clips.entries) { entry in
+                    HStack(alignment: .top, spacing: 10) {
+                        thumbnail(entry)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.stem).font(.system(.body, design: .monospaced))
+                            // The verdict, in full. A refused clip stays in the list carrying its
+                            // reason: a file that vanishes when dropped reads as a broken
+                            // interface, and the reason is what the person needs.
+                            Text(entry.verdict.description)
+                                .font(.caption)
+                                .foregroundStyle(entry.isUsable ? .green : .orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let f = entry.fields {
+                                Text(f.summary)
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Button("remove") { clips.remove(entry.stem) }.buttonStyle(.borderless)
+                    }
+                    Divider()
+                }
+            }
+        }
+    }
+
+    private func thumbnail(_ entry: ClipList.Entry) -> some View {
+        Group {
+            if let image = entry.thumbnail {
+                Image(decorative: image, scale: 1)
+                    .resizable().aspectRatio(contentMode: .fit)
+            } else {
+                RoundedRectangle(cornerRadius: 4).fill(.quaternary)
+            }
+        }
+        .frame(width: 44, height: 78)
     }
 }
+
+/// Files handed over by the Finder, which is the affordance the Info.plist's document type
+/// promises: drop clips on the dock icon, or Open With. Declaring the type without handling the
+/// message is a promise the app does not keep — the Finder accepted the drop and nothing happened.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let clips: ClipList
+    init(clips: ClipList) { self.clips = clips }
+
+    func application(_ sender: NSApplication, open urls: [URL]) {
+        for added in clips.add(urls) {
+            clips.loadThumbnail(for: added.stem)
+        }
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { true }
+}
+
+let app = NSApplication.shared
+app.setActivationPolicy(.regular)
 
 let engine = EngineLocation.locate()
 let problems = engine?.preflight() ?? []
 
-let app = NSApplication.shared
-app.setActivationPolicy(.regular)
 let window = NSWindow(
     contentRect: NSRect(x: 0, y: 0, width: 620, height: 380),
     styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -62,7 +139,11 @@ let window = NSWindow(
     defer: false)
 window.title = "LogGrade"
 window.center()
-window.contentView = NSHostingView(rootView: RootView(engine: engine, problems: problems))
+let clipList = ClipList(probe: EngineLocation.resolveTool("ffprobe").map(ClipProbe.init))
+let delegate = AppDelegate(clips: clipList)
+app.delegate = delegate
+window.contentView = NSHostingView(rootView: RootView(engine: engine, problems: problems,
+                                                      clips: clipList))
 window.makeKeyAndOrderFront(nil)
 app.activate(ignoringOtherApps: true)
 app.run()
