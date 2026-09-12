@@ -27,6 +27,11 @@ final class GradeModel: ObservableObject {
         return rendered != look
     }
 
+    /// The project: presets, delivery, and what is decided per clip. Held here because the crop
+    /// offset has to live somewhere that survives selecting another clip, and because a shoot is
+    /// the unit of work rather than a file.
+    @Published var project: Project
+
     /// The cubes on disk, read once: the interface offers what is there.
     let availableLooks: [String]
 
@@ -38,6 +43,8 @@ final class GradeModel: ObservableObject {
         self.engine = engine
         self.look = look
         self.availableLooks = engine.availableLooks()
+        self.project = Project(presets: [.init(name: "shipped", look: look)],
+                               activePreset: "shipped")
         let work = FileManager.default.temporaryDirectory
             .appendingPathComponent("loggrade-preview", isDirectory: true)
         self.renderer = PreviewRenderer(engine: engine, workDirectory: work)
@@ -59,6 +66,36 @@ final class GradeModel: ObservableObject {
     /// ON RELEASE, not on every movement. The exact preview is a render through the real chain,
     /// which takes a second or two: firing it per pixel of slider travel would queue work nobody
     /// is waiting for any more. This is the scanner's preview-scan gesture — adjust, then look.
+    /// The crop offset for the selected clip, in master pixels. Nil means undecided, which is not
+    /// zero: the engine refuses a Feed render across clips without one, because one clip's framing
+    /// applied to eighteen others produces files that all look done.
+    var cropOffset: Int? {
+        get { selectedClip.flatMap { project.clips[$0.stem]?.cropOffset } }
+        set {
+            guard let stem = selectedClip?.stem else { return }
+            var settings = project.clips[stem] ?? Project.ClipSettings()
+            settings.cropOffset = newValue
+            project.clips[stem] = settings
+        }
+    }
+
+    /// The window's geometry for the selected clip, from what was measured about it rather than
+    /// from this camera's numbers assumed.
+    var cropGeometry: CropGeometry? {
+        guard let f = selectedClip?.fields else { return nil }
+        // The container reports these clips landscape, because rotation is a display-matrix flag.
+        // The master the engine crops is the DECODED frame, so the two are swapped here.
+        let w = min(f.width, f.height), h = max(f.width, f.height)
+        return CropGeometry(sourceWidth: w, sourceHeight: h)
+    }
+
+    /// What would stop a render, named before one starts.
+    var blockers: [Project.Blocker] {
+        project.blockers(for: clipNames)
+    }
+
+    var clipNames: [String] = []
+
     func renderPreview() {
         guard let clip = selectedClip, clip.isUsable else { return }
         let look = self.look

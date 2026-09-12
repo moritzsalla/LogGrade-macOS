@@ -70,6 +70,10 @@ struct RootView: View {
                     .padding(.top, 14)
                 }
             }
+            if let grade {
+                Divider().overlay(Palette.hairline)
+                DeliveryPanel(model: grade)
+            }
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Palette.panel)
@@ -94,6 +98,7 @@ struct RootView: View {
                                 clips.loadThumbnail(for: added.stem)
                                 selectIfNothingSelected(added)
                             }
+                            grade?.clipNames = clips.usable.map(\.stem)
                         }
                     }
                 }
@@ -177,6 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 grade.selectedClip = added
                 grade.renderPreview()
             }
+            grade?.clipNames = clips.usable.map(\.stem)
         }
     }
 

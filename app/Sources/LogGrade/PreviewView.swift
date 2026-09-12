@@ -16,11 +16,20 @@ struct PreviewView: View {
                 Rectangle().fill(Palette.well)
                 if let image = comparing ? (model.previousImage ?? model.previewImage)
                                           : model.previewImage {
-                    Image(nsImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .padding(10)
-                        .opacity(model.isStale ? 0.55 : 1)
+                    ZStack {
+                        Image(nsImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .opacity(model.isStale ? 0.55 : 1)
+                        // The crop is judged on the picture, because the question it answers is
+                        // what is in the frame and no number answers that.
+                        if model.project.delivery.feed, let geometry = model.cropGeometry {
+                            CropOverlay(model: model, geometry: geometry)
+                                .aspectRatio(image.size.width / image.size.height,
+                                             contentMode: .fit)
+                        }
+                    }
+                    .padding(10)
                 } else {
                     Text(model.selectedClip == nil
                          ? "drop a clip to start"
