@@ -240,6 +240,26 @@ emit() {
 # know why a clip was skipped, and the human sentence is the thing that gets reworded.
 emit_code() { printf 'GRADE_CODE=%s\n' "$1" >&2; }
 
+# Translates ffmpeg's -progress stream into events. ffmpeg writes bare `key=value` lines and ends
+# each block with `progress=continue`, or `progress=end` for the last one, so one event per block
+# is the natural granularity — roughly two a second.
+#
+# WHY A TRANSLATOR RATHER THAN LETTING IT THROUGH. `-progress pipe:1` would otherwise interleave
+# ffmpeg's own format with the event stream on the same fd, and a consumer would have to sniff
+# every line to know which grammar it is in.
+progress_events() {  # progress_events <label>   reads -progress output on stdin
+	local label="$1" key value frame="" fps="" out_time=""
+	while IFS='=' read -r key value; do
+		case "$key" in
+			frame)       frame="$value";;
+			fps)         fps="$value";;
+			out_time_ms) out_time="$value";;
+			progress)    emit progress label "$label" state "$value" \
+			                  frame "${frame:-0}" fps "${fps:-0}" out_time_ms "${out_time:-0}";;
+		esac
+	done
+}
+
 # --- the look -----------------------------------------------------------------
 # One source for every look value: look.json at the repo root. Nothing else may hardcode one.
 # Before this existed, `SAT=1.27` was written out in two scripts and had already started to drift
@@ -516,7 +536,23 @@ render_delivery() {  # render_delivery <final-out> <label> <ffmpeg-arg>...
 	local tmp="${out%.*}.partial.${out##*.}"
 	rm -f "$tmp"          # a staging file left by an earlier interrupted run
 
-	if ! ffmpeg "$@" "$tmp" -v error; then
+	# PROGRESS, and only under JSON=1. Piping ffmpeg changes the process tree and the exit status
+	# has to come out of PIPESTATUS rather than $?, so the default path is left exactly as it was
+	# rather than carrying that for a consumer that is not listening. `-nostats` because the
+	# human-facing stats line is what -progress replaces.
+	local rc=0
+	if [ "$JSON" = "1" ]; then
+		# errexit is suspended for exactly one pipeline: this file sets `pipefail`, so a failing
+		# ffmpeg would abort the function before PIPESTATUS could be read — and then the staging
+		# file would never be cleaned up and the caller would see a crash instead of a verdict.
+		set +e
+		ffmpeg "$@" -progress pipe:1 -nostats "$tmp" -v error | progress_events "$label"
+		rc="${PIPESTATUS[0]}"
+		set -e
+	else
+		ffmpeg "$@" "$tmp" -v error || rc=$?
+	fi
+	if [ "$rc" -ne 0 ]; then
 		rm -f "$tmp"
 		echo "$label FAILED (ffmpeg error) — $out left exactly as it was" >&2
 		return 1

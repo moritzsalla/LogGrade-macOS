@@ -69,6 +69,12 @@ single-line ffprobe answer without checking what it actually printed.
   ends in `|| fail "..."`, which is a function call and so is seen. This had already hidden a real
   defect: a test stayed green while the message it asserts on was renamed. Do not tidy the guard
   away.
+- **bats `run` disables errexit, so it cannot see an abort.** bats turns errexit off around `run`
+  in order to capture a status, which makes any behaviour that depends on `set -e` or `pipefail`
+  invisible through it: a function that must return a verdict rather than abort, or a cleanup that
+  must happen on the way out. Test those in a subshell that sources `lib.sh`, which is what
+  production actually runs under. A `run`-based test stayed green against a `render_delivery` that
+  aborted mid-pipeline and left its staging file behind.
 - **Mutation-test anything you add.** Break the guard, confirm the test goes red. Two tests here
   passed against a *removed* guard before this was done, and two more passed against a removed
   guard again afterwards for the `[[ ]]` reason above. Apply the mutation and *verify it applied* —

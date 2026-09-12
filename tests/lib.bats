@@ -1274,3 +1274,52 @@ for i, line in enumerate(sys.stdin.read().splitlines(), 1):
 	[ "$skipped" -eq 1 ] || fail "expected 1 clip_skipped, got $skipped:$output"
 	[[ "$output" == *'"skipped":1'* ]] || fail "run_done did not count the skip: $output"
 }
+
+@test "a render reports progress, through the one chokepoint every path uses" {
+	# render_delivery is where grade.sh, 03-final.sh and the proof path all end up, so a bar in the
+	# app needs instrumenting exactly here and nowhere else. Every ffmpeg call in this pipeline runs
+	# at -v error and none used -progress, so there was no signal at all to read.
+	local out="$BATS_TEST_TMPDIR/prog.mp4"
+	JSON=1 run render_delivery "$out" "encode" \
+		-y -f lavfi -i "color=c=gray:s=64x128:d=1:r=24" \
+		-filter_complex "[0:v]${DELIVERY_SETPARAMS}[o]" -map "[o]" \
+		-c:v libx264 -pix_fmt yuv420p
+	[ "$status" -eq 0 ]
+	[ -s "$out" ]
+	[[ "$output" == *'"event":"progress"'* ]] || fail "no progress events: $output"
+	[[ "$output" == *'"state":"end"'* ]] || fail "the stream never reported completion: $output"
+	printf '%s\n' "$output" | python3 -c '
+import json, sys
+for line in sys.stdin.read().splitlines():
+    if line.strip(): json.loads(line)
+' || fail "progress broke the one-object-per-line contract:$output"
+}
+
+@test "a failed render reports and cleans up identically on both paths" {
+	# The JSON path pipes ffmpeg, which moves the exit status out of $? and into PIPESTATUS. Taken
+	# the naive way, `pipefail` aborts the function at the pipeline instead of returning: the caller
+	# gets a bare abort rather than a verdict, and the staging file is left for the next run.
+	#
+	# RUN UNDER PRODUCTION CONDITIONS, not through bats `run`. `run` disables errexit so it can
+	# capture a status, which hides this entire failure class — the first version of this test
+	# stayed green against the naive code for exactly that reason. A subshell that sources lib.sh
+	# gets lib.sh's own `set -euo pipefail`, which is what grade.sh actually renders under.
+	local out="$BATS_TEST_TMPDIR/keep.mp4" mode rc text
+	ffmpeg -v error -y -f lavfi -i "color=c=red:s=64x128:d=0.1:r=24" -frames:v 1 \
+		-c:v libx264 -pix_fmt yuv420p "$out"
+	local before; before=$(md5 -q "$out")
+	for mode in 0 1; do
+		rc=0
+		text=$(JSON=$mode bash -c '
+			source "$1/lib.sh"
+			render_delivery "$2" doomed -y -f lavfi -i "color=c=gray:s=64x128:d=0.1:r=24" \
+				-filter_complex "[0:v]nosuchfilter[o]" -map "[o]" -c:v libx264
+		' _ "$SCRIPTS" "$out" 2>&1) || rc=$?
+		[ "$rc" -ne 0 ] || fail "JSON=$mode: a broken graph reported success"
+		[ "$(md5 -q "$out")" = "$before" ] || fail "JSON=$mode: the existing file was damaged"
+		[[ "$text" == *"doomed FAILED (ffmpeg error)"* ]] \
+			|| fail "JSON=$mode: no verdict, just an abort: $text"
+		[ ! -f "$BATS_TEST_TMPDIR/keep.partial.mp4" ] \
+			|| fail "JSON=$mode: a staging file was left behind"
+	done
+}
