@@ -78,6 +78,10 @@ because the same change moves negative-black the wrong way, from 36.4 to 40.4 â€
 evidently not symmetric in the sign of the move, and guessing again without reading ffmpeg's source
 would be another round of this.
 
+THE DECISION THIS MEASUREMENT PRODUCED is in docs/adr/0009: the app's preview is the render, and
+no GPU tier is built until the divergence above has a cause. The gate for a second implementation
+of the image is this harness, and a harness that measures an unexplained gap cannot hold one.
+
 WHAT THIS DOES NOT COVER YET. The input-correction stage (scripts/make-correct-lut.py) has no
 counterpart in the Bench, so there is nothing to compare it against here. When the app's preview
 implements it, it gets a case of its own â€” and the probe has to become an Apple Log probe, because

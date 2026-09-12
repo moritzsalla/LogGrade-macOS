@@ -10,6 +10,8 @@ final class GradeModel: ObservableObject {
     @Published var look: Look
     @Published var curve: ToneCurve?
     @Published var previewImage: NSImage?
+    /// Measured on the rendered frame, so the scopes read the render rather than a guess at it.
+    @Published var scopes: Scopes?
     /// The previous render, kept for hold-to-compare. Comparing against the last committed frame
     /// is what a colourist actually wants while adjusting: "is this better than what I had".
     @Published var previousImage: NSImage?
@@ -143,9 +145,12 @@ final class GradeModel: ObservableObject {
             do {
                 let frame = try self.renderer.render(clip: clip.url, seconds: seconds, look: look)
                 let image = NSImage(contentsOf: frame.url)
+                let measured = image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                    .map { Scopes.measure($0) }
                 DispatchQueue.main.async {
                     self.previousImage = self.previewImage
                     self.previewImage = image
+                    self.scopes = measured
                     self.renderedLook = look
                     self.isRendering = false
                     self.status = "grade only — no grain, sharpening, denoise, stabiliser or dither"

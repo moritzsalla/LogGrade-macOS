@@ -44,6 +44,8 @@ struct PreviewView: View {
                 }
             }
 
+            ScopesView(scopes: model.scopes)
+
             HStack(spacing: 12) {
                 Button(model.isStale ? "preview (out of date)" : "preview") { model.renderPreview() }
                     .buttonStyle(.bordered)
