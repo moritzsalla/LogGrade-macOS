@@ -48,11 +48,28 @@ recorded output over this probe, and none of these is the cause:
   - WHICH PLANE IS CURVED. Curving chroma instead of luma is far worse, 117 against 36, so
     mergeplanes does map the way its documentation says.
 
-What is left, and what the next attempt should test, is that ffmpeg's YUV intermediate clamps
-out-of-gamut colour in YUV rather than in RGB. The worst patches are all at saturation extremes —
-the worst is a near-primary orange, 246.8/48.7/5.0 in, where the Bench produces 187.7/0.0/0.0 and
-ffmpeg 223.9/25.8/0.0 — and a synthetic cube probe samples those corners deliberately. Real
-footage reaches them on signage, which is the one place it would be visible.
+Two more were ruled out afterwards, and one fact was established that makes the rest tractable.
+
+  - a NON-709 LUMA of any kind. The shift ffmpeg applies is uniform across the three channels to
+    within 0.004 code values, so it really is "curve one value, shift everything by the delta".
+    But no linear combination of R, G and B explains which value: a least-squares fit over 357
+    unclipped patches lands on 709's own weights and still leaves a 32-code-value residual.
+  - a LINEAR-LIGHT luma. Linearising before the weighted sum fits the single worst patch almost
+    exactly, which is how it got tested, and is worse everywhere else: 42 against 36 on the tone
+    case. A coincidence, not a cause.
+
+THE FACT THAT MATTERS, and the minimal reproduction for whoever picks this up. The divergence is
+not an artefact of the probe, the tiling or the sample offsets: render one flat 8x8 patch of
+242.9/55.4/64.8 through `grade_chain` with the shipped tone curve, no look, saturation 1, warmth 0,
+and ffmpeg shifts every channel by -31.90. That colour's 709 luma is 95.9, and the curve at 95.9
+gives -60.67. A near-neutral patch in the same render agrees with the curve to 0.01. So the effect
+is real, deterministic, reproducible on a single pixel, and grows with saturation — the eight worst
+patches have saturation 0.55 to 0.83 and the eight best 0.02 to 0.05.
+
+Whatever is happening lives inside ffmpeg's own 10-bit plane handling between `format=yuv444p10le`,
+`lut1d` and `mergeplanes`. Reading that source is the next step, not fitting another model: seven
+have been fitted and the honest summary is that the shape of the answer is not a colour-space
+choice.
 
 One thing the same experiment settled positively: ffmpeg's colorbalance is level-weighted, not a
 flat offset. Weighting warmth by the midtone ramp moves the warm-only case from 31.6 to 22.4 code
