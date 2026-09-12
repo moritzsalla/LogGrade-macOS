@@ -34,16 +34,23 @@ Getting that out of it is a tone problem, and tone is something ffmpeg can do pr
 ./scripts/grade.sh src/IMG_0609.mov      # one clip
 
 PROOF=2 ./scripts/grade.sh src/IMG_0609.mov   # 2s through the real chain → dist/proofs/
+FRAME=4 ./scripts/grade.sh src/IMG_0609.mov   # one graded still → dist/frames/
 STAB=0 ./scripts/grade.sh src/           # skip stabilisation, faster
 DRY=1  ./scripts/grade.sh src/           # plan only, render nothing
 
 FEED=1 CROP_Y=750 ./scripts/grade.sh src/IMG_0609.mov   # also emit the 4:5 Feed crop
+LOOK=none ./scripts/grade.sh src/IMG_0609.mov           # no film emulation, just tone
+HEIGHT=2160 ./scripts/grade.sh src/IMG_0609.mov         # deliver taller than 1080p
+JSON=1 ./scripts/grade.sh src/           # machine-readable events instead of prose
 ```
 
 Roughly 3 minutes per clip. Output lands in `dist/03-final/`, a per-run report in `dist/reports/`.
 
-`PROOF` is the one to reach for first: it renders a couple of seconds through the identical filter
-chain, so a look can be judged in seconds instead of minutes. The Feed crop needs `CROP_Y` because
+`FRAME` is the cheapest way to see a grade: one still through the real chain, no delivery stage,
+which is what the app's preview uses. `PROOF` is the next one up — a couple of seconds through the
+identical chain including grain, sharpening and the encode, so a deliverable can be judged before
+committing to the full render. A preview answers "is this the grade"; a proof answers "is this
+deliverable", and `CONTEXT.md` keeps the two words apart. The Feed crop needs `CROP_Y` because
 its offset is a composition call per clip, and a run across several clips is refused without one
 rather than quietly applying one clip's framing to all of them. The full list of knobs is in
 `scripts/grade.sh`'s header.
@@ -84,7 +91,9 @@ render and nothing would say so.
 ## Caveats
 
 Built for my footage, my machine, my deliverables. macOS on Intel, bash 3.2, ffmpeg from
-`~/.local/bin`. Output is hardcoded to Instagram's two shapes. The look is one I like; yours will
+`~/.local/bin`. The two Instagram shapes are the defaults rather than the only options now: height,
+frame rate and the crop aspect are arguments, and a frame rate that would need retiming is refused
+rather than interpolated. The look is one I like; yours will
 differ, which is what `look.json` and the Bench are for.
 
 **It will never be published.** Unlike its precursor it does have a roadmap: a native
@@ -99,9 +108,16 @@ Camera app: ProRes 422 HQ, Apple Log, 4K24, locked white balance and focus.
 
 One ffmpeg invocation per clip, source to deliverable. In order:
 
-1. **Apple Log → Rec.709** via Apple's own 65³ conversion LUT. The transfer function is
-   proprietary, so this is a lookup, not a curve anyone can derive.
-2. **Look LUT** — Kodak Portra emulation. Supplies colour character and almost no contrast.
+0. **Input correction**, if it is not neutral: exposure, white balance and an ASC CDL, generated
+   into one cube from `look.json`. It runs *before* the conversion, in log, because Apple Log holds
+   about twelve stops that the conversion lands on a display ceiling of 1.0 — corrected afterwards,
+   the same move clips highlights the source still has. A neutral correction leaves the filter out
+   of the graph entirely rather than rendering every pixel through a lookup that returns it.
+1. **Apple Log → Rec.709** via Apple's own 65³ conversion LUT. Apple published the log transfer
+   function, so the log-to-linear half is reproducible — but this cube also carries a display
+   rendering that Apple has not published, which is why it stays a lookup.
+2. **Look LUT** — Kodak Portra emulation by default, chosen in `look.json` and selectable per
+   run. Supplies colour character and almost no contrast. `none` removes it from the graph.
 3. **Tone curve**, generated from `look.json`, applied to the **luma plane only**. The original
    chroma is merged back untouched, which is what stops a contrast curve turning saturated colour
    neon.
@@ -109,9 +125,12 @@ One ffmpeg invocation per clip, source to deliverable. In order:
 5. **Stabilisation**, if a `.trf` exists for the clip, applied at full resolution before the
    downscale so the warp resamples at 4K.
 6. **Chroma-only denoise** — removes fringing on high-contrast edges that saturation amplifies.
-7. **Downscale to 1080p** with Lanczos, dithered on the 10→8 bit reduction.
+7. **Downscale** with Lanczos, dithered on the 10→8 bit reduction. 1080p by default; the height
+   is a knob and the width follows the deliverable's aspect.
 8. **Sharpen**, then **grain**, in that order. Grain is generated at half resolution and blended,
-   so it survives Instagram's re-encode instead of being smeared into blobs.
+   so it survives Instagram's re-encode instead of being smeared into blobs. The sharpener's radius
+   scales with the output height, because its measured 5x5 is in pixels; the grain needs no such
+   adjustment, since a half-size plate scales with the frame already.
 9. **H.264 encode**, then a remux pass that stamps and verifies the Rec.709 tags — encoders don't
    reliably write them, and a wrongly tagged file gets double-transformed by any player that
    trusts the tag.

@@ -41,6 +41,12 @@ steps.
 
 **To grade a clip:**
 
+0. **Or skip this by hand entirely:** `FRAME=<seconds> ./scripts/grade.sh src/IMG_XXXX.mov`
+   renders one still through the real chain into `dist/frames/` — the same CST, the same look cube,
+   the same solved tone curve. That is strictly better than the hand-export below, which bypasses
+   both the real conversion and the look and therefore mispredicts every reading. The steps below
+   are kept because they describe what the Bench expects to be given.
+
 1. Extract a frame from the **baseline, with the look LUT applied but no tone stage** — that is
    exactly the input the tone LUT sees, so the preview matches the render. (The Bench's own hint
    says only "post-CST, pre-tone"; post-*look* is the part it leaves out, and a frame without the

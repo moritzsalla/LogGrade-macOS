@@ -1811,3 +1811,28 @@ PY
 	run "$SCRIPTS/make-correct-lut.py" --stdout --size 200
 	[ "$status" -ne 0 ] || fail "accepted an absurd cube size"
 }
+
+@test "the recorded event stream still matches what the engine emits" {
+	# The app parses these events, and a parser is only as good as the shape it was written
+	# against. This pins the contract by CONTENT: field names, order and types, with the work dir
+	# and the volume's free space tokenised because neither is reproducible.
+	#
+	# It is also the fixture the app's own tests read, so they need no ffmpeg and no footage.
+	local fixture="$BATS_TEST_DIRNAME/fixtures/events.jsonl" now
+	[ -f "$fixture" ] || fail "no recorded stream at $fixture"
+	now="$("$BATS_TEST_DIRNAME/make-event-fixture.sh" --check)" || skip "fixture generator skipped"
+	if [ "$now" != "$(cat "$fixture")" ]; then
+		printf 'recorded:\n%s\nnow:\n%s\n' "$(cat "$fixture")" "$now"
+		fail "the event stream changed. If that was intended, re-run tests/make-event-fixture.sh and say in the commit what moved."
+	fi
+	# And it is a stream, not a blob: one object per line, each parseable on its own.
+	printf '%s\n' "$now" | python3 -c '
+import json, sys
+lines = [l for l in sys.stdin.read().splitlines() if l.strip()]
+for i, l in enumerate(lines, 1):
+    try: json.loads(l)
+    except Exception as e: sys.exit("line %d is not JSON (%s)" % (i, e))
+if not any(json.loads(l)["event"] == "run_done" for l in lines):
+    sys.exit("the stream has no run_done, so a consumer cannot tell it ended")
+' || fail "the recorded stream is not one object per line"
+}
