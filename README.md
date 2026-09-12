@@ -7,9 +7,30 @@ A Mac app for grading iPhone ProRes + AppleLog footage, built on a measured ffmp
 there. `PROVENANCE.md` records what was inherited, what debt came with it, and why the original is
 not being changed. Everything below Usage describes that inherited engine and is accurate today.
 
-**Where it is going.** Drop clips, see the graded picture, adjust, pick a crop and a delivery
-format and a folder, hit Convert. The engine stays the shell chain and the app drives it, never
-rebuilding its filter graph. `tests/conformance.sh` is what keeps that honest.
+**What it is.** A Mac app over that engine: drop clips, see the graded picture, adjust, pick a
+crop and a delivery format, hit convert. The app sets environment variables and reads the engine's
+event stream — it never builds a filter graph, and a test renders one clip both ways and asserts
+the bytes match, so that cannot quietly stop being true.
+
+```sh
+./app/make-app.sh                  # builds dist/LogGrade.app
+swift test --package-path app      # the app's own suite
+./scripts/check.sh                 # lint, grade parity, bats, and the Swift suite
+./scripts/check.sh --conformance   # plus: still byte-identical to the precursor?
+```
+
+Three things about the app are worth knowing before using it:
+
+- **The preview is the render.** One frame through the real chain, on release rather than
+  continuously, so it takes a second or two and says when it is out of date. It covers the grade
+  only: grain, sharpening, denoise, the stabiliser and the dither are delivery-stage and a still
+  cannot show them. There is no GPU preview, and `docs/adr/0009_THE_PREVIEW_STAYS_EXACT_UNTIL_THE_DIVERGENCE_IS_EXPLAINED.md`
+  records that as a decision made on evidence rather than on time.
+- **The crop is dragged on the picture**, per clip, because the offset is a composition call and
+  one clip's framing applied to a batch produces files that all look done. A Feed render is blocked
+  until every clip has one.
+- **Clips are measured before they are accepted.** Already-converted footage is refused, since
+  grading it again applies Apple's conversion twice.
 
 **Why?** iPhone Pros 15th generation and newer are able to shoot in log which retains enough depth to edit professionally. Apple log preserves enough dynamic range, shadow detail, and color depth (10-bit) to be seamlessly edited alongside footage from professional cinema cameras.
 
@@ -171,7 +192,11 @@ docs/           PIPELINE.md is the real documentation.
   BATCH_RUNBOOK.md  per-clip procedure, and which calls are not safe to automate
   SHOOTING_SETUP.md how to shoot for this pipeline, and what the first shoot measured
   adr/            decisions that would be expensive to reverse, with the measurements
-tests/          bats suite + the grade parity check and its probe.
+tests/          bats suite, the grade parity harness, the conformance check against the
+                precursor, and the recorded event stream the app parses.
+app/            the Mac app. GradeKit is the engine adapter and the models, tested from the
+                terminal; LogGrade is the window. make-app.sh assembles the bundle and vendors
+                the engine and ffmpeg into it, since a launched app inherits no useful PATH.
 CONTEXT.md      What each word means here.
 ```
 
