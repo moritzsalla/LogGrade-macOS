@@ -84,6 +84,10 @@ single-line ffprobe answer without checking what it actually printed.
   not attempted. A synthetic fixture cannot complete the delivery chain — it fails reinitialising
   filters on the way to 1080x1920 — so `status != 0` and an empty output folder are true whether or
   not the guard fired. Three tests here passed against a removed guard for exactly that reason.
+- **A grep guard needs a boundary and has to ignore prose.** `@Observable` is a prefix of
+  `@ObservedObject`, so the obvious pattern flagged the correct spelling as the forbidden one —
+  and once the boundary was added, the pattern matched the comment explaining the rule. A guard
+  that cannot tell those apart is worse than none, because the fix it demands is wrong.
 - **Mutation-test anything you add.** Break the guard, confirm the test goes red. Two tests here
   passed against a *removed* guard before this was done, and two more passed against a removed
   guard again afterwards for the `[[ ]]` reason above. Apply the mutation and *verify it applied* —

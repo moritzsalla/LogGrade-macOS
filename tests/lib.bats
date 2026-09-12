@@ -1857,7 +1857,15 @@ if not any(json.loads(l)["event"] == "run_done" for l in lines):
 		|| fail "the deployment target moved off macOS 13"
 	# @Observable is macOS 14 and the obvious thing to reach for; ObservableObject is the one that
 	# builds here. Caught by grep rather than by a build failure on the wrong machine.
-	! grep -rn '@Observable' "$BATS_TEST_DIRNAME/../app/Sources" \
+	#
+	# The pattern needs its boundary: `@Observable` is a PREFIX of `@ObservedObject`, so the
+	# obvious grep flagged the correct spelling as the forbidden one and this test failed on code
+	# that builds. A guard that cannot tell the two apart is worse than none, because the fix it
+	# demands is wrong.
+	# And it has to ignore COMMENTS, or the sentence explaining the rule trips the rule. Matching
+	# only where no slash precedes it does that: `/// ... @Observable` is excluded, an actual
+	# attribute at the start of a line is not.
+	! grep -rnE '^[^/]*@Observable([^A-Za-z]|$)' "$BATS_TEST_DIRNAME/../app/Sources" \
 		|| fail "@Observable needs macOS 14; use ObservableObject"
 }
 
