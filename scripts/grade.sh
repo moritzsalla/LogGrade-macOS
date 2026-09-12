@@ -14,6 +14,8 @@
 #   GRAIN_STRENGTH=<n>  override look.json's grain strength
 #   PROOF=<seconds>   render this many seconds through the real chain into dist/proofs/
 #   DRY=1             plan only, render nothing
+#   LOOK=<name|none>  which film-emulation cube to use, by stem from luts/looks/, or none for a
+#                     neutral grade. Overrides look.json's .look.lut for this run.
 #   FRAME=<seconds>   render ONE frame at that timecode through the grade chain to a PNG and
 #                     stop — the app's exact preview. No delivery stage, no stabilisation.
 #   FRAME_HEIGHT=<px> height of that frame (default 1440, the Bench's working height)
@@ -97,6 +99,9 @@ CACHE="$WORK/dist/.grade-work"
 # quietly substitute a different look.
 # Every one of these is spliced into an ffmpeg filter graph, and look.json is transcribed from the
 # Bench's artifact db rather than typed here — see require_number in lib.sh for why that matters.
+# The look LUT is a look value like any other, so it comes from look.json. LOOK=<name|none|path>
+# overrides it for one run; the app sets it per render.
+LOOK_LUT="$(resolve_look_lut "${LOOK:-$(look .look.lut)}" "$ROOT")"
 SAT="$(require_number SAT "$(look .colour.saturation)")"
 WARM="$(require_number WARM "$(look .colour.warmth)")"
 G_PIVOT="$(require_number pivot "$(look .tone.pivot)")"

@@ -1480,3 +1480,90 @@ for line in sys.stdin.read().splitlines():
 	[[ "$output" == *"will recompute"* ]] || fail "did not say what a real run would do: $output"
 	[[ "$output" != *"rendering unstabilised"* ]] || fail "still claims it renders unstabilised"
 }
+
+# --- choosing a look ----------------------------------------------------------
+# The look LUT was a constant in lib.sh. The app offers it as a choice, so it is a look value in
+# look.json like saturation is, and "none" means the filter leaves the graph rather than being
+# pointed at an identity cube.
+
+@test "resolve_look_lut finds a cube by its stem" {
+	local root; root="$BATS_TEST_DIRNAME/.."
+	run resolve_look_lut kodak_portra_400_nc "$root"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"/luts/looks/kodak_portra_400_nc.cube" ]] || fail "wrong path: $output"
+	[ -f "$output" ] || fail "resolved to a file that does not exist: $output"
+}
+
+@test "resolve_look_lut treats none as no look at all" {
+	run resolve_look_lut none "$BATS_TEST_DIRNAME/.."
+	[ "$status" -eq 0 ]
+	[ -z "$output" ] || fail "none should resolve to nothing, got: $output"
+}
+
+@test "resolve_look_lut refuses a cube that is not there, and says what is" {
+	run resolve_look_lut fuji_something "$BATS_TEST_DIRNAME/.."
+	[ "$status" -ne 0 ] || fail "accepted a look that does not exist"
+	[[ "$output" == *"not found"* ]] || fail "no reason given: $output"
+	[[ "$output" == *"kodak_portra_400_nc"* ]] || fail "did not list what is available: $output"
+}
+
+@test "resolve_look_lut refuses a path carrying filter syntax" {
+	run resolve_look_lut "luts/looks/x',metadata=print:file=/tmp/x.cube" "$BATS_TEST_DIRNAME/.."
+	[ "$status" -ne 0 ] || fail "accepted a path that would close ffmpeg's quoting"
+}
+
+@test "the grade chain leaves the look filter out when there is no look" {
+	# Not an identity cube: an identity lookup pays interpolation error on every pixel for no
+	# change, and the coarse grid these film cubes use pays a visible amount of it.
+	LOOK_LUT="" run grade_chain /tmp/tone.cube 1.27 0.005
+	[ "$status" -eq 0 ]
+	# No 3D lookup at all, not merely one pointing somewhere else. Asserting on the path was the
+	# weaker version and it stayed green against a chain that emitted `lut3d=file=''` — a filter
+	# with an empty filename, which is worse than either intended behaviour. Found by mutation.
+	[[ "$output" != *"lut3d="* ]] || fail "a look filter survived: $output"
+	# One lookup left, and it is the tone curve on the luma plane.
+	[[ "$output" == *"lut1d=file='/tmp/tone.cube'"* ]] || fail "lost the tone curve: $output"
+	[[ "$output" == *"mergeplanes=0x001112"* ]] || fail "lost the luma-only merge: $output"
+}
+
+@test "the grade chain names the chosen look when there is one" {
+	LOOK_LUT="/tmp/portra.cube" run grade_chain /tmp/tone.cube 1.27 0.005
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"lut3d=file='/tmp/portra.cube':interp=tetrahedral,"* ]] \
+		|| fail "the look is not in the chain: $output"
+}
+
+@test "look.json is where the look LUT is chosen" {
+	# The whole point: a grade sent from the Bench changes the look LUT too, without editing a
+	# script. A cube nothing else in the repo would pick.
+	local work="$BATS_TEST_TMPDIR/lookchoice" look="$BATS_TEST_TMPDIR/other.json"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	python3 - "$BATS_TEST_DIRNAME/../look.json" "$look" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["look"]["lut"] = "kodak_portra_400_nc_NOPE"
+json.dump(d, open(sys.argv[2], "w"))
+PY
+	LOOK_FILE="$look" GRADE_WORK_DIR="$work" DRY=1 MATCH=0 STAB=0 \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -ne 0 ] || fail "a look.json naming a missing cube rendered anyway"
+	[[ "$output" == *"not found"* ]] || fail "no reason given: $output"
+}
+
+@test "LOOK=none renders a visibly different still than the shipped look" {
+	# End to end, through the real chain, because a string test cannot tell whether the filter that
+	# left the graph was the one doing the work.
+	local work="$BATS_TEST_TMPDIR/lookdiff"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	mv "$work/dist/frames/CLIP_t0s.png" "$work/with-look.png"
+	LOOK=none FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	! cmp -s "$work/with-look.png" "$work/dist/frames/CLIP_t0s.png" \
+		|| fail "LOOK=none produced the same pixels as the shipped look"
+}

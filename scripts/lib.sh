@@ -20,10 +20,48 @@ set -euo pipefail
 # Resolved relative to lib.sh itself, so every stage sees the same file regardless of cwd.
 LOOK_FILE="${LOOK_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/look.json}"
 
-# The look LUT is part of the grade, so it is named ONCE here rather than in each render path.
-# Both scripts used to carry their own copy of this path: two places to change a look, which is
-# exactly the drift look.json exists to end.
-LOOK_LUT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/luts/looks/kodak_portra_400_nc.cube"
+# The look LUT is part of the grade, so it is chosen in look.json like every other look value and
+# resolved HERE, once, rather than in each render path. Both scripts used to carry their own copy
+# of a hardcoded path: two places to change a look, which is the drift look.json exists to end.
+#
+# It is a choice now rather than a constant, because the app offers it as one. Two things that
+# follow are not obvious:
+#
+#   - "none" omits the filter entirely instead of passing an identity cube. An identity lookup
+#     still pays interpolation error on every pixel for no change, and a 13-point identity grid
+#     pays a visible amount of it.
+#   - the tone curve was tuned WITH this look in the chain, so a look and a tone belong to each
+#     other. Changing one without the other is a different grade, not the same grade in a
+#     different film stock. A preset is the pair.
+resolve_look_lut() {  # resolve_look_lut <name|none|path> <repo-root>   -> a path, or nothing
+	local name="$1" root="$2" path
+	case "$name" in
+		none|None|NONE|"") printf '' ; return 0;;
+		*/*|*.cube) path="$name";;
+		*) path="$root/luts/looks/${name}.cube";;
+	esac
+	# The path is spliced into `lut3d=file='...'` so a quote or a filter separator in it closes
+	# ffmpeg's quoting from the inside — the same reason require_clip_name exists one level up.
+	case "$path" in
+		*[\'\"\,\;\[\]]*)
+			echo "look LUT path contains filter syntax: $path" >&2
+			return 1;;
+	esac
+	if [ ! -f "$path" ]; then
+		echo "look LUT not found: $path" >&2
+		echo "  look.json's .look.lut names a cube in luts/looks/ (without the extension)," >&2
+		echo "  or \"none\" for no look at all. Available:" >&2
+		# A glob loop rather than `ls`: shellcheck rejects parsing ls output, and this also
+		# prints nothing at all when the folder is empty instead of an unmatched pattern.
+		for c in "$root/luts/looks/"*.cube; do
+			[ -f "$c" ] || continue
+			c="${c##*/}"
+			echo "    ${c%.cube}" >&2
+		done
+		return 1
+	fi
+	printf '%s\n' "$path"
+}
 
 # ffprobe misreports these files two ways at once, and this function exists to survive both.
 #
@@ -465,8 +503,12 @@ DELIVERY_BLEND="blend=all_mode=grainmerge:shortest=1"
 # applied it back in stage 01), and tag is DELIVERY_SETPARAMS wherever the result feeds filters
 # that negotiate a colourspace.
 grade_chain() {  # grade_chain <tone-lut> <sat> <warm> [head-prefix] [tag-prefix]
-	printf "%slut3d=file='%s':interp=tetrahedral,format=yuv444p10le,split=2[gc_y][gc_c];[gc_y]lut1d=file='%s':interp=linear,format=yuv444p10le[gc_t];[gc_t][gc_c]mergeplanes=0x001112:yuv444p10le,%shue=s=%s,colorbalance=rm=%s:bm=-%s" \
-		"${4:-}" "$LOOK_LUT" "$1" "${5:-}" "$2" "$3" "$3"
+	# An empty LOOK_LUT means no look: the filter is left out of the string entirely rather than
+	# pointed at an identity cube. See resolve_look_lut for why that is not the same thing.
+	local look=""
+	[ -z "${LOOK_LUT:-}" ] || look="lut3d=file='${LOOK_LUT}':interp=tetrahedral,"
+	printf "%s%sformat=yuv444p10le,split=2[gc_y][gc_c];[gc_y]lut1d=file='%s':interp=linear,format=yuv444p10le[gc_t];[gc_t][gc_c]mergeplanes=0x001112:yuv444p10le,%shue=s=%s,colorbalance=rm=%s:bm=-%s" \
+		"${4:-}" "$look" "$1" "${5:-}" "$2" "$3" "$3"
 }
 # The warp resamples BEFORE the downscale, so it happens at master resolution rather than at
 # delivery size. The trailing comma belongs to the prefix: callers splice the result directly into

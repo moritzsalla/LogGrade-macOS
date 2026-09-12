@@ -8,6 +8,10 @@
     "from them: 02-grade.sh regenerates it whenever this file is newer, so the .cube can never",
     "silently disagree with the numbers recorded here.",
     "",
+    "look.lut names the film-emulation cube by its stem in luts/looks/, or \"none\" for no look at",
+    "all. It lives here rather than in a script because it is a look value, and because the tone",
+    "block below was tuned WITH this cube in the chain: the two belong to each other.",
+    "",
     "Provenance of the current values: graded by eye in the Bench against the RAL references in",
     "frame, then adjusted once for shadow detail (black 0.015 -> 0.025, gamma 2.09 -> 2.02).",
     "saturation 1.27 is DELIBERATELY off-spec — it puts the traffic blue at B/G 2.39 against a",
@@ -18,6 +22,9 @@
     "window gets the same look rather than the same curve. It lives here because it is a",
     "measurement of the grade, not a knob: change it only if the look is re-tuned on another frame."
   ],
+  "look": {
+    "lut": "kodak_portra_400_nc"
+  },
   "tone": {
     "gamma": 2.02,
     "pivot": 0.39,

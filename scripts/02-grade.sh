@@ -44,6 +44,9 @@ TONE="$ROOT/luts/tone/shipped.cube"
 # percentiles at 0.07 and 0.00 — so it is zeroed rather than left as a decorative knob. The black
 # point is the live shadow control here.
 # Both are spliced into the filter graph; see require_number in lib.sh.
+# The look LUT is a look value like any other, so it comes from look.json. LOOK=<name|none|path>
+# overrides it for one run; the app sets it per render.
+LOOK_LUT="$(resolve_look_lut "${LOOK:-$(look .look.lut)}" "$ROOT")"
 SAT="$(require_number SAT "$(look .colour.saturation)")"
 WARM="$(require_number WARM "$(look .colour.warmth)")"
 OUT="$WORK/dist/02-graded/${CLIP}_graded.mov"
