@@ -1,4 +1,4 @@
-# loggrade
+# ffgrade-macOS
 
 A Mac app for grading iPhone ProRes + AppleLog footage, built on a measured ffmpeg chain.
 **Personal use tool, never distributed.**
