@@ -272,7 +272,7 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
     }
     switch key {
     case "c":
-        grade.isComparing = grade.previousImage != nil
+        grade.isComparing = grade.comparisonImage != nil
         return nil
     case "p", " ":
         grade.renderPreview()

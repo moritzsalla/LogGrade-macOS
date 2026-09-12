@@ -11,6 +11,11 @@
 # should not stop working when a checkout moves. A debug build points at the working copy instead,
 # so engine scripts stay editable without a rebuild — see LOGGRADE_ENGINE.
 #
+# WHICH CONFIGURATION. Debug by default, because that is the one that points at the working copy
+# of the engine. It costs something real though: the live preview grades a frame on the CPU per
+# slider tick, measured at 44ms in debug against 3.9ms in release — about 22 frames a second
+# against a limit nothing reaches. Use --release when you are grading rather than building.
+#
 # Usage:  ./app/make-app.sh [--release]
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

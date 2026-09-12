@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import Combine
 import GradeKit
 import SwiftUI
@@ -40,6 +41,138 @@ final class GradeModel: ObservableObject {
     /// The cubes on disk, read once: the interface offers what is there.
     let availableLooks: [String]
 
+    // MARK: - the live tier
+
+    /// The clip through the conversion and the look, with the tone stage neutral: the input the
+    /// live model expects. Rendered once per clip by the engine, then graded in the app on every
+    /// control change so a drag is followed rather than waited for.
+    private var baseImage: CGImage?
+    /// What the base was rendered from, all three parts. The look's correction stage runs BEFORE
+    /// the conversion so changing it invalidates the base and needs the engine again — a live tier
+    /// cannot fake that. The clip and the timecode invalidate it for a blunter reason: a base kept
+    /// across a clip change would grade the picture you are no longer looking at, live, and say it
+    /// was live.
+    private var baseSignature: String?
+    private var baseClip: URL?
+    private var baseSeconds: Double?
+    @Published var isLive = false
+    /// The last frame the ENGINE produced, kept apart from `previewImage` because that one holds
+    /// live approximations too. Compare reaches for this, so that holding C answers a question
+    /// about the grade rather than about the model.
+    @Published private var lastExactImage: NSImage?
+
+    /// What holding C shows: the picture as it was before the adjustment in progress.
+    ///
+    /// Which frame that is depends on where you are. Mid-drag it is the render this drag started
+    /// from, because the question is what the move has done. Once the render lands, that frame IS
+    /// the picture, so the comparison moves back one to the render before it.
+    var comparisonImage: NSImage? { isLive ? lastExactImage : previousImage }
+    /// Set while a control is actually under the pointer. Only a real drag goes live: a preset
+    /// switch or an opened project moves the same values and wants the render, not a model of it.
+    private var isDragging = false
+    /// True while the base is being rendered. Without it, a tone drag in that window reports the
+    /// correction message, which is not what is happening.
+    @Published private var isPreparingLive = false
+
+    /// The tone curve is the engine's own table, so it is regenerated rather than evaluated here.
+    /// Throttled: generating costs about a tenth of a second and a drag does not need a new one
+    /// every frame, only a recent one.
+    private var lastCurveAt = Date.distantPast
+
+    private func signature(of look: Look) -> String {
+        "\(look.lookLUT)|\(look.correct.exposure)|\(look.correct.temp)|\(look.correct.tint)|"
+            + "\(look.correct.slope)|\(look.correct.offset)|\(look.correct.power)|"
+            + "\(look.correct.lumMix)"
+    }
+
+    /// A control went under the pointer.
+    ///
+    /// The render in flight is for a look nobody wants any more — the person is already moving
+    /// away from it — so it is stopped here rather than left to finish and be discarded. Without
+    /// this, letting go and immediately grabbing again gives three dead seconds, which is the
+    /// stutter the whole tier exists to remove.
+    func beginDrag() {
+        isDragging = true
+        // Unless it is the render that builds the base. Cancelling that one leaves nothing to be
+        // live from, so grabbing a control every couple of seconds would keep the live tier from
+        // ever starting — the render would be killed each time by the gesture that needs it.
+        let haveBase = baseImage != nil && baseClip == selectedClip?.url
+            && baseSeconds == previewSeconds && baseSignature == signature(of: look)
+        if isRendering && haveBase {
+            previewGeneration += 1
+            if let running = previewProcess, running.isRunning { EngineRun.stop(running) }
+            isRendering = false
+        }
+    }
+
+    func endDrag() { isDragging = false }
+
+    /// Follows the controls. Applies the verified model to the base frame and shows the result;
+    /// falls back to marking the preview stale when the change is one the model cannot apply.
+    func liveUpdate() {
+        guard isDragging, let clip = selectedClip else { return }
+        // Nothing to be live from yet, and nothing to say about it: the first preview has not
+        // happened, so the controls have nothing to move against.
+        guard baseImage != nil, baseClip == clip.url, baseSeconds == previewSeconds else { return }
+        if isPreparingLive {
+            status = "preparing the live preview…"
+            return
+        }
+        if signature(of: look) != baseSignature {
+            // The correction stage runs BEFORE Apple's conversion, so nothing downstream of the
+            // conversion can show it. The render on release is what shows it, and it is already
+            // scheduled, so this says what is true rather than asking for a button press.
+            isLive = false
+            status = "corrections run before the conversion — they appear on release"
+            return
+        }
+        if Date().timeIntervalSince(lastCurveAt) > 0.12 {
+            lastCurveAt = Date()
+            refreshCurve()
+        }
+        applyLive()
+    }
+
+    /// Grades the base with whatever curve has arrived. Called again when a newer curve lands, so
+    /// the last frame of a drag is not left showing a curve one generation behind.
+    private func applyLive() {
+        guard let base = baseImage, let curve = curve else { return }
+        let live = LiveGrade(curve: curve, saturation: look.colour.saturation,
+                             warmth: look.colour.warmth)
+        guard let graded = live.apply(to: base) else { return }
+        previewImage = NSImage(cgImage: graded, size: NSSize(width: graded.width,
+                                                             height: graded.height))
+        scopes = Scopes.measure(graded)
+        isLive = true
+        status = "live — the render will confirm it"
+    }
+
+    /// Renders the base the live tier grades from: the same chain with the tone stage neutral.
+    /// Small, because it is dragged against rather than judged, and a drag needs frames.
+    private func refreshBase(for clip: ClipList.Entry, seconds: Double, signature: String) {
+        let neutral = LiveGrade.base(for: look)
+        // MATCH OFF, which is the whole reason this parameter exists. With it on, gamma 1 is not
+        // passed through: the engine solves a per-clip gamma from it and clamps the answer to at
+        // least 1.2, so the base would arrive with a curve already in it and every live frame
+        // would be that curve twice.
+        if let frame = try? renderer.render(clip: clip.url, seconds: seconds, look: neutral,
+                                            height: 480, match: false),
+           let image = NSImage(contentsOf: frame.url)?
+            .cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            DispatchQueue.main.async {
+                self.baseImage = image
+                self.baseSignature = signature
+                self.baseClip = clip.url
+                self.baseSeconds = seconds
+                self.isPreparingLive = false
+            }
+        } else {
+            // A base that will not render is not worth a message of its own: the exact preview
+            // still works, and the controls fall back to rendering on release.
+            DispatchQueue.main.async { self.isPreparingLive = false }
+        }
+    }
+
     /// Which preview request is current. A render that finishes after a newer one was asked for
     /// is answering a question nobody is still asking.
     private var previewGeneration = 0
@@ -68,17 +201,32 @@ final class GradeModel: ObservableObject {
     /// the table the render applies. It costs about a tenth of a second, which is why it can be
     /// done on every change rather than only on release.
     func refreshCurve() {
-        let tone = look.tone
+        var tone = look.tone
         let generator = engine.toneGenerator
+        let solver = engine.gammaSolver
+        // The reference gamma is what the slider holds; the engine renders the SOLVED one. Drawing
+        // the slider value was a graph of a curve nothing applies, and previewing it would be a
+        // picture nothing renders.
+        let clip = selectedClip?.url
+        let reference = look.matchReferenceYAVG
+        // Read on `queue`, not here. `measuredExposure` is written on that same serial queue by
+        // every render, and a Swift dictionary read from another thread while one writes is not
+        // merely stale — it is undefined.
         queue.async { [weak self] in
+            guard let self else { return }
+            if let measured = clip.flatMap({ self.renderer.measuredYAVG(for: $0) }) {
+                tone.gamma = ToneCurve.solvedGamma(using: solver, clipYAVG: measured,
+                                                   referenceYAVG: reference,
+                                                   referenceGamma: tone.gamma)
+            }
             let curve = try? ToneCurve.generate(using: generator, tone: tone)
-            DispatchQueue.main.async { self?.curve = curve }
+            DispatchQueue.main.async {
+                self.curve = curve
+                if self.isLive { self.applyLive() }
+            }
         }
     }
 
-    /// ON RELEASE, not on every movement. The exact preview is a render through the real chain,
-    /// which takes a second or two: firing it per pixel of slider travel would queue work nobody
-    /// is waiting for any more. This is the scanner's preview-scan gesture — adjust, then look.
     // MARK: - presets and the project file
 
     /// Switches to a preset, which replaces the whole grade: a look cube together with its tone
@@ -246,6 +394,10 @@ final class GradeModel: ObservableObject {
             EngineRun.stop(running)
         }
 
+        // Decided here, on the main thread, because `baseSignature` is only ever touched here.
+        let baseSig = signature(of: look)
+        let needsBase = baseSignature != baseSig || baseClip != clip.url || baseSeconds != seconds
+
         isRendering = true
         status = "rendering…"
         queue.async { [weak self] in
@@ -260,12 +412,28 @@ final class GradeModel: ObservableObject {
                     .map { Scopes.measure($0) }
                 DispatchQueue.main.async {
                     guard generation == self.previewGeneration else { return }
-                    self.previousImage = self.previewImage
+                    // Compare holds the last EXACT frame, from its own slot. Taking it from
+                    // `previewImage` would sometimes take a live approximation instead, which
+                    // answers a question about the model rather than about the grade.
+                    self.previousImage = self.lastExactImage
+                    self.lastExactImage = image
                     self.previewImage = image
                     self.scopes = measured
                     self.renderedLook = look
                     self.isRendering = false
+                    self.isLive = false
                     self.status = "grade only — no grain, sharpening, denoise, stabiliser or dither"
+                    // The FIRST render of a clip is the one that measures its mean, so until it
+                    // lands there is no solved gamma and the graph beside the sliders is drawing
+                    // the reference curve. Regenerate now that the answer exists.
+                    self.refreshCurve()
+                }
+                // AFTER the exact frame is on screen, not before it. The base is only needed for
+                // the next drag, so rendering it first would add its second to the wait for a
+                // picture somebody is already looking at.
+                if needsBase {
+                    DispatchQueue.main.async { self.isPreparingLive = true }
+                    self.refreshBase(for: clip, seconds: seconds, signature: baseSig)
                 }
             } catch {
                 guard generation == self.previewGeneration else { return }

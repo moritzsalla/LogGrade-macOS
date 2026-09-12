@@ -41,7 +41,10 @@ So the preview is the render. One frame, through the real chain, on release.
 
 ## Consequences
 
-- **Adjusting a control costs a second or two rather than being instant.** Accepted. A preview that
+- **Adjusting a control costs a second or two rather than being instant.** ~~Accepted.~~ Superseded
+  by the live tier below, which follows a drag and hands over to the exact render on release. The
+  sentence that follows still holds and is why the live tier had to be measured before it shipped.
+  A preview that
   is fast and wrong is worse than one that is slow and true, and this project's entire history is
   silent wrongness — a filter negotiating 8-bit, tags never written, a curve turning signage neon.
 - **The scopes are better for it.** They read the rendered frame, so they measure what was produced
@@ -73,3 +76,40 @@ That is now an ordinary piece of work with a harness that can hold it, rather th
 gap. A GPU preview is buildable when someone wants one; this record no longer refuses it, it only
 says the trims are not finished. The exact preview stays the default regardless, because it costs a
 second and cannot be wrong.
+
+## The live tier is built, on the CPU, and the exact render still decides
+
+With the cause in hand this became ordinary work, and it was done. `GradeKit/LiveGrade.swift` is
+the model as measured: the curve per RGB channel, luma taken from that, the original chroma scaled
+by saturation, clamped in the plane, then colorbalance's midtone window. It is held to the golden's
+own per-case tolerances — the same numbers the JavaScript is held to, not looser ones — and to the
+render itself on a real frame.
+
+**Against the render, on `IMG_0607` at the shipped look: 0.78 code values mean, 28 worst.** The
+worst pixels are in the shadows, where the base frame's 8-bit round trip costs the most.
+
+**On the CPU rather than the GPU.** Grading a 270×480 frame costs 3.9ms in a release build and
+44ms in a debug one. The GPU would buy nothing a person could perceive and would cost a shader,
+a runtime compile and a third implementation of the image. This is the rare case where the slower
+route is also the simpler one, so the plan's Metal tier is not built and is not owed.
+
+### What the tier cannot do, and says so
+
+The correction stage — exposure, white balance, the CDL wheels — runs **before** Apple's
+conversion. Nothing downstream of the conversion can show it, so moving one of those controls
+drops out of live mode and says why. The render on release shows it, which is already scheduled.
+
+### The mistake this nearly shipped with
+
+The tone slider is not the rendered curve. With exposure matching on, which is every render this
+app performs, `tone.gamma` is the *reference* gamma and the engine solves a per-clip gamma from it
+so that every clip lands where the look was tuned. On this footage the shipped 2.02 solves to
+1.381. The interface had been drawing its curve graph straight from the slider since that graph was
+built, which means **the graph has never shown the curve the render applies.** The live tier made
+it visible because a wrong curve is obvious in a picture and invisible in a line drawing.
+
+Both now subprocess `solve-gamma.py` before `make-tone-lut.py`, for the same one-home reason the
+curve itself is subprocessed. `LiveGradeTests` keeps the mutation as a test rather than as a note:
+one case asserts the solved curve is within two code values of the render, and a second asserts the
+unsolved one is more than four out, so the day the solve stops earning its subprocess the test says
+so.

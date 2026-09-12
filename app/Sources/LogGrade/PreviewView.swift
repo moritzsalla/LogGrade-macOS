@@ -3,9 +3,11 @@ import SwiftUI
 
 /// The picture, in a recess, with nothing bright next to it.
 ///
-/// The panel says when the reading is out of date. An instrument that shows a stale value while
-/// the controls have moved on is lying, and this one renders on release rather than continuously,
-/// so the gap is real and worth naming.
+/// The panel always says what it is showing. There are three states and they are not
+/// interchangeable: a live approximation while a control is moving, the exact render once it
+/// lands, and a stale render when a control the live tier cannot model has moved. An instrument
+/// that shows a stale value while the controls have moved on is lying, so the stale one is dimmed
+/// and named; the live one is neither, because it does answer the controls.
 struct PreviewView: View {
     @ObservedObject var model: GradeModel
 
@@ -16,13 +18,15 @@ struct PreviewView: View {
         VStack(spacing: 12) {
             ZStack {
                 Rectangle().fill(Palette.well)
-                if let image = comparing ? (model.previousImage ?? model.previewImage)
+                if let image = comparing ? (model.comparisonImage ?? model.previewImage)
                                           : model.previewImage {
                     ZStack {
                         Image(nsImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .opacity(model.isStale ? 0.55 : 1)
+                            // Dimmed when the picture no longer answers the controls. A live
+                            // frame does answer them, so it is not dimmed.
+                            .opacity(model.isStale && !model.isLive ? 0.55 : 1)
                         // The crop is judged on the picture, because the question it answers is
                         // what is in the frame and no number answers that.
                         if model.project.delivery.feed, let geometry = model.cropGeometry {
@@ -64,11 +68,13 @@ struct PreviewView: View {
                     .disabled(model.selectedClip == nil || model.isRendering)
                 Text("hold C to compare")
                     .font(.system(size: 11))
-                    .foregroundColor(model.previousImage == nil ? Palette.inkTertiary
-                                                                : Palette.inkSecondary)
+                    .foregroundColor(model.comparisonImage == nil ? Palette.inkTertiary
+                                                                   : Palette.inkSecondary)
                 Spacer()
                 if comparing {
                     Readout(text: "previous")
+                } else if model.isLive {
+                    Readout(text: "live — the render confirms it")
                 } else if model.isStale {
                     Readout(text: "controls moved since this render")
                 }

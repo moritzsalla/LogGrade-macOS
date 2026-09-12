@@ -50,8 +50,13 @@ numbers right-aligned against the rail's far edge.
 1. The photograph is the only saturated thing on screen.
 2. Structure encodes the chain: the rail shows order, locking, and what the preview cannot show.
 3. Readouts are instrument-grade: monospaced, tabular, editable by typing as well as dragging.
-4. The preview says when it is out of date. An instrument that shows a stale reading is lying.
-5. Spend the boldness on the rail. Everything else is quiet greys and one yellow.
+4. The picture follows the control. A grading control you cannot see the effect of while you move
+   it is a control you cannot find a value with — you guess, wait, and guess again. So the preview
+   is live while a control is moving and exact once it lands.
+5. The preview always says which of the three it is showing: live, exact, or stale. An instrument
+   that shows a stale reading is lying, and one that passes an approximation off as the render is
+   lying in a way that is harder to catch.
+6. Spend the boldness on the rail. Everything else is quiet greys and one yellow.
 
 ## What the first build got wrong, and what it cost
 
@@ -67,3 +72,18 @@ Four things, all found by looking at a screenshot rather than by reasoning:
   dots, so the panel disagreed with the file it produces. The formatter is POSIX.
 - **The preview button was the brightest object on screen**, which in a tool for judging an image
   is the one thing it must never be.
+
+## What the second build got wrong
+
+One thing, and it was not found by looking at a screenshot. It was found by being asked.
+
+**The preview did not follow the controls.** Every adjustment meant letting go of the slider and
+waiting about three seconds for a render. A UX audit run over this interface listed seven gaps and
+did not list that one — it named "superseded previews are not cancelled", which is a symptom of
+render-on-release, while treating render-on-release itself as settled. The audit was run against
+the reasoning already written down rather than against what the tool should feel like, and a
+justification in a decision record is exactly the kind of thing an audit has to be willing to
+question. The ADR that justified it had already been amended to say the obstacle was gone.
+
+The fix is in `docs/adr/0009`. The check it suggests, for next time: for each control, say how long
+it takes to see its effect, then ask whether anyone would use a control that costs that.

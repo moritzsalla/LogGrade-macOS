@@ -152,11 +152,19 @@ struct InspectorView: View {
                 .foregroundColor(Palette.inkSecondary)
                 .frame(width: 84, alignment: .leading)
             Slider(value: value, in: range) { editing in
-                if !editing {
+                if editing {
+                    model.beginDrag()
+                } else {
+                    model.endDrag()
                     model.refreshCurve()
-                    model.renderPreview()   // on release: a render is seconds, not milliseconds
+                    model.renderPreview()   // on release: the exact render confirms the live one
                 }
             }
+            // DURING the drag, not only after it. A grading control that shows nothing until you
+            // let go is a control you cannot find a value with: you guess, wait, and guess again.
+            // The live tier is an approximation held to the same golden as the render, so it can
+            // be dragged against; the render on release is what is judged.
+            .onChange(of: value.wrappedValue) { _ in model.liveUpdate() }
             .controlSize(.mini)
             .tint(Palette.inkTertiary)
             TextField("", value: value, formatter: Self.formatter(format))

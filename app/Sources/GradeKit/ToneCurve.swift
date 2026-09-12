@@ -36,6 +36,34 @@ public struct ToneCurve: Equatable {
         }
     }
 
+    /// The gamma the engine will actually apply to this clip.
+    ///
+    /// THE SLIDER IS NOT THE CURVE. With exposure matching on — which is the engine's default and
+    /// what every render in this app uses — `tone.gamma` is the REFERENCE gamma, and the engine
+    /// solves a per-clip gamma from it so that every clip lands where the look was tuned. Drawing
+    /// or previewing the slider value directly shows a curve nothing renders: on this footage the
+    /// solve moves 2.02 by enough to be obvious in the shadows. Subprocessed rather than ported,
+    /// for the reason the curve itself is subprocessed — one home, no drift.
+    public static func solvedGamma(using solver: URL, clipYAVG: Double, referenceYAVG: Double,
+                                   referenceGamma: Double) -> Double {
+        let process = Process()
+        process.executableURL = solver
+        process.arguments = [String(clipYAVG), String(referenceYAVG), String(referenceGamma)]
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = Pipe()
+        // A solver that will not run is not a reason to draw nothing; the reference gamma is what
+        // the engine itself falls back to when the probe says nothing usable.
+        do { try process.run() } catch { return referenceGamma }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0,
+              let value = Double(String(decoding: data, as: UTF8.self)
+                  .trimmingCharacters(in: .whitespacesAndNewlines))
+        else { return referenceGamma }
+        return value
+    }
+
     /// Runs the engine's generator and parses what it writes. Arguments are the same names the
     /// engine passes, so there is one spelling of each parameter across the two languages.
     public static func generate(using generator: URL, tone: Look.Tone) throws -> ToneCurve {
