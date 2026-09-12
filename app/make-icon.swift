@@ -7,6 +7,9 @@
 // a second copy of it that goes stale the day the look is re-tuned. Re-run this after a re-grade
 // and the icon follows.
 //
+// RUN IT FROM THE REPO ROOT. It reads look.json and scripts/ relative to the working directory,
+// and writes dist/AppIcon.icns there.
+//
 // Usage:  swift app/make-icon.swift            (writes dist/AppIcon.icns)
 
 import AppKit

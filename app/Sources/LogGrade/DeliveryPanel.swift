@@ -28,14 +28,17 @@ struct DeliveryPanel: View {
 
             // Labels get room rather than wrapping mid-word, which is what "heig / ht" was.
             HStack(spacing: 8) {
-                Text("height").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
+                Text("size").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
                     .fixedSize()
+                // Spelled as dimensions, not as "1080p". The output is portrait, so 1080p means a
+                // height of 1920 — which is the number stored, and labelling it "height: 1080p"
+                // was a fresh contradiction in a pass meant to remove them.
                 Picker("", selection: $model.project.delivery.height) {
-                    Text("1080p").tag(1920)
-                    Text("1440p").tag(2560)
-                    Text("2160p").tag(3840)
+                    Text("1080 × 1920").tag(1920)
+                    Text("1440 × 2560").tag(2560)
+                    Text("2160 × 3840").tag(3840)
                 }
-                .labelsHidden().frame(width: 84)
+                .labelsHidden().frame(width: 108)
                 Spacer(minLength: 4)
                 Text("fps").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
                     .fixedSize()
