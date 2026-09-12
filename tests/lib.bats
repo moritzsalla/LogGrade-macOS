@@ -1351,13 +1351,42 @@ for line in sys.stdin.read().splitlines():
 	FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || { echo "$output"; false; }
-	local png="$work/dist/frames/CLIP_t0s.png"
+	local png="$work/dist/frames/CLIP_t0s_graded.png"
 	[ -s "$png" ] || fail "no preview frame at $png: $output"
 	run ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,height \
 		-of default=nw=1:nk=1 "$png"
 	[[ "$output" == *"png"* ]] || fail "not a PNG: $output"
 	# A preview is not a delivery. Nothing may land where someone uploads from.
 	[ -z "$(ls -A "$work/dist/03-final" 2>/dev/null)" ] || fail "FRAME wrote a deliverable"
+}
+
+@test "FRAME_STAGE=source gives the picture with no grade on it at all" {
+	# The app's live preview grades this frame itself, so that the correction stage — which runs
+	# BEFORE Apple's conversion and therefore cannot be recovered from a converted frame — follows
+	# a slider too. If this ever returned the graded frame the preview would apply the whole chain
+	# twice and look plausible while being wrong.
+	local work="$BATS_TEST_TMPDIR/stage"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	FRAME=0 FRAME_HEIGHT=128 MATCH=0 FRAME_STAGE=source GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	local graded="$work/dist/frames/CLIP_t0s_graded.png"
+	local source="$work/dist/frames/CLIP_t0s_source.png"
+	[ -s "$graded" ] || fail "no graded frame: $output"
+	# SEPARATE FILES. One name for both stages meant the second render silently replaced the first,
+	# which is how a test in the Swift suite once compared a frame against itself.
+	[ -s "$source" ] || fail "no source frame: $output"
+	! cmp -s "$graded" "$source" || fail "the source stage rendered the graded chain"
+}
+
+@test "FRAME_STAGE refuses a value that is neither stage" {
+	run env FRAME=0 FRAME_STAGE=halfway "$SCRIPTS/grade.sh" "$FIXTURES/portrait_tagged.mov"
+	[ "$status" -ne 0 ] || fail "an unknown stage was accepted"
+	[[ "$output" == *"REFUSE_FRAME_STAGE"* ]] || fail "no refusal code: $output"
 }
 
 @test "FRAME and PROOF together are refused rather than silently resolved" {
@@ -1377,7 +1406,7 @@ for line in sys.stdin.read().splitlines():
 		run --separate-stderr "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *'"event":"frame"'* ]] || fail "no frame event: $output"
-	[[ "$output" == *'"path":"'*"CLIP_t0s.png"* ]] || fail "the event did not name the file: $output"
+	[[ "$output" == *'"path":"'*"CLIP_t0s_graded.png"* ]] || fail "the event did not name the file: $output"
 	printf '%s\n' "$output" | python3 -c '
 import json, sys
 for line in sys.stdin.read().splitlines():
@@ -1572,11 +1601,11 @@ PY
 	FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || { echo "$output"; false; }
-	mv "$work/dist/frames/CLIP_t0s.png" "$work/with-look.png"
+	mv "$work/dist/frames/CLIP_t0s_graded.png" "$work/with-look.png"
 	LOOK=none FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || { echo "$output"; false; }
-	! cmp -s "$work/with-look.png" "$work/dist/frames/CLIP_t0s.png" \
+	! cmp -s "$work/with-look.png" "$work/dist/frames/CLIP_t0s_graded.png" \
 		|| fail "LOOK=none produced the same pixels as the shipped look"
 }
 
@@ -1772,11 +1801,11 @@ PY
 	[[ "$output" == *"correction: exposure=0.75"* ]] || fail "said nothing about it: $output"
 	[ -s "$work/dist/.grade-work/correct.cube" ] || fail "no cube was generated"
 	# And it changed the picture. A string test cannot tell whether the filter did anything.
-	mv "$work/dist/frames/CLIP_t0s.png" "$work/corrected.png"
+	mv "$work/dist/frames/CLIP_t0s_graded.png" "$work/corrected.png"
 	FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ]
-	! cmp -s "$work/corrected.png" "$work/dist/frames/CLIP_t0s.png" \
+	! cmp -s "$work/corrected.png" "$work/dist/frames/CLIP_t0s_graded.png" \
 		|| fail "a 0.75 stop exposure correction changed nothing"
 }
 
@@ -1874,7 +1903,10 @@ if not any(json.loads(l)["event"] == "run_done" for l in lines):
 @test "the app bundle script produces something launchable" {
 	command -v swift >/dev/null || skip "no swift toolchain"
 	local app="$BATS_TEST_DIRNAME/../dist/LogGrade.app"
-	run "$BATS_TEST_DIRNAME/../app/make-app.sh"
+	# --debug on purpose. This test is about the bundle's SHAPE — an executable, an Info.plist, the
+	# engine vendored beside it — none of which optimisation affects, and a release build of the
+	# package costs twenty seconds of every suite run to prove nothing this test asserts.
+	run "$BATS_TEST_DIRNAME/../app/make-app.sh" --debug
 	[ "$status" -eq 0 ] || { echo "$output"; false; }
 	[ -x "$app/Contents/MacOS/LogGrade" ] || fail "no executable in the bundle"
 	[ -f "$app/Contents/Info.plist" ] || fail "no Info.plist, so macOS treats it as a stray binary"
@@ -1882,6 +1914,9 @@ if not any(json.loads(l)["event"] == "run_done" for l in lines):
 	# because a checkout moved.
 	[ -x "$app/Contents/Resources/engine/scripts/grade.sh" ] || fail "the engine was not vendored"
 	[ -f "$app/Contents/Resources/engine/look.json" ] || fail "look.json was not vendored"
+	# Drawn from the shipped curve by make-icon.swift. Without it macOS gives the app the generic
+	# document icon, which is how you tell at a glance that a build went wrong.
+	[ -f "$app/Contents/Resources/AppIcon.icns" ] || fail "the icon was not drawn into the bundle"
 }
 
 @test "a measured exposure can be handed back instead of measured again" {

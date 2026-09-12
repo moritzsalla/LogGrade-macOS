@@ -13,19 +13,24 @@ event stream — it never builds a filter graph, and a test renders one clip bot
 the bytes match, so that cannot quietly stop being true.
 
 ```sh
-./app/make-app.sh                  # builds dist/LogGrade.app
-swift test --package-path app      # the app's own suite
+./app/make-app.sh                  # builds dist/LogGrade.app, optimised
+./app/make-app.sh --debug          # unoptimised; the live preview is unusable, see below
+swift test --package-path app      # the app's own suite, about a minute
 ./scripts/check.sh                 # lint, grade parity, bats, and the Swift suite
 ./scripts/check.sh --conformance   # plus: still byte-identical to the precursor?
 ```
 
-Three things about the app are worth knowing before using it:
+Four things about the app are worth knowing before using it:
 
-- **The preview is the render.** One frame through the real chain, on release rather than
-  continuously, so it takes a second or two and says when it is out of date. It covers the grade
-  only: grain, sharpening, denoise, the stabiliser and the dither are delivery-stage and a still
-  cannot show them. There is no GPU preview, and `docs/adr/0009_THE_PREVIEW_STAYS_EXACT_UNTIL_THE_DIVERGENCE_IS_EXPLAINED.md`
-  records that as a decision made on evidence rather than on time.
+- **The picture follows every control.** While a control is moving the whole chain runs in the app
+  on a decoded source frame, which costs 4ms for a tone move and 15ms for a correction; when you
+  let go, the engine renders the same frame and that is what gets judged. The live picture is
+  within about 1.3 code values of the render, measured, and the panel always says which of the two
+  you are looking at. `docs/adr/0009_THE_PREVIEW_STAYS_EXACT_UNTIL_THE_DIVERGENCE_IS_EXPLAINED.md`
+  carries the numbers and what licenses each piece of maths that had to be written twice.
+- **Build it optimised.** The live preview is a tight loop over half a million cube samples, and a
+  debug build takes 1.5 seconds per frame against 12.7ms. That is why `make-app.sh` takes `--debug`
+  rather than `--release`.
 - **The crop is dragged on the picture**, per clip, because the offset is a composition call and
   one clip's framing applied to a batch produces files that all look done. A Feed render is blocked
   until every clip has one.

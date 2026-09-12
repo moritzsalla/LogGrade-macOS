@@ -4,9 +4,11 @@ import Foundation
 /// The grade, applied in the app, so a control can be dragged and seen.
 ///
 /// THIS IS A SECOND IMPLEMENTATION OF THE IMAGE, which this repo allows only when a test can hold
-/// it to the first. That test exists: `tests/grade-parity.py` measures this model against ffmpeg's
-/// own output over a probe, and `LiveGradeTests` runs the same comparison against the same golden
-/// in Swift. On the shipped look it is within about 2 code values of the render.
+/// it to the first. Two exist: `tests/grade-parity.py` measures this model against ffmpeg's own
+/// output over a probe and `LiveGradeTests` runs the same comparison in Swift, while
+/// `LiveChainTests` measures the whole live preview against the engine's own render of real
+/// footage. On the shipped look the finished picture is 1.3 code values from the render on
+/// average.
 ///
 /// WHAT IT MODELS, and why it is not the obvious thing. `lut1d` cannot process a YUV plane, so
 /// ffmpeg converts to planar RGB around it: the tone curve is applied to R, G and B INDEPENDENTLY,
@@ -14,9 +16,10 @@ import Foundation
 /// the description — curve the luma — is wrong by about 30 code values, which is what the browser
 /// bench did for months.
 ///
-/// WHAT IT DOES NOT MODEL. The input correction runs BEFORE Apple's conversion, so it cannot be
-/// applied to an already-converted frame: changing exposure or white balance needs the engine.
-/// The interface says so rather than showing a picture that ignores a control.
+/// WHERE IT SITS. This is the second half of the live preview: `LiveChain` puts the source frame
+/// through the correction, Apple's conversion and the film look, and hands the result here. So
+/// this models exactly the part of the chain that follows those — the tone LUT and the two trims —
+/// and nothing else.
 public struct LiveGrade {
     public let curve: ToneCurve
     public let saturation: Double
@@ -48,7 +51,7 @@ public struct LiveGrade {
     /// differently — one evaluates the curve, one reads a table — and that is the only difference
     /// between them that is allowed to exist.
     @inline(__always)
-    func merge(r: Double, g: Double, b: Double,
+    public func merge(r: Double, g: Double, b: Double,
                lr: Double, lg: Double, lb: Double) -> (Double, Double, Double) {
         let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
         var cb = (b - y) / 1.8556
@@ -80,60 +83,5 @@ public struct LiveGrade {
     public func apply(r: Double, g: Double, b: Double) -> (Double, Double, Double) {
         func curved(_ v: Double) -> Double { curve.value(at: min(1, max(0, v / 255))) * 255 }
         return merge(r: r, g: g, b: b, lr: curved(r), lg: curved(g), lb: curved(b))
-    }
-
-    /// The look to render the base frame with: everything this model applies, turned off.
-    ///
-    /// IT LIVES HERE, next to the model that consumes it, because the two are one contract. Held
-    /// separately they drift silently: a control added to the model and not neutralised here gets
-    /// applied twice, and nothing would say so — the picture would simply be wrong in a way that
-    /// looks like a grade. The test uses this same function, so it tests the arrangement the app
-    /// runs rather than a second copy of it that happens to agree today.
-    ///
-    /// Render it with exposure matching OFF. Matching does not pass a gamma of 1 through: it
-    /// solves a per-clip gamma from it and `solve-gamma.py` clamps the answer to at least 1.2.
-    public static func base(for look: Look) -> Look {
-        var base = look
-        base.tone.gamma = 1
-        base.tone.contrast = 1
-        base.tone.toe = 0
-        base.tone.shoulder = 0
-        base.tone.black = 0
-        base.colour.saturation = 1
-        base.colour.warmth = 0
-        return base
-    }
-
-    /// A whole frame. The base image is the clip through the conversion and the look with the tone
-    /// stage neutral — which is the input this model expects, and what the engine renders when it
-    /// is handed an identity curve.
-    public func apply(to image: CGImage) -> CGImage? {
-        let width = image.width, height = image.height
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        let space = CGColorSpaceCreateDeviceRGB()
-        guard let context = CGContext(data: &pixels, width: width, height: height,
-                                      bitsPerComponent: 8, bytesPerRow: width * 4, space: space,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-        else { return nil }
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-
-        // A 256-entry table, because the curve is the same for every pixel and evaluating it four
-        // million times is the difference between a drag that follows and one that stutters.
-        var table = [Double](repeating: 0, count: 256)
-        for i in 0..<256 { table[i] = curve.value(at: Double(i) / 255) * 255 }
-
-        var index = 0
-        while index + 3 < pixels.count {
-            let r = pixels[index], g = pixels[index + 1], b = pixels[index + 2]
-            // The table is exact rather than an approximation: the input is 8-bit, so its 256
-            // entries are every value the curve can be asked for.
-            let out = merge(r: Double(r), g: Double(g), b: Double(b),
-                            lr: table[Int(r)], lg: table[Int(g)], lb: table[Int(b)])
-            pixels[index] = UInt8(out.0)
-            pixels[index + 1] = UInt8(out.1)
-            pixels[index + 2] = UInt8(out.2)
-            index += 4
-        }
-        return context.makeImage()
     }
 }

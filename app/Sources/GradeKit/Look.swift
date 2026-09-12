@@ -24,6 +24,14 @@ public struct Look: Equatable {
             self.slope = slope; self.offset = offset; self.power = power; self.lumMix = lumMix
         }
 
+        /// The arguments the engine's generator takes, spelled once so the interface and the
+        /// render cannot disagree about which knob is which.
+        public func generatorArguments(size: Int) -> [String] {
+            ["--stdout", "--exposure", String(exposure), "--temp", String(temp),
+             "--tint", String(tint), "--slope", slope, "--offset", offset, "--power", power,
+             "--lum-mix", String(lumMix), "--size", String(size)]
+        }
+
         /// True when this correction does nothing. The engine decides this for itself — the
         /// generator owns the rule — but the interface needs to know whether to show the stage as
         /// active, and a neutral correction is what keeps a render identical to the precursor's.

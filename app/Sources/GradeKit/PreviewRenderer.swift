@@ -46,8 +46,17 @@ public final class PreviewRenderer {
     /// grades from, which wants the tone stage to do nothing. With matching on, a gamma of 1 is
     /// not passed through — it is solved, and `solve-gamma.py` clamps the result to at least 1.2,
     /// so the "neutral" base would come back with a curve already baked into it.
+    /// Which frame the engine should produce.
+    public enum Stage: String {
+        /// Everything a control moves, through the real chain. What gets judged.
+        case graded
+        /// The decoded Apple Log picture with no chain at all, which is what `LiveChain` grades in
+        /// this process while a control is moving.
+        case source
+    }
+
     public func render(clip: URL, seconds: Double, look: Look, height: Int = 1440,
-                       match: Bool = true,
+                       match: Bool = true, stage: Stage = .graded,
                        onStart: ((Process) -> Void)? = nil) throws -> Frame {
         let lookFile = workDirectory.appendingPathComponent("preview-look.json")
         try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
@@ -58,6 +67,7 @@ public final class PreviewRenderer {
                            "FRAME_HEIGHT": String(height),
                            "LOOK_FILE": lookFile.path,
                            "GRADE_WORK_DIR": workDirectory.path,
+                           "FRAME_STAGE": stage.rawValue,
                            "MATCH": match ? "1" : "0"]
         if let known = measuredExposure[stem] {
             environment["YAVG_IN"] = String(known)

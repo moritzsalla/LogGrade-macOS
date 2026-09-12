@@ -87,6 +87,14 @@ public struct EngineLocation {
     /// The film-emulation cubes on disk, by stem, so the interface offers what is actually there
     /// rather than a list someone has to remember to update. "none" is not in here: it is the
     /// absence of a look, and the engine leaves the filter out of the graph for it.
+    /// The cube for a look's stem, or nil for "none" and for a stem that is not on disk.
+    public func lookCube(named stem: String,
+                         fileManager: FileManager = .default) -> URL? {
+        guard stem != "none", !stem.isEmpty else { return nil }
+        let url = lookCubes.appendingPathComponent("\(stem).cube")
+        return fileManager.fileExists(atPath: url.path) ? url : nil
+    }
+
     public func availableLooks(fileManager: FileManager = .default) -> [String] {
         let urls = (try? fileManager.contentsOfDirectory(at: lookCubes,
                                                          includingPropertiesForKeys: nil)) ?? []

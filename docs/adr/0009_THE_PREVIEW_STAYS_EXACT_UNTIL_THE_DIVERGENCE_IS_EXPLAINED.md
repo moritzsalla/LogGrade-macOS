@@ -113,3 +113,53 @@ curve itself is subprocessed. `LiveGradeTests` keeps the mutation as a test rath
 one case asserts the solved curve is within two code values of the render, and a second asserts the
 unsolved one is more than four out, so the day the solve stops earning its subprocess the test says
 so.
+
+## Then the whole chain moved into the app, and every control became live
+
+The tier above still started from a frame the engine had already converted, which left the
+correction stage — exposure, white balance, the CDL, the first controls anybody reaches for — with
+no live picture at all. The fix is to start from the clip instead.
+
+`FRAME_STAGE=source` gives the decoded Apple Log frame with no chain on it, resampled exactly as
+the graded frame is. `GradeKit/LiveChain.swift` then puts it through the correction, Apple's
+conversion and the film look, and hands the result to `LiveGrade` for the tone curve and the trims.
+The source frame does not depend on the look, so it is fetched once per clip and per timecode and
+nothing about the grade invalidates it.
+
+**Against the engine's own render of IMG_0607, at the shipped look: 1.28 code values mean, 13 at
+the 99.9th percentile, 56 at the worst pixel.** The worst pixels are on hard edges and the cause is
+known: the live tier resamples to preview size and then grades, while the render grades at full
+resolution and then resamples. Those two orders agree everywhere a pixel is one colour. The test
+asserts on the percentile for that reason.
+
+### Cost per control change, measured at 270×480 in a release build
+
+| what moved | cost |
+|---|---|
+| midtone, contrast, saturation, warmth | 4.1ms |
+| exposure, white balance, the CDL, the film look | 15.3ms |
+
+Nothing on that path is a subprocess any more, which is what makes it a drag rather than a
+slideshow. Three things moved into Swift to achieve it, and each is licensed by an exact-equivalence
+test rather than a tolerance:
+
+- **`CorrectionCube`** replaces a 419ms call to `make-correct-lut.py` with 1.4ms.
+  `CorrectionCubeTests` builds all 107,811 numbers both ways and requires agreement to one unit in
+  the last place of a `Float`.
+- **`ToneCurve.generated`** replaces a ~100ms call to `make-tone-lut.py` with 0.12ms, held to all
+  4096 entries.
+- **`ToneCurve.solvedGamma`** replaces a process launch with ten lines, held across both clamps and
+  both domain guards.
+
+The cubes themselves are still data: Apple's conversion and the film look are read from the same
+files the render hands to `lut3d`. The only interpolation implemented here is tetrahedral, in
+`Cube3D`, and `Cube3DTests` measures it against ffmpeg's own `lut3d` on a deliberately non-smooth
+cube — because on a smooth one, deleting an entire tetrahedron branch left every other test green.
+
+### A debug build is not a slow build, it is a broken one
+
+The same frame costs **1.5 seconds** unoptimised against 12.7ms optimised, because this is a tight
+loop over half a million samples and Swift's bounds and overflow checks dominate it. `make-app.sh`
+therefore builds release by default and takes `--debug` rather than `--release`. There is no timing
+assertion in the suite: one existed, asserted 0.1s, and passed in the configuration where the real
+cost was fifteen times its own bound.

@@ -36,9 +36,8 @@ struct InspectorView: View {
                     control("tint", $model.look.correct.tint, -1...1)
                     control("luminance mix", $model.look.correct.lumMix, 0...1)
                     Text("These run before the conversion, on the log, so an exposure move keeps "
-                         + "the highlights instead of clipping them. That is also why the "
-                         + "picture cannot follow them while you drag: it updates when you let "
-                         + "go.")
+                         + "the highlights instead of clipping them rather than flattening them "
+                         + "against a ceiling.")
                         .modifier(Note())
                     if model.look.correct.lumMix < 1 {
                         Text("Luminance mix only does something once a colour wheel is in play, "

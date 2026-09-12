@@ -26,6 +26,9 @@
 #   FRAME=<seconds>   render ONE frame at that timecode through the grade chain to a PNG and
 #                     stop — the app's exact preview. No delivery stage, no stabilisation.
 #   FRAME_HEIGHT=<px> height of that frame (default 1440, the Bench's working height)
+#   FRAME_STAGE=source  the same frame with NO grade chain on it: the decoded Apple Log picture,
+#                     resampled identically. It is what the app's live preview grades itself while
+#                     a control is moving. Default 'graded'.
 #   JSON=1            emit one machine-readable event per line on stdout instead of the human
 #                     lines, which then go only to the run report. Named codes go to stderr
 #                     either way. This is what the app drives the engine through.
@@ -73,6 +76,25 @@ PROOF="${PROOF:-}"        # PROOF=<seconds> renders a short proof; see the note 
 FRAME="${FRAME:-}"
 [ -z "$FRAME" ] || FRAME="$(require_number FRAME "$FRAME")"
 FRAME_HEIGHT="$(require_number FRAME_HEIGHT "${FRAME_HEIGHT:-1440}")"
+
+# FRAME_STAGE=source gives the same frame with NO grade chain at all: the decoded Apple Log
+# picture, resampled the same way, and nothing else. It is what the app's live preview grades in
+# its own process while a control is moving, so that the correction stage — which runs before
+# Apple's conversion and therefore cannot be modelled from a converted frame — follows the slider
+# too. Every filter in the graded path is absent by construction rather than by a second list that
+# could drift: the chain simply is not built.
+#
+# The app never builds a filter graph, which is what tests/conformance.sh and ADR 0008 are for, so
+# the command lives here with the rest of them rather than in Swift.
+FRAME_STAGE="${FRAME_STAGE:-graded}"
+case "$FRAME_STAGE" in
+	graded|source) ;;
+	*)
+		echo "REFUSING: FRAME_STAGE must be 'graded' or 'source', got: $FRAME_STAGE" >&2
+		emit_code REFUSE_FRAME_STAGE
+		emit refused code REFUSE_FRAME_STAGE
+		exit 1;;
+esac
 FRAME_DIR="$WORK/dist/frames"
 
 # Delivery shape. The sizes were 1080x1920 and 1080x1350 written into the render calls; they are
@@ -342,16 +364,30 @@ for SRC in "${CLIPS[@]}"; do
 	# grade_chain like everything else, so it cannot drift from what the render does — the suite's
 	# "grade chain is built in exactly one place" test is what holds that.
 	if [ -n "$FRAME" ]; then
-		frame_out="$FRAME_DIR/${CLIP}_t${FRAME}s.png"
+		# The stage is in the NAME. Two frames of one clip at one timecode differ only by which
+		# chain produced them, and holding a URL while the other stage renders over it is how a
+		# test once compared a frame against itself and read 16 code values of error.
+		frame_out="$FRAME_DIR/${CLIP}_t${FRAME}s_${FRAME_STAGE}.png"
 		# 16-bit PNG, because the point of a preview is to predict a 10-bit render and an 8-bit
 		# still is a known source of misreading in the Bench. Lanczos to match the delivery
 		# resample; no dither, because nothing here reduces to 8 bits.
+		if [ "$FRAME_STAGE" = source ]; then
+			# The SAME resample, so the two frames register pixel for pixel and one can be
+			# measured against the other. format=gbrp16le before the scale forces the YUV to RGB
+			# conversion to happen where the chain's first lut3d forces it, on the same matrix and
+			# range — the difference between that and letting the PNG encoder negotiate it is the
+			# untagged-probe mistake, which cost hours once already.
+			frame_graph="format=gbrp16le,scale=-2:${FRAME_HEIGHT}:flags=lanczos"
+		else
+			frame_graph="$(grade_chain "$TONE" "$SAT" "$WARM" \
+  "${CORRECT_PREFIX}lut3d=file='${CST}':interp=tetrahedral,"),scale=-2:${FRAME_HEIGHT}:flags=lanczos"
+		fi
 		if ffmpeg -v error -y -ss "$FRAME" -i "$SRC" -frames:v 1 -filter_complex \
-"[0:v]$(grade_chain "$TONE" "$SAT" "$WARM" \
-  "${CORRECT_PREFIX}lut3d=file='${CST}':interp=tetrahedral,"),scale=-2:${FRAME_HEIGHT}:flags=lanczos[o]" \
+"[0:v]${frame_graph}[o]" \
 			-map "[o]" -pix_fmt rgb48be "$frame_out"; then
-			say "      -> $(basename "$frame_out")  (grade only, no delivery stage)"
-			emit frame clip "$CLIP" path "$frame_out" at "$FRAME" height "$FRAME_HEIGHT"
+			say "      -> $(basename "$frame_out")  (${FRAME_STAGE}, no delivery stage)"
+			emit frame clip "$CLIP" path "$frame_out" at "$FRAME" height "$FRAME_HEIGHT" \
+				stage "$FRAME_STAGE"
 			OK=$((OK+1))
 		else
 			say "FAIL  $CLIP — preview frame failed. Continuing."

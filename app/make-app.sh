@@ -11,16 +11,16 @@
 # should not stop working when a checkout moves. A debug build points at the working copy instead,
 # so engine scripts stay editable without a rebuild — see LOGGRADE_ENGINE.
 #
-# WHICH CONFIGURATION. Debug by default, because that is the one that points at the working copy
-# of the engine. It costs something real though: the live preview grades a frame on the CPU per
-# slider tick, measured at 44ms in debug against 3.9ms in release — about 22 frames a second
-# against a limit nothing reaches. Use --release when you are grading rather than building.
+# RELEASE BY DEFAULT, and this is not a preference. The live preview grades a whole frame per
+# slider tick, and Swift's bounds and overflow checks make that 1.5 SECONDS in a debug build
+# against 12.7ms in a release one. A debug build does not feel slow; it feels broken. Pass --debug
+# when you are debugging the app itself and can live with that.
 #
-# Usage:  ./app/make-app.sh [--release]
+# Usage:  ./app/make-app.sh [--debug]
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG=debug
-[ "${1:-}" != "--release" ] || CONFIG=release
+CONFIG=release
+[ "${1:-}" != "--debug" ] || CONFIG=debug
 
 command -v swift >/dev/null || { echo "swift not installed"; exit 1; }
 swift build --package-path "$ROOT/app" -c "$CONFIG"

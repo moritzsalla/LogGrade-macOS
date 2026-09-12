@@ -114,6 +114,7 @@ public enum EngineCode: Equatable {
     case notFound
     case noArguments
     case proofAndFrameTogether
+    case unknownFrameStage
     case fpsWouldNeedRetiming
     case staleTransform
     case noTransform
@@ -128,6 +129,7 @@ public enum EngineCode: Equatable {
         case "REFUSE_NOT_FOUND": self = .notFound
         case "REFUSE_NO_ARGS": self = .noArguments
         case "REFUSE_PROOF_AND_FRAME": self = .proofAndFrameTogether
+        case "REFUSE_FRAME_STAGE": self = .unknownFrameStage
         case "REFUSE_FPS_RETIME": self = .fpsWouldNeedRetiming
         case "STALE_TRANSFORM": self = .staleTransform
         case "NO_TRANSFORM": self = .noTransform
@@ -149,6 +151,8 @@ public enum EngineCode: Equatable {
         case .noArguments: return "no clips given"
         case .proofAndFrameTogether:
             return "a preview and a proof answer different questions — pick one"
+        case .unknownFrameStage:
+            return "a preview frame is either graded or source, nothing in between"
         case .fpsWouldNeedRetiming:
             return "that frame rate needs retiming, which judders — see scripts/lib.sh"
         case .staleTransform:

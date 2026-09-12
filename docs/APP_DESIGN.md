@@ -50,9 +50,10 @@ numbers right-aligned against the rail's far edge.
 1. The photograph is the only saturated thing on screen.
 2. Structure encodes the chain: the rail shows order, locking, and what the preview cannot show.
 3. Readouts are instrument-grade: monospaced, tabular, editable by typing as well as dragging.
-4. The picture follows the control. A grading control you cannot see the effect of while you move
-   it is a control you cannot find a value with — you guess, wait, and guess again. So the preview
-   is live while a control is moving and exact once it lands.
+4. The picture follows the control. Every one of them, including the corrections that run before
+   Apple's conversion — a grading control you cannot see the effect of while you move it is a
+   control you cannot find a value with. The preview is live while a control is moving and exact
+   once it lands.
 5. The preview always says which of the three it is showing: live, exact, or stale. An instrument
    that shows a stale reading is lying, and one that passes an approximation off as the render is
    lying in a way that is harder to catch.

@@ -105,6 +105,24 @@ single-line ffprobe answer without checking what it actually printed.
 - **Synthetic fixtures cannot reproduce this camera's quirks.** A generated ProRes file prints one
   clean ffprobe line; a real clip prints three with a trailing comma. Tests covering those
   behaviours must use real footage from `src/` and skip when it is absent.
+- **A second implementation of the image is licensed by an EXACT-equivalence test, not by a
+  tolerance.** Three exist — `CorrectionCube`, `ToneCurve.generated` and `ToneCurve.solvedGamma` —
+  and each is compared to the generator it replaced across every value it produces, to the
+  precision the generator prints. That is what makes them transcriptions rather than opinions.
+  Tolerances are for things that genuinely cannot agree, like this app against ffmpeg's own output.
+- **Test an interpolation rule on something that is NOT smooth.** Deleting an entire branch of
+  `Cube3D`'s tetrahedral decomposition left every test green, because the cube it was exercised on
+  is Apple's conversion and picking the wrong tetrahedron on a smooth function moves a pixel by a
+  fraction of a code value. `Cube3DTests` uses a pseudo-random cube against ffmpeg's `lut3d`, where
+  the same mutation is out by half of full scale.
+- **A timing assertion is worthless in the configuration nobody runs.** One asserted a frame took
+  under 0.1s and passed, in a debug build whose real cost was 1.5 seconds. Swift's bounds and
+  overflow checks make a tight pixel loop over a hundred times slower unoptimised. Either measure
+  in release or do not measure; the numbers belong in a decision record either way.
+- **Two renders of one clip at one timecode can write the same path.** A test held the URL of the
+  first, rendered the second over it, and compared a frame against itself — reading 16 code values
+  of error off a model that was within one. Decode a frame as soon as it lands, or put what
+  produced it in the name.
 - A test that cannot fail is worse than no test — it reads as coverage.
 
 ## Things that are settled, don't re-litigate
@@ -145,6 +163,15 @@ single-line ffprobe answer without checking what it actually printed.
 - **Orientation is settled in ADR 0005, the media layout in ADR 0006.** Removing rotation in pieces
   left a runbook step telling you to pass an argument that was silently ignored; when a concept is
   deleted, grep for its name in prose too.
+
+- **The app builds RELEASE by default, and that is not a preference.** The live preview grades a
+  whole frame per control change; unoptimised that is 1.5 seconds against 12.7ms. `make-app.sh`
+  therefore takes `--debug`, not `--release`. A debug build does not feel slow, it feels broken.
+- **The preview is live, and the render on release is still what gets judged.** Every control moves
+  the picture immediately because `LiveChain` runs the whole chain in-process on a decoded source
+  frame. It is within about 1.3 code values of the render, measured against it on real footage by
+  `LiveChainTests`. Do not "simplify" it back to grading a converted frame: that is what made the
+  correction stage impossible to preview, which is `docs/adr/0009`.
 
 ## Style
 
