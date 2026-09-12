@@ -17,6 +17,15 @@ final class GradeModel: ObservableObject {
     @Published var isRendering = false
     @Published var selectedClip: ClipList.Entry?
     @Published var previewSeconds: Double = 1
+    /// The look the visible frame was rendered from. Comparing it with the live one is how the
+    /// panel knows the reading is out of date — which matters because this renders on release,
+    /// not continuously, so the gap is real.
+    @Published private(set) var renderedLook: Look?
+
+    var isStale: Bool {
+        guard let rendered = renderedLook, previewImage != nil else { return false }
+        return rendered != look
+    }
 
     /// The cubes on disk, read once: the interface offers what is there.
     let availableLooks: [String]
@@ -64,6 +73,7 @@ final class GradeModel: ObservableObject {
                 DispatchQueue.main.async {
                     self.previousImage = self.previewImage
                     self.previewImage = image
+                    self.renderedLook = look
                     self.isRendering = false
                     self.status = "grade only — no grain, sharpening, denoise, stabiliser or dither"
                 }

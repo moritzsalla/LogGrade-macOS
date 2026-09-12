@@ -13,59 +13,79 @@ struct RootView: View {
     let engine: EngineLocation?
     let problems: [EngineLocation.Problem]
     @ObservedObject var clips: ClipList
-
     var grade: GradeModel?
 
     var body: some View {
         HSplitView {
-            VStack(alignment: .leading, spacing: 14) {
-                header
-                dropZone
-                if !clips.entries.isEmpty { clipTable }
-                Spacer()
-            }
-            .padding(16)
-            .frame(minWidth: 300)
-
+            clipColumn.frame(minWidth: 240, idealWidth: 264, maxWidth: 340)
             if let grade {
-                PreviewView(model: grade).padding(16).frame(minWidth: 280)
-                InspectorView(model: grade).frame(minWidth: 330)
+                PreviewView(model: grade).frame(minWidth: 320)
+                InspectorView(model: grade).frame(minWidth: 372, maxWidth: 420)
             } else {
-                Text("no engine, so nothing to grade with")
-                    .foregroundStyle(.secondary).padding()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("no engine").font(.system(size: 13, weight: .medium))
+                        .foregroundColor(Palette.ink)
+                    Text("point LOGGRADE_ENGINE at a checkout, or rebuild the bundle.")
+                        .font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
+                    Spacer()
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .background(Palette.surround)
             }
         }
-        .frame(minWidth: 1040, minHeight: 620)
+        .frame(minWidth: 1080, minHeight: 660)
+        .background(Palette.surround)
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("LogGrade").font(.title)
-            if let engine {
-                Text(engine.root.path)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-            if engine == nil {
-                Text("nothing to run: point LOGGRADE_ENGINE at a checkout, or rebuild the bundle")
-                    .font(.caption).foregroundStyle(.orange)
-            } else if !problems.isEmpty {
+    private var clipColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("LogGrade")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(Palette.ink)
+                if let engine {
+                    Text(engine.root.path)
+                        .font(.system(size: 9.5, design: .monospaced))
+                        .foregroundColor(Palette.inkTertiary)
+                        .lineLimit(2).truncationMode(.head)
+                }
                 ForEach(problems.indices, id: \.self) { i in
-                    Text(problems[i].description).font(.caption).foregroundStyle(.orange)
+                    Text(problems[i].description)
+                        .font(.system(size: 10.5)).foregroundColor(Palette.lamp)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 14)
+
+            dropZone.padding(.horizontal, 16)
+
+            if clips.entries.isEmpty {
+                Spacer()
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(clips.entries) { entry in clipRow(entry) }
+                    }
+                    .padding(.top, 14)
                 }
             }
         }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Palette.panel)
     }
 
     private var dropZone: some View {
-        RoundedRectangle(cornerRadius: 10)
-            .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
-            .foregroundStyle(.secondary)
-            .frame(height: 76)
-            .overlay(Text("drop Apple Log clips here").foregroundStyle(.secondary))
+        RoundedRectangle(cornerRadius: 3)
+            .strokeBorder(Palette.hairline, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            .frame(height: 56)
+            .overlay(
+                Text("drop Apple Log clips")
+                    .font(.system(size: 11))
+                    .foregroundColor(Palette.inkTertiary))
             .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-                // Real paths, which is the whole reason this is a native app: a browser drop hands
-                // over bytes, not a location, and the engine needs a location.
+                // Real paths, which is the reason this is an app and not a page: a browser drop
+                // hands over bytes, and the engine needs a location.
                 for provider in providers {
                     _ = provider.loadObject(ofClass: URL.self) { url, _ in
                         guard let url else { return }
@@ -81,41 +101,44 @@ struct RootView: View {
             }
     }
 
-    private var clipTable: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(clips.entries) { entry in
-                    HStack(alignment: .top, spacing: 10) {
-                        thumbnail(entry)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(entry.stem).font(.system(.body, design: .monospaced))
-                            // The verdict, in full. A refused clip stays in the list carrying its
-                            // reason: a file that vanishes when dropped reads as a broken
-                            // interface, and the reason is what the person needs.
-                            Text(entry.verdict.description)
-                                .font(.caption)
-                                .foregroundStyle(entry.isUsable ? .green : .orange)
-                                .fixedSize(horizontal: false, vertical: true)
-                            if let f = entry.fields {
-                                Text(f.summary)
-                                    .font(.system(.caption2, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Spacer()
-                        if entry.isUsable {
-                            Button(grade?.selectedClip?.stem == entry.stem ? "selected" : "select") {
-                                grade?.selectedClip = entry
-                                grade?.renderPreview()
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                        Button("remove") { clips.remove(entry.stem) }.buttonStyle(.borderless)
-                    }
-                    Divider()
-                }
+    /// A clip reads as its frame first: that is how a person recognises it. The selected one is
+    /// marked on its leading edge in the colour this tool measures, rather than by a filled row,
+    /// so nothing bright sits next to a photograph.
+    private func clipRow(_ entry: ClipList.Entry) -> some View {
+        let selected = grade?.selectedClip?.stem == entry.stem
+        return HStack(alignment: .top, spacing: 10) {
+            Rectangle()
+                .fill(selected ? Palette.plate : Color.clear)
+                .frame(width: 2)
+            thumbnail(entry)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.stem)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Palette.ink)
+                Text(entry.verdict.description)
+                    .font(.system(size: 10))
+                    .foregroundColor(entry.isUsable ? Palette.inkSecondary : Palette.lamp)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let f = entry.fields { Readout(text: f.summary, muted: true) }
             }
+            Spacer(minLength: 4)
+            Button {
+                clips.remove(entry.stem)
+            } label: {
+                Image(systemName: "xmark").font(.system(size: 8))
+                    .foregroundColor(Palette.inkTertiary)
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 12)
         }
+        .padding(.vertical, 9)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard entry.isUsable, let grade else { return }
+            grade.selectedClip = entry
+            grade.renderPreview()
+        }
+        .overlay(Rectangle().fill(Palette.hairline).frame(height: 1), alignment: .bottom)
     }
 
     /// Drop a clip and it is the one being graded. Making someone click "select" first is a step
@@ -129,13 +152,13 @@ struct RootView: View {
     private func thumbnail(_ entry: ClipList.Entry) -> some View {
         Group {
             if let image = entry.thumbnail {
-                Image(decorative: image, scale: 1)
-                    .resizable().aspectRatio(contentMode: .fit)
+                Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fill)
             } else {
-                RoundedRectangle(cornerRadius: 4).fill(.quaternary)
+                Rectangle().fill(Palette.well)
             }
         }
-        .frame(width: 44, height: 78)
+        .frame(width: 40, height: 71)
+        .clipped()
     }
 }
 
@@ -172,6 +195,11 @@ let window = NSWindow(
     backing: .buffered,
     defer: false)
 window.title = "LogGrade"
+// The window is part of the room: a light title bar beside a graded frame is a bright object in
+// the field of view, which is the thing a grading suite is dark to avoid.
+window.appearance = NSAppearance(named: .darkAqua)
+window.titlebarAppearsTransparent = true
+window.backgroundColor = NSColor(red: 0.098, green: 0.098, blue: 0.098, alpha: 1)
 window.center()
 let clipList = ClipList(probe: EngineLocation.resolveTool("ffprobe").map(ClipProbe.init))
 
