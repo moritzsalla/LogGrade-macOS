@@ -1679,3 +1679,26 @@ PY
 	[ "$have" = "$want" ] || fail "the probe image and the golden disagree; regenerate both"
 }
 
+
+@test "the golden records what its tolerances mean, not just what they are" {
+	# A number with no rationale beside it is the thing that gets "tidied" to make a run green.
+	# Every tolerance in the golden carries its own _why, and the measured grade divergence is far
+	# above the curve's one-code-value bar deliberately — that gap is a finding, not a defect.
+	local root
+	root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+	run python3 -c '
+import json, sys
+t = json.load(open(sys.argv[1]))["tolerances"]
+need = ["curve_code_values", "conversion_floor_code_values", "grade_code_values",
+        "grade_worst_by_case", "grade_margin_code_values"]
+for k in need:
+    if k not in t: sys.exit("golden is missing tolerance %s" % k)
+for k in ("_curve_why", "_floor_why", "_grade_why", "_margin_why"):
+    if not t.get(k): sys.exit("tolerance %s has no rationale" % k)
+if t["conversion_floor_code_values"] > 2:
+    sys.exit("the conversion floor is %.2f code values — the ruler is measuring itself"
+             % t["conversion_floor_code_values"])
+print("ok")
+' "$root/tests/fixtures/grade-golden.json"
+	[ "$status" -eq 0 ] || fail "$output"
+}

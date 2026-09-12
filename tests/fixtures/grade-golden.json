@@ -34,6 +34,53 @@
    "it. Measured with two separate runs because measuring it with one \u2014 the real look",
    "cube and a neutral curve \u2014 reported the look LUT's own effect as a 189-code-value",
    "conversion error."
+  ],
+  "grade_code_values": 108.004,
+  "_grade_why": [
+   "MEASURED, not chosen. A tolerance picked to make a test pass leaves a guard that",
+   "cannot fail, so this records what the Bench's approximations actually cost.",
+   "",
+   "WHERE IT COMES FROM, and it is not where it was assumed to be. Decomposed on the",
+   "shipped look, worst case in 8-bit code values:",
+   "",
+   "                 cube    ramp    refs",
+   "  tone-only     36.21    2.49   28.69",
+   "  trims-only     6.32    2.83    5.08",
+   "  shipped       28.81    3.97   23.28",
+   "",
+   "So the trims are the SMALL half. The Bench's saturation and warmth stand-ins cost",
+   "about six code values, and the two partly cancel, which is why `shipped` measures",
+   "lower than `tone-only` alone.",
+   "",
+   "The large half is the tone stage's APPLICATION. On neutral tones the Bench is",
+   "faithful to within 2.5 code values, so the curve and its domain are right \u2014 and a",
+   "separate experiment confirmed ffmpeg curves a FULL-range luma, not a 16-235 one",
+   "(the limited-range model measured 16.8 against 2.49). What diverges is saturated",
+   "colour: the Bench subtracts one luma delta from all three channels, which drives",
+   "already-low channels below zero and clamps them, while the renderer curves the Y",
+   "plane and merges the ORIGINAL chroma back. The worst patch, a saturated orange,",
+   "goes to 187.7/0.0/0.0 in the Bench against 223.9/25.8/0.0 in the renderer.",
+   "",
+   "That is ADR 0003 seen from the other side: an equal RGB offset is not what",
+   "mergeplanes=0x001112 does. The consequence for the app is concrete \u2014 its Metal",
+   "preview must curve Y and keep CbCr, not shift RGB \u2014 and it is a requirement",
+   "measured here rather than assumed."
+  ],
+  "grade_worst_by_case": {
+   "shipped": 28.807,
+   "tone-only": 36.213,
+   "trims-only": 6.322,
+   "extreme": 108.004,
+   "negative-black": 36.394,
+   "midrange": 36.971
+  },
+  "grade_margin_code_values": 0.5,
+  "_margin_why": [
+   "Each case is asserted against its own number above, plus this margin. Both sides",
+   "are deterministic \u2014 the same ffmpeg build and the same node \u2014 so the margin only",
+   "absorbs floating-point jitter. A single global tolerance was the alternative and",
+   "it would have let the shipped look drift by the extreme case's hundred code",
+   "values while still reporting green."
   ]
  },
  "cases": [

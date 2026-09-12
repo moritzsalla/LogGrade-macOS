@@ -320,6 +320,33 @@
     return v < 0 ? 0 : (v > 1 ? 1 : v);
   }
 
+  // The whole per-pixel grade, in ONE named function so tests/grade-parity.py can slice it out
+  // and run it against ffmpeg's own output. It used to be inlined in render() below, which meant
+  // the only tested part of the preview was the tone curve — the saturation and warmth
+  // approximations were never compared with anything.
+  //
+  // Writes into `out` rather than returning an array: this runs once per pixel, and allocating
+  // 1.2M three-element arrays per frame stalls a slider drag.
+  //
+  // Reads P and takes the 256-entry luma LUT built from curveAt, the way curveAt itself reads P —
+  // the extractor in grade-parity.py relies on both being free variables.
+  function gradePixel(r, g, b, lut, out) {
+    // luma-only: shift every channel by the luma delta, leaving chroma alone. This mirrors
+    // mergeplanes=0x001112 and is what stops a contrast curve turning saturated signage neon.
+    var y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    var dy = lut[y | 0] - y;
+    r += dy; g += dy; b += dy;
+    var warm = P.warm * 255;
+    if (warm !== 0) { r += warm; b -= warm; }
+    if (P.sat !== 1) {
+      var y2 = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      r = y2 + (r - y2) * P.sat; g = y2 + (g - y2) * P.sat; b = y2 + (b - y2) * P.sat;
+    }
+    out[0] = r < 0 ? 0 : (r > 255 ? 255 : r);
+    out[1] = g < 0 ? 0 : (g > 255 ? 255 : g);
+    out[2] = b < 0 ? 0 : (b > 255 ? 255 : b);
+  }
+
   var processed = null;
 
   function render() {
@@ -332,22 +359,10 @@
     } else {
       var lut = new Float32Array(256);
       for (var k = 0; k < 256; k++) lut[k] = curveAt(k / 255) * 255;
-      var sat = P.sat, warm = P.warm * 255;
+      var px = [0, 0, 0];
       for (var i = 0; i < n; i += 4) {
-        var r = s[i], g = s[i + 1], b = s[i + 2];
-        // luma-only: shift every channel by the luma delta, leaving chroma alone
-        var y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        var dy = lut[y | 0] - y;
-        r += dy; g += dy; b += dy;
-        if (warm !== 0) { r += warm; b -= warm; }
-        if (sat !== 1) {
-          var y2 = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-          r = y2 + (r - y2) * sat; g = y2 + (g - y2) * sat; b = y2 + (b - y2) * sat;
-        }
-        d[i] = r < 0 ? 0 : (r > 255 ? 255 : r);
-        d[i + 1] = g < 0 ? 0 : (g > 255 ? 255 : g);
-        d[i + 2] = b < 0 ? 0 : (b > 255 ? 255 : b);
-        d[i + 3] = 255;
+        gradePixel(s[i], s[i + 1], s[i + 2], lut, px);
+        d[i] = px[0]; d[i + 1] = px[1]; d[i + 2] = px[2]; d[i + 3] = 255;
       }
     }
     processed = out;

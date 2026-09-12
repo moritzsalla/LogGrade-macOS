@@ -17,11 +17,12 @@ This file used to compare the tone curve alone: the Bench's `curveAt` against a 
 make-tone-lut.py. That left the rest of the grade untested, and the rest of the grade is where the
 Bench is WEAKEST — it approximates `hue=s=` with an RGB saturation about luma, and
 `colorbalance=rm/bm` with a flat per-channel offset, applies them in the opposite order to the
-renderer, and works in 8-bit. None of that is compared with anything yet.
+renderer, and works in 8-bit. None of that was compared with anything. So this asserts at two
+levels now:
 
-This commit builds the instrument for that: a probe image, and a golden holding ffmpeg's own output
-for it per parameter set. The curve check runs against it unchanged; the whole-grade comparison
-arrives with the bench change that gives the Bench's per-pixel maths a name to extract.
+  1. the curve, exactly as before — JS `curveAt` against the generated .cube, so the .cube writer
+     is covered and a curve drift is pinned to the curve rather than to the whole grade;
+  2. the whole grade — JS `gradePixel` against ffmpeg's own output over a probe image.
 
 FFMPEG IS THE ORACLE, and it is reached through `grade_chain` sourced out of scripts/lib.sh rather
 than transcribed here. That is the point: this cannot drift from production, because it calls the
@@ -68,7 +69,7 @@ GOLDEN = os.path.join(FIXTURES, "grade-golden.json")
 #              side of the chain — error that belongs to colour conversion, not to anyone's maths.
 #              Every other number here has to be read on top of it.
 #   post-look  the real Portra cube. This is the Bench's documented input (post-CST, post-look), so
-#              it is what the Bench's own maths will be fed once there is a function to extract.
+#              it is what the Bench's own maths gets fed in the comparison below.
 #
 # The first version of this file used one run for both jobs and reported a 189-code-value "floor",
 # which was the look LUT's own effect rather than any conversion error. Two runs, two questions.
@@ -289,6 +290,24 @@ console.log(JSON.stringify(out));
 """ % (extract_js(("soft", "curveAt")), json.dumps(params), json.dumps(xs)))
 
 
+def js_grade(params, sat, warm, inputs8):
+    """Run the Bench's own per-pixel grade over 8-bit inputs, which is the space it works in."""
+    p = dict(params)
+    p["sat"] = sat
+    p["warm"] = warm
+    return run_node("""
+%s
+var P = %s;
+var lut = new Float32Array(256);
+for (var k = 0; k < 256; k++) lut[k] = curveAt(k / 255) * 255;
+var px = [0, 0, 0];
+var out = %s.map(function (p) {
+  gradePixel(p[0], p[1], p[2], lut, px);
+  return [px[0], px[1], px[2]];
+});
+console.log(JSON.stringify(out));
+""" % (extract_js(("soft", "curveAt", "gradePixel")), json.dumps(p), json.dumps(inputs8)))
+
 
 def py_curve(params, xs):
     """Generate a real .cube and read the curve back out of it, so the .cube writer is covered
@@ -346,6 +365,17 @@ def regenerate():
         print("render  %-15s %d samples (%s look LUT)" % (name, len(out), look))
 
     by = {c["name"]: c for c in cases}
+    base = by["post-look"]["output"]
+    ins = [[round(x, 4) for x in to8(v)] for v in base]
+    worst = {}
+    for c in cases:
+        if c["name"] in CALIBRATION:
+            continue
+        js = js_grade(c["params"], c["saturation"], c["warmth"], ins)
+        d = worst_delta(js, [to8(v) for v in c["output"]])
+        worst[c["name"]] = round(d, 3)
+        print("measure %-15s worst |JS - ffmpeg| = %.3f code values" % (c["name"], d))
+
     floor = worst_delta([to8(v) for v in by["floor"]["output"]], [to8(v) for v in patches])
 
     golden = {
@@ -382,6 +412,46 @@ def regenerate():
                 "cube and a neutral curve — reported the look LUT's own effect as a 189-code-value",
                 "conversion error.",
             ],
+            "grade_code_values": max(worst.values()),
+            "_grade_why": [
+                "MEASURED, not chosen. A tolerance picked to make a test pass leaves a guard that",
+                "cannot fail, so this records what the Bench's approximations actually cost.",
+                "",
+                "WHERE IT COMES FROM, and it is not where it was assumed to be. Decomposed on the",
+                "shipped look, worst case in 8-bit code values:",
+                "",
+                "                 cube    ramp    refs",
+                "  tone-only     36.21    2.49   28.69",
+                "  trims-only     6.32    2.83    5.08",
+                "  shipped       28.81    3.97   23.28",
+                "",
+                "So the trims are the SMALL half. The Bench's saturation and warmth stand-ins cost",
+                "about six code values, and the two partly cancel, which is why `shipped` measures",
+                "lower than `tone-only` alone.",
+                "",
+                "The large half is the tone stage's APPLICATION. On neutral tones the Bench is",
+                "faithful to within 2.5 code values, so the curve and its domain are right — and a",
+                "separate experiment confirmed ffmpeg curves a FULL-range luma, not a 16-235 one",
+                "(the limited-range model measured 16.8 against 2.49). What diverges is saturated",
+                "colour: the Bench subtracts one luma delta from all three channels, which drives",
+                "already-low channels below zero and clamps them, while the renderer curves the Y",
+                "plane and merges the ORIGINAL chroma back. The worst patch, a saturated orange,",
+                "goes to 187.7/0.0/0.0 in the Bench against 223.9/25.8/0.0 in the renderer.",
+                "",
+                "That is ADR 0003 seen from the other side: an equal RGB offset is not what",
+                "mergeplanes=0x001112 does. The consequence for the app is concrete — its Metal",
+                "preview must curve Y and keep CbCr, not shift RGB — and it is a requirement",
+                "measured here rather than assumed.",
+            ],
+            "grade_worst_by_case": worst,
+            "grade_margin_code_values": 0.5,
+            "_margin_why": [
+                "Each case is asserted against its own number above, plus this margin. Both sides",
+                "are deterministic — the same ffmpeg build and the same node — so the margin only",
+                "absorbs floating-point jitter. A single global tolerance was the alternative and",
+                "it would have let the shipped look drift by the extreme case's hundred code",
+                "values while still reporting green.",
+            ],
         },
         "cases": cases,
     }
@@ -389,6 +459,7 @@ def regenerate():
         json.dump(golden, f, indent=1)
         f.write("\n")
     print("\nfloor   %.3f code values (RGB/YUV round-trip)" % floor)
+    print("grade   %.3f code values worst across cases" % max(worst.values()))
     print("wrote   %s (%d bytes)" % (os.path.relpath(GOLDEN, ROOT), os.path.getsize(GOLDEN)))
 
 
@@ -429,12 +500,34 @@ def check():
         else:
             print("in step  curve %-15s max delta %.6f" % (name, worst))
 
+    # 4. The whole grade, against ffmpeg's recorded output.
+    base = {c["name"]: c for c in golden["cases"]}["post-look"]["output"]
+    ins = [[round(x, 4) for x in to8(v)] for v in base]
+    # PER CASE, not against the global worst. The global worst belongs to the `extreme` case, so a
+    # single tolerance would let the shipped look drift a hundred code values and still pass — a
+    # guard that cannot fail. Each case is pinned to the divergence measured for it, plus a margin
+    # for floating-point jitter: both sides are deterministic, so the margin is small on purpose.
+    margin = golden["tolerances"]["grade_margin_code_values"]
+    per_case = golden["tolerances"]["grade_worst_by_case"]
+    for c in golden["cases"]:
+        if c["name"] in CALIBRATION:
+            continue
+        js = js_grade(c["params"], c["saturation"], c["warmth"], ins)
+        worst = worst_delta(js, [to8(v) for v in c["output"]])
+        tol = per_case[c["name"]] + margin
+        if worst > tol:
+            fails.append("grade %s: max delta %.3f > %.3f" % (c["name"], worst, tol))
+            print("DRIFTED  grade %-15s max delta %.3f (was %.3f, margin %.2f)"
+                  % (c["name"], worst, per_case[c["name"]], margin))
+        else:
+            print("as measured  grade %-15s max delta %.3f" % (c["name"], worst))
+
     if fails:
         print("\nThe Bench and the renderer have diverged. The browser preview no longer predicts\n"
               "what ffmpeg produces, so any grade sent from it is unreliable until they are\n"
               "reconciled. Fix BOTH, then re-run.\n  " + "\n  ".join(fails), file=sys.stderr)
         return 1
-    print("\nCurve within %.5f. Probe and golden fresh; floor %.3f code values."
+    print("\nCurve within %.5f. Whole grade at its measured divergence per case, floor %.3f."
           % (CURVE_TOLERANCE, golden["tolerances"]["conversion_floor_code_values"]))
     return 0
 
