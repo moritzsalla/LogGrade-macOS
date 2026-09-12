@@ -1326,3 +1326,62 @@ for line in sys.stdin.read().splitlines():
 			|| fail "JSON=$mode: a staging file was left behind"
 	done
 }
+
+# --- the preview frame --------------------------------------------------------
+# The app's exact preview. It exists because a slider has to be judged against what the render
+# actually produces, and the alternative — the Bench's pre-baked JPEG — bypasses both the real CST
+# and the look LUT, so it mispredicts every reading.
+
+@test "FRAME renders one still through the grade chain and no deliverable" {
+	local work="$BATS_TEST_TMPDIR/frame"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	local png="$work/dist/frames/CLIP_t0s.png"
+	[ -s "$png" ] || fail "no preview frame at $png: $output"
+	run ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,height \
+		-of default=nw=1:nk=1 "$png"
+	[[ "$output" == *"png"* ]] || fail "not a PNG: $output"
+	# A preview is not a delivery. Nothing may land where someone uploads from.
+	[ -z "$(ls -A "$work/dist/03-final" 2>/dev/null)" ] || fail "FRAME wrote a deliverable"
+}
+
+@test "FRAME and PROOF together are refused rather than silently resolved" {
+	local work="$BATS_TEST_TMPDIR/frame-proof"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	FRAME=1 PROOF=1 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -ne 0 ] || fail "accepted both modes at once"
+	[[ "$output" == *"GRADE_CODE=REFUSE_PROOF_AND_FRAME"* ]] || fail "unnamed refusal: $output"
+}
+
+@test "FRAME announces where the still landed, for a consumer that has to load it" {
+	local work="$BATS_TEST_TMPDIR/frame-json"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	JSON=1 FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run --separate-stderr "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *'"event":"frame"'* ]] || fail "no frame event: $output"
+	[[ "$output" == *'"path":"'*"CLIP_t0s.png"* ]] || fail "the event did not name the file: $output"
+	printf '%s\n' "$output" | python3 -c '
+import json, sys
+for line in sys.stdin.read().splitlines():
+    if line.strip(): json.loads(line)
+' || fail "the frame event broke the stream contract:$output"
+}
+
+@test "FRAME does not pay for a stabilisation pass it cannot show" {
+	# vidstabdetect costs ~65s per clip and the still has no warp in it. A preview that waited for
+	# that would not be a preview.
+	local work="$BATS_TEST_TMPDIR/frame-stab"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	FRAME=0 FRAME_HEIGHT=128 MATCH=0 STAB=1 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ]
+	[ ! -f "$work/dist/stab/CLIP.trf" ] || fail "FRAME ran the detect pass anyway"
+	[[ "$output" != *"stabilising from"* ]] || fail "FRAME claimed to stabilise a still: $output"
+}

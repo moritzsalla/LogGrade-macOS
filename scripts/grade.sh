@@ -14,6 +14,9 @@
 #   GRAIN_STRENGTH=<n>  override look.json's grain strength
 #   PROOF=<seconds>   render this many seconds through the real chain into dist/proofs/
 #   DRY=1             plan only, render nothing
+#   FRAME=<seconds>   render ONE frame at that timecode through the grade chain to a PNG and
+#                     stop — the app's exact preview. No delivery stage, no stabilisation.
+#   FRAME_HEIGHT=<px> height of that frame (default 1440, the Bench's working height)
 #   JSON=1            emit one machine-readable event per line on stdout instead of the human
 #                     lines, which then go only to the run report. Named codes go to stderr
 #                     either way. This is what the app drives the engine through.
@@ -51,6 +54,27 @@ PROOF="${PROOF:-}"        # PROOF=<seconds> renders a short proof; see the note 
 # That split means whitespace in PROOF becomes extra ffmpeg OPTIONS, and `-f mp4 <path>` would
 # append a second output file, walking straight past render_delivery's staging.
 [ -z "$PROOF" ] || PROOF="$(require_number PROOF "$PROOF")"
+
+# FRAME=<seconds> renders a single frame through the REAL grade chain and stops. It is the app's
+# exact preview: a still cannot show grain, the sharpener, the chroma denoise, the stabiliser or
+# the dither, all of which are delivery-stage, so this deliberately covers the grade only and the
+# interface says so. What it does cover is everything a slider moves — the CST, the look LUT, the
+# solved tone curve, saturation and warmth — at full resolution, resampled to display size after
+# the grade exactly as the delivery chain resamples after it.
+FRAME="${FRAME:-}"
+[ -z "$FRAME" ] || FRAME="$(require_number FRAME "$FRAME")"
+FRAME_HEIGHT="$(require_number FRAME_HEIGHT "${FRAME_HEIGHT:-1440}")"
+FRAME_DIR="$WORK/dist/frames"
+# Two modes that both mean "do not deliver" would otherwise silently pick one. Refuse instead: a
+# preview and a proof answer different questions and neither is a fallback for the other.
+if [ -n "$FRAME" ] && [ -n "$PROOF" ]; then
+	echo "REFUSING: FRAME and PROOF are both set." >&2
+	echo "  FRAME renders one still through the grade chain; PROOF renders seconds through the" >&2
+	echo "  whole delivery chain. Pick one." >&2
+	emit_code REFUSE_PROOF_AND_FRAME
+	emit refused code REFUSE_PROOF_AND_FRAME
+	exit 1
+fi
 # Proofs are not deliverables and must never land where someone uploads from.
 if [ -n "$PROOF" ]; then
 	OUT_DIR="$WORK/dist/proofs"
@@ -137,6 +161,7 @@ CROP_Y_OK="$(require_number CROP_Y "${CROP_Y:-750}")"
 
 check_disk_space "$WORK/dist" 10
 mkdir -p "$OUT_DIR" "$REPORT_DIR" "$CACHE"
+[ -z "$FRAME" ] || mkdir -p "$FRAME_DIR"
 REPORT="$REPORT_DIR/run-$(date +%Y%m%d-%H%M%S).txt"
 : > "$REPORT"
 # Under JSON=1 the human line still lands in the report and leaves stdout to the event stream.
@@ -192,7 +217,7 @@ for SRC in "${CLIPS[@]}"; do
 
 	# --- stabilisation: detect on the SOURCE, so no intermediate is needed ---------------
 	SFX=""
-	if [ "$STAB" = "1" ]; then
+	if [ "$STAB" = "1" ] && [ -z "$FRAME" ]; then
 		TRF="$WORK/dist/stab/${CLIP}.trf"
 		if ! transform_is_fresh "$TRF" "$SRC" && [ "$DRY" != "1" ]; then
 			mkdir -p "$(dirname "$TRF")"
@@ -233,6 +258,30 @@ for SRC in "${CLIPS[@]}"; do
 	# probe and the solve still happen above, because the solved gamma IS the plan.
 	"$SCRIPT_DIR/make-tone-lut.py" "$TONE" --gamma "$GAMMA" --pivot "$G_PIVOT" \
 		--contrast "$G_CONTRAST" --toe "$G_TOE" --shoulder "$G_SHOULDER" --black "$G_BLACK" >/dev/null
+
+	# The preview stops here: same chain head, same tone cube, no delivery stage. It goes through
+	# grade_chain like everything else, so it cannot drift from what the render does — the suite's
+	# "grade chain is built in exactly one place" test is what holds that.
+	if [ -n "$FRAME" ]; then
+		frame_out="$FRAME_DIR/${CLIP}_t${FRAME}s.png"
+		# 16-bit PNG, because the point of a preview is to predict a 10-bit render and an 8-bit
+		# still is a known source of misreading in the Bench. Lanczos to match the delivery
+		# resample; no dither, because nothing here reduces to 8 bits.
+		if ffmpeg -v error -y -ss "$FRAME" -i "$SRC" -frames:v 1 -filter_complex \
+"[0:v]$(grade_chain "$TONE" "$SAT" "$WARM" \
+  "lut3d=file='${CST}':interp=tetrahedral,"),scale=-2:${FRAME_HEIGHT}:flags=lanczos[o]" \
+			-map "[o]" -pix_fmt rgb48be "$frame_out"; then
+			say "      -> $(basename "$frame_out")  (grade only, no delivery stage)"
+			emit frame clip "$CLIP" path "$frame_out" at "$FRAME" height "$FRAME_HEIGHT"
+			OK=$((OK+1))
+		else
+			say "FAIL  $CLIP — preview frame failed. Continuing."
+			emit_code FRAME_FAILED
+			emit clip_failed clip "$CLIP" source "$SRC"
+			FAILED=$((FAILED+1))
+		fi
+		continue
+	fi
 
 	# What makes this path ONE pass is the head: the CST is spliced into grade_chain rather than
 	# spent on its own decode, so conversion, look and tone all happen in the single graph below.

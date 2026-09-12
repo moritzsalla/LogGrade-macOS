@@ -137,6 +137,7 @@ dist/           Everything generated. Gitignored.
   02-graded/      staged pipeline only: the ProRes master
   03-final/       deliverables
   proofs/         short renders through the real chain, for judging before a full render (PROOF=)
+  frames/         single graded stills for the app's preview (FRAME=)
   ladders/        side-by-side comparison stills, assembled by hand
   stab/           camera-motion transforms, per clip
   reports/        what each run did
