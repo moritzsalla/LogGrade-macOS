@@ -29,6 +29,38 @@ than transcribed here. That is the point: this cannot drift from production, bec
 same builder production calls. The suite's "grade chain is built in exactly one place" test is what
 keeps that true.
 
+WHERE THE DIVERGENCE COMES FROM, AND WHAT IT IS NOT
+--------------------------------------------------
+The whole-grade numbers below are dominated by the tone case at roughly 36 code values, and an
+attempt to fix that in the Bench failed usefully. Six models were fitted against ffmpeg's own
+recorded output over this probe, and none of these is the cause:
+
+  - the SPACE. Rewriting the Bench to convert to luma and chroma, curve the luma, and clip once at
+    the end changes nothing at all: adding one luma delta to R, G and B is algebraically identical
+    to curving Y while holding Cb and Cr, because the channel differences are preserved either way.
+  - the CLIPPING POINT. Same reason. Both clip each channel to 0..255 in the end.
+  - the ORDER. Moving saturation ahead of warmth, which is the renderer's order, moves the trims
+    case from 6.31 to 5.35 and leaves the tone case untouched.
+  - the MATRIX. 709 fits better than 601 (35.75 against 39.01) and better than 2020. So the
+    conversion is 709, as tagged.
+  - the RANGE. Full range fits at 35.75 against 46.50 for limited, which corroborates the ramp
+    measurement independently.
+  - WHICH PLANE IS CURVED. Curving chroma instead of luma is far worse, 117 against 36, so
+    mergeplanes does map the way its documentation says.
+
+What is left, and what the next attempt should test, is that ffmpeg's YUV intermediate clamps
+out-of-gamut colour in YUV rather than in RGB. The worst patches are all at saturation extremes —
+the worst is a near-primary orange, 246.8/48.7/5.0 in, where the Bench produces 187.7/0.0/0.0 and
+ffmpeg 223.9/25.8/0.0 — and a synthetic cube probe samples those corners deliberately. Real
+footage reaches them on signage, which is the one place it would be visible.
+
+One thing the same experiment settled positively: ffmpeg's colorbalance is level-weighted, not a
+flat offset. Weighting warmth by the midtone ramp moves the warm-only case from 31.6 to 22.4 code
+values, and the Bench's flat offset is wrong everywhere except the midtones. It is not committed,
+because the same change moves negative-black the wrong way, from 36.4 to 40.4 — the weighting is
+evidently not symmetric in the sign of the move, and guessing again without reading ffmpeg's source
+would be another round of this.
+
 WHAT THIS DOES NOT COVER YET. The input-correction stage (scripts/make-correct-lut.py) has no
 counterpart in the Bench, so there is nothing to compare it against here. When the app's preview
 implements it, it gets a case of its own — and the probe has to become an Apple Log probe, because
