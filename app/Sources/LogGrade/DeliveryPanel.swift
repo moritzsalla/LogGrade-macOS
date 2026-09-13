@@ -50,6 +50,8 @@ struct DeliveryPanel: View {
                 .labelsHidden().frame(width: 84)
             }
 
+            stabiliseRow
+
             if model.project.delivery.feed {
                 cropRow
             } else {
@@ -100,12 +102,42 @@ struct DeliveryPanel: View {
         .background(Palette.panel)
     }
 
+    /// Per clip, because it is a property of the shot rather than of the shoot. The engine has
+    /// always taken it; until now nothing in the interface set it, so every clip was stabilised
+    /// whether it needed to be or not.
+    private var stabiliseRow: some View {
+        HStack(spacing: 10) {
+            Toggle("stabilise this clip", isOn: Binding(get: { model.stabilise },
+                                                        set: { model.stabilise = $0 }))
+                .toggleStyle(.checkbox)
+                .font(.system(size: 11))
+                .foregroundColor(Palette.inkSecondary)
+                .disabled(model.selectedClip == nil)
+            Spacer()
+        }
+    }
+
     private var cropRow: some View {
         HStack(spacing: 10) {
             Text("4:5 crop").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
             if let geometry = model.cropGeometry {
-                if let offset = model.cropOffset {
-                    Readout(text: "\(offset) of \(geometry.maximumOffset) px from the top")
+                if model.cropOffset != nil {
+                    // TYPED AS WELL AS DRAGGED. A drag finds a framing; only a number repeats one,
+                    // and repeating one is how a shoot gets a consistent crop. Arrow keys nudge by
+                    // a pixel from here too.
+                    TextField("", value: Binding(get: { model.cropOffset ?? 0 },
+                                                 set: { model.cropOffset = geometry.clamp($0) }),
+                              formatter: Self.pixels)
+                        .font(.system(size: 11, design: .monospaced))
+                        .monospacedDigit()
+                        .multilineTextAlignment(.trailing)
+                        .textFieldStyle(.plain)
+                        .foregroundColor(Palette.ink)
+                        .frame(width: 46)
+                    Text("of \(geometry.maximumOffset) px from the top")
+                        .font(.system(size: 10.5)).foregroundColor(Palette.inkTertiary)
+                    Stepper("") { model.nudgeCrop(by: -8) } onDecrement: { model.nudgeCrop(by: 8) }
+                        .labelsHidden()
                     Button("clear") { model.cropOffset = nil }
                         .buttonStyle(.borderless).font(.system(size: 10.5))
                 } else {
@@ -121,6 +153,16 @@ struct DeliveryPanel: View {
             }
         }
     }
+
+    /// Whole pixels, POSIX, for the same reason the inspector's readouts are: this number is
+    /// written into a project file and read back by the engine.
+    private static let pixels: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .none
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.allowsFloats = false
+        return f
+    }()
 
     /// Zero stands for "the source's rate", which is the only lossless answer and therefore the
     /// default. A picker needs a value for it; the project keeps nil.

@@ -65,6 +65,46 @@ public final class RenderQueue: ObservableObject {
 
     public init(engine: EngineLocation) { self.engine = engine }
 
+    /// Sets a job's outcome directly.
+    ///
+    /// INTERNAL, and only the tests call it. The queue's own route to a finished state runs the
+    /// engine, and what `retry` has to get right is what happens AFTER a job finished, not how it
+    /// got there — so the tests set the outcome and skip the render.
+    func setOutcome(_ id: Job.ID, state: State, outputs: [URL] = [], frame: Int? = nil) {
+        guard let i = jobs.firstIndex(where: { $0.id == id }) else { return }
+        jobs[i].state = state
+        jobs[i].outputs = outputs
+        jobs[i].frame = frame
+    }
+
+    /// Puts a finished job back in the queue.
+    ///
+    /// RESET RATHER THAN RE-RUN. A clip usually fails for a reason the person then fixes — a
+    /// missing crop offset, a full disk, a look value the engine refused — so the retry has to
+    /// pick up whatever changed, which means going through `start(environment:)` again and asking
+    /// the caller for a fresh environment. Re-running a captured one would repeat the failure and
+    /// look like the fix did not work.
+    ///
+    /// The previous outputs and frame count are cleared with it: a half-written progress figure
+    /// from the attempt that failed is worse than none.
+    public func retry(_ id: Job.ID) {
+        guard let i = jobs.firstIndex(where: { $0.id == id }), jobs[i].state.isFinished else {
+            return
+        }
+        jobs[i].state = .waiting
+        jobs[i].frame = nil
+        jobs[i].outputs = []
+    }
+
+    /// Every job that did not finish cleanly, back in the queue at once. The button a person
+    /// actually wants after fixing one thing that broke several clips.
+    public func retryAllFailed() {
+        for job in jobs where job.state.isFinished {
+            if case .done = job.state { continue }
+            retry(job.id)
+        }
+    }
+
     public func enqueue(_ clips: [(url: URL, stem: String, frames: Int?)]) {
         for clip in clips where !jobs.contains(where: { $0.stem == clip.stem && !$0.state.isFinished }) {
             jobs.append(Job(clip: clip.url, stem: clip.stem, totalFrames: clip.frames))

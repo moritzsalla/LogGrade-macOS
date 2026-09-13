@@ -321,3 +321,68 @@ final class OutputDestinationTests: XCTestCase {
                        "nothing should default into a scratch directory")
     }
 }
+
+/// The wheels, and the one way they can quietly break a default render.
+final class WheelTests: XCTestCase {
+    /// THE TRAP THIS EXISTS FOR. The wire format is a string and the engine decides whether a
+    /// correction is neutral by parsing it. Joining three doubles the obvious way writes
+    /// "1.0,1.0,1.0" — the same correction, a different string — so a wheel dragged and returned
+    /// to centre would put the correction cube back in the filter graph and stop a default render
+    /// being byte-identical to the precursor's.
+    func testAWheelMovedAndReturnedIsNeutralAgain() {
+        var correct = Look.Correct()
+        XCTAssertTrue(correct.isNeutral, "the default correction is not neutral")
+        for wheel in Look.Correct.Wheel.allCases {
+            for channel in 0..<3 {
+                correct.setValue(wheel, channel, wheel.neutral + 0.25)
+                XCTAssertFalse(correct.isNeutral, "\(wheel) \(channel) moved and still reads neutral")
+                correct.setValue(wheel, channel, wheel.neutral)
+                XCTAssertTrue(correct.isNeutral,
+                              "\(wheel) \(channel) returned to centre and reads as a correction — "
+                              + "the engine would put the cube back in the graph")
+            }
+        }
+        // And the text is spelled the way the generator spells it, which is what the engine's own
+        // neutrality check and its cube fingerprint both compare.
+        XCTAssertEqual(correct.slope, "1,1,1")
+        XCTAssertEqual(correct.offset, "0,0,0")
+        XCTAssertEqual(correct.power, "1,1,1")
+    }
+
+    /// look.json is documented as hand-editable, so a neutral correction reaches this code spelled
+    /// however a person felt like spelling it. The engine's own check parses before comparing;
+    /// this one has to as well, or a hand-written "1.0,1.0,1.0" puts a lookup that returns its own
+    /// input into the filter graph for every pixel of every render.
+    func testNeutralityIsDecidedByValueNotBySpelling() {
+        XCTAssertTrue(Look.Correct(slope: "1.0,1.0,1.0", offset: "0.0,0.0,0.0",
+                                   power: "1.00,1.00,1.00").isNeutral)
+        XCTAssertTrue(Look.Correct(slope: "1", offset: "0", power: "1").isNeutral,
+                      "the generator accepts one value for three; so must this")
+        XCTAssertFalse(Look.Correct(slope: "1,1,1.0001").isNeutral)
+        XCTAssertFalse(Look.Correct(slope: "nonsense").isNeutral,
+                       "an unparseable triple is not a neutral one — the engine would refuse it")
+    }
+
+    func testEachWheelAndChannelIsItsOwnValue() {
+        var correct = Look.Correct()
+        correct.setValue(.slope, 0, 1.1)
+        correct.setValue(.offset, 1, -0.02)
+        correct.setValue(.power, 2, 1.15)
+        XCTAssertEqual(correct.slope, "1.1,1,1")
+        XCTAssertEqual(correct.offset, "0,-0.02,0")
+        XCTAssertEqual(correct.power, "1,1,1.15")
+        XCTAssertEqual(correct.value(.slope, 0), 1.1)
+        XCTAssertEqual(correct.value(.offset, 1), -0.02)
+        XCTAssertEqual(correct.value(.power, 2), 1.15)
+        XCTAssertEqual(correct.value(.slope, 1), 1, "a channel nobody moved changed anyway")
+    }
+
+    /// A file written by hand can carry a single value meaning all three, which the generator
+    /// accepts. Reading it must not silently lose the other two.
+    func testAOneValueTripleReadsAsThreeChannels() {
+        var correct = Look.Correct(slope: "1.2")
+        XCTAssertEqual(correct.value(.slope, 2), 1.2)
+        correct.setValue(.slope, 0, 1.3)
+        XCTAssertEqual(correct.slope, "1.3,1.2,1.2")
+    }
+}

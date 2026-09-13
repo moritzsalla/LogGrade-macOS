@@ -206,3 +206,48 @@ final class ProgressTests: XCTestCase {
         XCTAssertNil(unmeasured.frameCount)
     }
 }
+
+/// Retrying a clip that did not make it.
+///
+/// A failed clip does not stop the batch — that was settled — but until now it was also final,
+/// which meant fixing the cause and re-adding the clip by hand. These cover the state reset only;
+/// that a retry actually re-renders is the engine's job and is covered by the delivery test.
+extension RenderQueueTests {
+    func testRetryPutsAFinishedJobBackInTheQueue() throws {
+        let queue = RenderQueue(engine: EngineLocation(root: URL(fileURLWithPath: "/nowhere")))
+        queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A", nil)])
+        let id = try XCTUnwrap(queue.jobs.first?.id)
+        queue.setOutcome(id, state: .failed("disk full"), outputs: [URL(fileURLWithPath: "/x")],
+                         frame: 12)
+
+        queue.retry(id)
+        XCTAssertEqual(queue.jobs.first?.state, .waiting)
+        // CLEARED WITH IT. A frame count and an output path from the attempt that failed describe
+        // a render that does not exist; leaving them would show progress for work not done.
+        XCTAssertNil(queue.jobs.first?.frame)
+        XCTAssertEqual(queue.jobs.first?.outputs, [])
+    }
+
+    func testRetryLeavesAFinishedSuccessAlone() throws {
+        let queue = RenderQueue(engine: EngineLocation(root: URL(fileURLWithPath: "/nowhere")))
+        queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A", nil),
+                       (URL(fileURLWithPath: "/tmp/B.mov"), "B", nil)])
+        let a = try XCTUnwrap(queue.jobs.first?.id)
+        let b = try XCTUnwrap(queue.jobs.last?.id)
+        queue.setOutcome(a, state: .done, outputs: [URL(fileURLWithPath: "/a.mp4")], frame: 90)
+        queue.setOutcome(b, state: .skipped(.notPortrait), outputs: [], frame: nil)
+
+        queue.retryAllFailed()
+        XCTAssertEqual(queue.jobs.first?.state, .done, "a delivered clip was queued again")
+        XCTAssertEqual(queue.jobs.first?.outputs.count, 1, "its output was thrown away")
+        XCTAssertEqual(queue.jobs.last?.state, .waiting, "a skipped clip was not offered a retry")
+    }
+
+    func testAWaitingJobIsNotResetByRetry() throws {
+        let queue = RenderQueue(engine: EngineLocation(root: URL(fileURLWithPath: "/nowhere")))
+        queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A", nil)])
+        let id = try XCTUnwrap(queue.jobs.first?.id)
+        queue.retry(id)
+        XCTAssertEqual(queue.jobs.first?.state, .waiting)
+    }
+}

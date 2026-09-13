@@ -24,6 +24,70 @@ public struct Look: Equatable {
             self.slope = slope; self.offset = offset; self.power = power; self.lumMix = lumMix
         }
 
+        /// The three ASC CDL controls, which is what a colourist's wheels are. The names on the
+        /// left are the wire format's; the names on the right are what the interface shows,
+        /// because nobody reaches for "slope".
+        public enum Wheel: String, CaseIterable {
+            case offset   // lift
+            case power    // gamma
+            case slope    // gain
+
+            /// The value that does nothing. Lift adds, so its neutral is zero; the other two
+            /// multiply or exponentiate, so theirs is one.
+            public var neutral: Double { self == .offset ? 0 : 1 }
+        }
+
+        /// THE WIRE FORMAT IS A STRING, AND THE ROUND TRIP HAS TO BE EXACT.
+        ///
+        /// These are stored as "1,1,1" because that is what the engine's generator takes, and the
+        /// generator decides whether a correction is neutral by PARSING them. An interface that
+        /// joins three doubles the obvious way writes "1.0,1.0,1.0" — which is the same correction
+        /// and a different string. Drag a wheel and return it to centre and the correction would
+        /// stop counting as neutral, the cube would go into the graph, and a default render would
+        /// stop being byte-identical to the precursor's for a look nobody changed.
+        ///
+        /// So the formatter is %g, which is the generator's own, and neutrality is decided by
+        /// parsing rather than by comparing text.
+        static func parse(_ text: String) -> (Double, Double, Double)? {
+            let parts = text.split(separator: ",").map {
+                Double($0.trimmingCharacters(in: .whitespaces))
+            }
+            if parts.count == 1, let only = parts[0] { return (only, only, only) }
+            guard parts.count == 3, let r = parts[0], let g = parts[1], let b = parts[2] else {
+                return nil
+            }
+            return (r, g, b)
+        }
+
+        static func format(_ v: (Double, Double, Double)) -> String {
+            [v.0, v.1, v.2].map { String(format: "%g", $0) }.joined(separator: ",")
+        }
+
+        private func text(for wheel: Wheel) -> String {
+            switch wheel {
+            case .slope: return slope
+            case .offset: return offset
+            case .power: return power
+            }
+        }
+
+        /// One channel of one wheel. Channel is 0, 1, 2 for red, green, blue.
+        public func value(_ wheel: Wheel, _ channel: Int) -> Double {
+            guard let t = Self.parse(text(for: wheel)) else { return wheel.neutral }
+            return channel == 0 ? t.0 : (channel == 1 ? t.1 : t.2)
+        }
+
+        public mutating func setValue(_ wheel: Wheel, _ channel: Int, _ value: Double) {
+            var t = Self.parse(text(for: wheel)) ?? (wheel.neutral, wheel.neutral, wheel.neutral)
+            if channel == 0 { t.0 = value } else if channel == 1 { t.1 = value } else { t.2 = value }
+            let written = Self.format(t)
+            switch wheel {
+            case .slope: slope = written
+            case .offset: offset = written
+            case .power: power = written
+            }
+        }
+
         /// The arguments the engine's generator takes, spelled once so the interface and the
         /// render cannot disagree about which knob is which.
         public func generatorArguments(size: Int) -> [String] {
@@ -36,8 +100,16 @@ public struct Look: Equatable {
         /// generator owns the rule — but the interface needs to know whether to show the stage as
         /// active, and a neutral correction is what keeps a render identical to the precursor's.
         public var isNeutral: Bool {
-            exposure == 0 && temp == 0 && tint == 0
-                && slope == "1,1,1" && offset == "0,0,0" && power == "1,1,1"
+            guard exposure == 0, temp == 0, tint == 0 else { return false }
+            // PARSED, not compared as text — the generator decides this by parsing too, and
+            // "1.0,1.0,1.0" is the same correction as "1,1,1". Comparing strings here made a
+            // wheel returned to centre read as an active correction.
+            for wheel in Wheel.allCases {
+                guard let t = Self.parse(text(for: wheel)) else { return false }
+                let n = wheel.neutral
+                if t.0 != n || t.1 != n || t.2 != n { return false }
+            }
+            return true
         }
     }
 

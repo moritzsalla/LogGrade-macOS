@@ -34,16 +34,19 @@ struct InspectorView: View {
                     control("exposure", $model.look.correct.exposure, -3...3, format: "%+.2f")
                     control("temperature", $model.look.correct.temp, -1...1)
                     control("tint", $model.look.correct.tint, -1...1)
+                    wheel(.offset, "lift")
+                    wheel(.power, "gamma")
+                    wheel(.slope, "gain")
                     control("luminance mix", $model.look.correct.lumMix, 0...1)
                     Text("These run before the conversion, on the log, so an exposure move keeps "
                          + "the highlights instead of clipping them rather than flattening them "
                          + "against a ceiling.")
                         .modifier(Note())
-                    if model.look.correct.lumMix < 1 {
-                        Text("Luminance mix only does something once a colour wheel is in play, "
-                             + "and no wheel is exposed yet.")
-                            .modifier(Note())
-                    }
+                    Text("Lift, gamma and gain are the three wheels, per channel. Luminance mix "
+                         + "decides how much of a wheel move lands on brightness against colour: "
+                         + "at 0 the move is colour only, because moving channels apart shifts "
+                         + "saturation whether you meant it to or not.")
+                        .modifier(Note())
                 }
                 stage("look", mark: .editable, note: "the film stock, as a lookup") {
                     Picker("", selection: $model.look.lookLUT) {
@@ -90,6 +93,25 @@ struct InspectorView: View {
             .padding(.trailing, 16)
         }
         .background(Palette.panel)
+    }
+
+    /// One wheel, as three channel sliders.
+    ///
+    /// NOT A COLOUR WHEEL, deliberately. A wheel is quicker to throw a look with and worse at
+    /// repeating one, and repeatability is what this app is for: the same grade across nineteen
+    /// clips. Three rows you can also type into give that, and they reuse the drag-live-then-
+    /// render plumbing every other control already has.
+    ///
+    /// The ranges are the ones the engine's generator is sane over, and the generator refuses a
+    /// power of zero, which is why gamma starts above it.
+    @ViewBuilder private func wheel(_ which: Look.Correct.Wheel, _ title: String) -> some View {
+        let range: ClosedRange<Double> = which == .offset ? -0.2...0.2 : 0.5...2
+        ForEach(Array(["R", "G", "B"].enumerated()), id: \.offset) { channel, name in
+            control("\(title) \(name)", Binding(
+                get: { model.look.correct.value(which, channel) },
+                set: { model.look.correct.setValue(which, channel, $0) }),
+                    range, format: which == .offset ? "%+.3f" : "%.3f")
+        }
     }
 
     /// THE SLIDER IS NOT THE NUMBER THAT RENDERS, and the interface has to say so rather than

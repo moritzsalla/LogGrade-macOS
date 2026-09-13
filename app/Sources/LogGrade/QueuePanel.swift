@@ -20,6 +20,15 @@ struct QueuePanel: View {
                     Button("stop") { model.cancel(queue: queue) }
                         .buttonStyle(.borderless)
                 }
+                // Only when there is something to retry, and it re-runs through convert so a
+                // crop offset or a look value fixed since the failure is picked up.
+                if !queue.isRunning && needsRetry > 0 {
+                    Button(needsRetry == 1 ? "retry 1 clip" : "retry \(needsRetry) clips") {
+                        queue.retryAllFailed()
+                        model.convert(queue: queue)
+                    }
+                    .buttonStyle(.borderless)
+                }
                 Spacer()
                 Picker("", selection: concurrencyBinding) {
                     Text("1 at a time").tag(1)
@@ -44,12 +53,25 @@ struct QueuePanel: View {
                             .foregroundColor(colour(job.state))
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
+                        if !queue.isRunning, job.state.isFinished, job.state != .done {
+                            Button("retry") {
+                                queue.retry(job.id)
+                                model.convert(queue: queue)
+                            }
+                            .buttonStyle(.borderless).font(.system(size: 10.5))
+                        }
                     }
                 }
             }
         }
         .padding(16)
         .background(Palette.panel)
+    }
+
+    /// How many clips ended in something other than success. A skipped clip counts: the engine
+    /// refused it for a reason the person can usually fix, which is exactly what a retry is for.
+    private var needsRetry: Int {
+        queue.jobs.filter { $0.state.isFinished && $0.state != .done }.count
     }
 
     /// One clip's state in its own words. A frame count while it runs, the reason when it does

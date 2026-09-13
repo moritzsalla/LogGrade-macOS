@@ -420,6 +420,26 @@ final class GradeModel: ObservableObject {
         }
     }
 
+    /// Whether this clip gets stabilised. Per clip, not per project: a locked-off shot does not
+    /// want a warp, and a handheld one does.
+    var stabilise: Bool {
+        get { selectedClip.flatMap { project.clips[$0.stem]?.stabilise } ?? true }
+        set {
+            guard let stem = selectedClip?.stem else { return }
+            var settings = project.clips[stem] ?? Project.ClipSettings()
+            settings.stabilise = newValue
+            project.clips[stem] = settings
+        }
+    }
+
+    /// Moves the crop by a number of pixels, clamped. The keyboard exists here because a drag
+    /// finds a framing and only a number repeats one — the same reason every readout in the
+    /// inspector can be typed into.
+    func nudgeCrop(by pixels: Int) {
+        guard let geometry = cropGeometry else { return }
+        cropOffset = geometry.clamp((cropOffset ?? geometry.maximumOffset / 2) + pixels)
+    }
+
     /// The window's geometry for the selected clip, from what was measured about it rather than
     /// from this camera's numbers assumed.
     var cropGeometry: CropGeometry? {
