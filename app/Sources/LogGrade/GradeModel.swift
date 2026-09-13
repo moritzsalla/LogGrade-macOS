@@ -38,6 +38,13 @@ final class GradeModel: ObservableObject {
     /// Told when something finishes that you were not watching.
     weak var toaster: Toaster?
 
+    /// What a control goes back to when you double-click its name: the value it had in the
+    /// active preset, not a neutral. "Default" in a grading tool means the look you started this
+    /// clip from, so undoing one control returns it to the grade rather than switching it off.
+    var defaultLook: Look {
+        project.presets.first(where: { $0.name == project.activePreset })?.look ?? look
+    }
+
     /// Which inspector stages are open. Remembered across launches, because which part of the
     /// chain you are working on outlives a window.
     @Published var openStages: Set<String> = ["Tone"]
@@ -444,7 +451,16 @@ final class GradeModel: ObservableObject {
     }
 
     /// The clips the interface is holding, set by the window when the list changes.
-    var clipEntries: [ClipList.Entry]?
+    /// THE CLIP LIST ITSELF, not a copy of it.
+    ///
+    /// These were two stored properties that every import path had to remember to refresh, and
+    /// there were four such paths. One forgot, so the list showed three clips while the model
+    /// believed it had none — which disabled Convert with no explanation, because "no clips" was
+    /// never a state the interface expected to be in while clips were visibly on screen. A derived
+    /// value cannot fall out of step with what it is derived from.
+    weak var clips: ClipList?
+    var clipEntries: [ClipList.Entry]? { clips.map { $0.usable } }
+    var clipNames: [String] { clips?.usable.map(\.stem) ?? [] }
 
     /// Where the project was opened from or last saved to.
     @Published var projectURL: URL?
@@ -497,7 +513,6 @@ final class GradeModel: ObservableObject {
         project.blockers(for: clipNames)
     }
 
-    var clipNames: [String] = []
 
     func renderPreview() {
         guard let clip = selectedClip, clip.isUsable else { return }

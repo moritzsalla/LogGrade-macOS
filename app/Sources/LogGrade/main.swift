@@ -17,9 +17,14 @@ struct RootView: View {
     var grade: GradeModel?
 
     @ObservedObject var toaster: Toaster
+    let actions: AppActions
 
     var body: some View {
         content
+            // ON THE WHOLE WINDOW, not on a dashed box inside one column. The startup screen says
+            // "or drag them onto this window" and it replaces that column entirely, so the only
+            // drop target in the app disappeared exactly when it was being advertised.
+            .onDrop(of: [.fileURL], isTargeted: nil) { providers in accept(providers) }
             // Top trailing, which is where macOS puts a notification, and clear of both the clip
             // list and the controls.
             .overlay(alignment: .topTrailing) {
@@ -35,13 +40,7 @@ struct RootView: View {
                 problems: problems,
                 recentProject: UserDefaults.standard.url(forKey: "lastProject"),
                 onOpenProject: { url in try? grade?.openProject(at: url) },
-                onChooseFiles: {
-                    let panel = NSOpenPanel()
-                    panel.allowsMultipleSelection = true
-                    panel.canChooseDirectories = true
-                    panel.prompt = "Add"
-                    if panel.runModal() == .OK { clips.add(panel.urls) }
-                }))
+                onChooseFiles: actions.chooseClips))
         }
         return AnyView(columns)
     }
@@ -91,9 +90,9 @@ struct RootView: View {
 
             if let grade {
                 HStack(spacing: 10) {
-                    Button("open project") { openProject(grade) }
+                    Button("open project") { actions.openProject() }
                         .buttonStyle(.borderless).font(Type.label)
-                    Button("save project") { saveProject(grade) }
+                    Button("save project") { actions.saveProject() }
                         .buttonStyle(.borderless).font(Type.label)
                     if let url = grade.projectURL {
                         Text(url.lastPathComponent)
@@ -136,24 +135,21 @@ struct RootView: View {
                 Text("drop Apple Log clips")
                     .font(Type.label)
                     .foregroundColor(Palette.inkTertiary))
-            .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-                // Real paths, which is the reason this is an app and not a page: a browser drop
-                // hands over bytes, and the engine needs a location.
-                for provider in providers {
-                    _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                        guard let url else { return }
-                        DispatchQueue.main.async {
-                            for added in clips.add([url]) {
-                                selectIfNothingSelected(added)
-                            }
-                            grade?.clipNames = clips.usable.map(\.stem)
-                            grade?.clipEntries = clips.usable
-                        }
-                    }
-                }
-                return true
-            }
     }
+
+
+    /// Takes a drop of file URLs. Real paths, which is the reason this is an app and not a page: a
+    /// browser drop hands over bytes, and the engine needs a location.
+    private func accept(_ providers: [NSItemProvider]) -> Bool {
+        for provider in providers {
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url else { return }
+                DispatchQueue.main.async { actions.take([url]) }
+            }
+        }
+        return true
+    }
+
 
     /// A clip reads as its frame first: that is how a person recognises it. The selected one is
     /// marked on its leading edge in the colour this tool measures, rather than by a filled row,
@@ -195,24 +191,7 @@ struct RootView: View {
         .overlay(Rectangle().fill(Palette.hairline).frame(height: 1), alignment: .bottom)
     }
 
-    /// A shoot is the unit of work, so it is saved and reopened as one: presets, delivery, and
-    /// every clip's crop offset. Without this the crop decisions — the one thing that cannot be
-    /// guessed — live only as long as the window is open.
-    private func saveProject(_ grade: GradeModel) {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = grade.projectURL?.lastPathComponent ?? "shoot.loggrade.json"
-        panel.allowedContentTypes = [.json]
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try grade.saveProject(to: url) } catch { NSSound.beep() }
-    }
 
-    private func openProject(_ grade: GradeModel) {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try grade.openProject(at: url) } catch { NSSound.beep() }
-    }
 
     /// Drop a clip and it is the one being graded. Making someone click "select" first is a step
     /// with no decision in it, and the whole app is shaped around the drop.
@@ -249,8 +228,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 grade.selectedClip = added
                 grade.renderPreview()
             }
-            grade?.clipNames = clips.usable.map(\.stem)
-            grade?.clipEntries = clips.usable
         }
     }
 
@@ -306,22 +283,14 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
         if event.keyCode == 126 { grade.nudgeCrop(by: -step); return nil }   // up
         if event.keyCode == 125 { grade.nudgeCrop(by: step); return nil }    // down
     }
-    switch key {
-    case "c":
+    // ONLY WHAT A MENU CANNOT DO. Compare has to be HELD — pressed and released — and a menu item
+    // fires once on selection, so it stays here. Everything else moved to the menu bar, where
+    // macOS draws the shortcut beside the name and people can find it without being told.
+    if key == "c" {
         grade.isComparing = grade.preview.comparison != nil
         return nil
-    case "p", " ":
-        grade.renderPreview()
-        return nil
-    case "[":
-        grade.step(-1, in: clipList.usable)
-        return nil
-    case "]":
-        grade.step(1, in: clipList.usable)
-        return nil
-    default:
-        return event
     }
+    return event
 }
 
 let renderQueue = RenderQueue(engine: engine ?? EngineLocation(root: URL(fileURLWithPath: "/")))
@@ -340,6 +309,14 @@ renderQueue.concurrency = storedConcurrency > 0 ? storedConcurrency : 2
 
 let delegate = AppDelegate(clips: clipList, grade: gradeModel)
 app.delegate = delegate
+// THE MENU BAR, which this app did not have. Without it ⌘Q does not quit and the standard
+// editing commands never reach a text field, because they travel up the responder chain from a
+// menu item. Built by hand because the bundle is assembled by a script rather than by Xcode.
+let commands = MainMenu.Commands()
+MainMenu.install(commands: commands)
+
+gradeModel?.clips = clipList
+let actions = AppActions(clips: clipList, grade: gradeModel, queue: renderQueue)
 let toaster = Toaster()
 gradeModel?.toaster = toaster
 renderQueue.onFinished = { delivered, failed in
@@ -353,7 +330,16 @@ renderQueue.onFinished = { delivered, failed in
 }
 window.contentView = NSHostingView(rootView: RootView(engine: engine, problems: problems,
                                                       clips: clipList, queue: renderQueue,
-                                                      grade: gradeModel, toaster: toaster))
+                                                      grade: gradeModel, toaster: toaster,
+                                                      actions: actions))
+// Wired after the model exists, since every one of them needs it.
+commands.addClips = { actions.chooseClips() }
+commands.openProject = { actions.openProject() }
+commands.saveProject = { actions.saveProject() }
+commands.previousClip = { actions.step(-1) }
+commands.nextClip = { actions.step(1) }
+commands.convert = { actions.convert() }
+
 window.makeKeyAndOrderFront(nil)
 app.activate(ignoringOtherApps: true)
 app.run()

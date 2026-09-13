@@ -44,13 +44,17 @@ struct InspectorView: View {
                           + "of a wheel move lands on brightness against colour. At 0 the move is "
                           + "colour only, because separating channels shifts saturation whether "
                           + "you meant it to or not.") {
-                    control("Exposure", $model.look.correct.exposure, -3...3, format: "%+.2f")
-                    control("Temperature", $model.look.correct.temp, -1...1)
-                    control("Tint", $model.look.correct.tint, -1...1)
+                    control("Exposure", $model.look.correct.exposure, -3...3, format: "%+.2f",
+                            default: model.defaultLook.correct.exposure)
+                    control("Temperature", $model.look.correct.temp, -1...1,
+                            default: model.defaultLook.correct.temp)
+                    control("Tint", $model.look.correct.tint, -1...1,
+                            default: model.defaultLook.correct.tint)
                     wheel(.offset, "Lift")
                     wheel(.power, "Gamma")
                     wheel(.slope, "Gain")
-                    control("Luminance", $model.look.correct.lumMix, 0...1)
+                    control("Luminance", $model.look.correct.lumMix, 0...1,
+                            default: model.defaultLook.correct.lumMix)
                 }
                 stage("Film look", mark: .editable,
                       help: "A film-emulation lookup, applied after the conversion.\n\nThe tone "
@@ -73,27 +77,37 @@ struct InspectorView: View {
                           + "saturated colour's two low channels harder than its high one, which "
                           + "is what makes signage glow.\n\nMidtone is a gamma, so higher is "
                           + "darker. The graph beside the picture is this curve.") {
-                    control("Midtone", $model.look.tone.gamma, 1...2.6)
+                    control("Midtone", $model.look.tone.gamma, 1...2.6,
+                            default: model.defaultLook.tone.gamma)
                     appliedGammaNote
-                    control("Contrast", $model.look.tone.contrast, 0.8...1.8)
-                    control("Pivot", $model.look.tone.pivot, 0.25...0.65)
-                    control("Shoulder", $model.look.tone.shoulder, 0...0.8)
-                    control("Toe", $model.look.tone.toe, 0...0.8)
-                    control("Black", $model.look.tone.black, -0.08...0.08, format: "%+.3f")
+                    control("Contrast", $model.look.tone.contrast, 0.8...1.8,
+                            default: model.defaultLook.tone.contrast)
+                    control("Pivot", $model.look.tone.pivot, 0.25...0.65,
+                            default: model.defaultLook.tone.pivot)
+                    control("Shoulder", $model.look.tone.shoulder, 0...0.8,
+                            default: model.defaultLook.tone.shoulder)
+                    control("Toe", $model.look.tone.toe, 0...0.8,
+                            default: model.defaultLook.tone.toe)
+                    control("Black", $model.look.tone.black, -0.08...0.08, format: "%+.3f",
+                            default: model.defaultLook.tone.black)
                 }
                 stage("Trims", mark: .editable,
                       help: "The last small moves, after the curve. Warmth acts on the midtones "
                           + "only, so it barely moves a bright sky or a deep shadow.") {
-                    control("Saturation", $model.look.colour.saturation, 0.6...1.6)
-                    control("Warmth", $model.look.colour.warmth, -0.12...0.12, format: "%+.3f")
+                    control("Saturation", $model.look.colour.saturation, 0.6...1.6,
+                            default: model.defaultLook.colour.saturation)
+                    control("Warmth", $model.look.colour.warmth, -0.12...0.12, format: "%+.3f",
+                            default: model.defaultLook.colour.warmth)
                 }
                 stage("Delivery", mark: .unpreviewed,
                       help: "Grain and stabilisation are applied to the video, never to the "
                           + "preview. Both need moving footage to judge, so a still leaves them "
                           + "out rather than showing a version that is not what renders.",
                       last: true) {
-                    control("Grain", $model.look.grainStrength, 0...20, format: "%.0f")
-                    control("Stabiliser", $model.look.stabilisationSmoothing, 0...60, format: "%.0f")
+                    control("Grain", $model.look.grainStrength, 0...20, format: "%.0f",
+                            default: model.defaultLook.grainStrength)
+                    control("Stabiliser", $model.look.stabilisationSmoothing, 0...60, format: "%.0f",
+                            default: model.defaultLook.stabilisationSmoothing)
                 }
             }
             .padding(.vertical, 18)
@@ -117,7 +131,8 @@ struct InspectorView: View {
             control("\(title) \(name)", Binding(
                 get: { model.look.correct.value(which, channel) },
                 set: { model.look.correct.setValue(which, channel, $0) }),
-                    range, format: which == .offset ? "%+.3f" : "%.3f")
+                    range, format: which == .offset ? "%+.3f" : "%.3f",
+                    default: which.neutral)
         }
     }
 
@@ -214,12 +229,26 @@ struct InspectorView: View {
     /// A label, a track, and a readout you can type into. Dragging finds a value; typing repeats
     /// one, and a grading tool needs both.
     private func control(_ label: String, _ value: Binding<Double>,
-                         _ range: ClosedRange<Double>, format: String = "%.3f") -> some View {
+                         _ range: ClosedRange<Double>, format: String = "%.3f",
+                         default original: Double? = nil) -> some View {
         HStack(spacing: Space.s) {
             Text(label)
                 .font(Type.label)
                 .foregroundColor(Palette.inkSecondary)
                 .frame(width: 84, alignment: .leading)
+                // DOUBLE-CLICK THE NAME TO PUT IT BACK. Every grading tool does this, and without
+                // it the only way to undo one control is to remember the number it held. The name
+                // is the target rather than the track, so the gesture cannot be confused with a
+                // drag that happens to start with two quick clicks.
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    guard let original else { return }
+                    value.wrappedValue = original
+                    model.refreshCurve()
+                    model.liveUpdate()
+                    model.renderPreview()
+                }
+                .help(original == nil ? "" : "Double-click to reset")
             Slider(value: value, in: range) { editing in
                 if editing {
                     model.beginDrag()

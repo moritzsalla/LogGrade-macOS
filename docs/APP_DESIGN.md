@@ -88,3 +88,33 @@ question. The ADR that justified it had already been amended to say the obstacle
 
 The fix is in `docs/adr/0009`. The check it suggests, for next time: for each control, say how long
 it takes to see its effect, then ask whether anyone would use a control that costs that.
+
+## What using it for real changed
+
+Everything here came from grading actual clips rather than from reading the code.
+
+**The interface had no scale.** Ten font sizes and fourteen spacings, each chosen one control at a
+time. There are four type roles and five spacings now, on macOS's own metrics: 13 is the system
+control size, 11 is what AppKit uses in inspectors, 10 is its caption. Weight carries the hierarchy
+rather than size, which is what keeps a panel this dense readable.
+
+**The panel explained itself at length, every visit.** Each stage carried a paragraph of prose. Read
+once it is useful; read on every visit it is a wall between you and the sliders. It is behind a help
+button now, in a popover, which is where macOS puts reference text. Stages collapse, and which ones
+are open is remembered.
+
+**There was no menu bar at all.** Not cosmetic: ⌘Q did not quit, and ⌘C, ⌘V and ⌘A did nothing in a
+text field, because the standard editing commands reach a field by travelling up the responder chain
+from a menu item. Shortcuts live there now, where macOS draws them beside the name. The one
+exception is hold-to-compare, which a menu item cannot express.
+
+**Disabled controls have to say why.** Convert can be blocked for four reasons and showed the same
+grey rectangle for all of them, leaving guessing as the only move.
+
+**Three bugs had one shape.** Thumbnails, the clip count behind Convert, and the drop target all
+broke because state was copied into a second place and one of several callers forgot to keep it in
+step. Each is now derived from the thing it describes, or funnelled through a single door. When a
+fourth path appears it cannot forget, because there is nothing to remember.
+
+**A busy indicator must not obscure the subject.** The picture greyed out to say "working", at
+exactly the moment it was being judged. A spinner in the corner says the same thing.

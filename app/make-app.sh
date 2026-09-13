@@ -83,4 +83,13 @@ PLIST
 # Signed to run locally, which needs no developer account. An unsigned bundle is quarantined and
 # refuses to launch; ad-hoc signing is enough for something that is never distributed.
 codesign --force --sign - "$APP" >/dev/null 2>&1 || echo "WARNING: ad-hoc signing failed" >&2
+
+# TELL THE SYSTEM THE BUNDLE CHANGED, or Finder keeps showing the generic application icon.
+# macOS caches an app's icon against its PATH, and this script deletes and recreates the bundle at
+# the same path on every build — so the cache is never invalidated and the app looks like it has
+# no icon at all, however correct the .icns inside it is. Touching the bundle and re-registering it
+# is what makes Finder look again.
+touch "$APP"
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+[ -x "$LSREGISTER" ] && "$LSREGISTER" -f "$APP" >/dev/null 2>&1
 echo "built $APP ($CONFIG)"

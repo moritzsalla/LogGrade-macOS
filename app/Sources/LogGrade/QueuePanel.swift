@@ -13,9 +13,12 @@ struct QueuePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Button(queue.isRunning ? "converting…" : "convert") { model.convert(queue: queue) }
-                    .disabled(queue.isRunning || model.clipNames.isEmpty
-                              || !model.blockers.isEmpty)
+                Button(queue.isRunning ? "Converting…" : "Convert") { model.convert(queue: queue) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(Palette.plate)
+                    .disabled(whyNot != nil)
+                    .help(whyNot ?? "Render every clip in the list")
                 if queue.isRunning {
                     Button("stop") { model.cancel(queue: queue) }
                         .buttonStyle(.borderless)
@@ -38,8 +41,19 @@ struct QueuePanel: View {
                 .labelsHidden().frame(width: 104).disabled(queue.isRunning)
             }
 
+            // A DISABLED BUTTON THAT DOES NOT SAY WHY IS A DEAD END. Convert can be blocked for
+            // four different reasons and the interface used to show the same grey rectangle for
+            // all of them, leaving the only remaining move to guess. Whatever is in the way is
+            // named where the button is, not in a panel somewhere else.
+            if let reason = whyNot, !queue.isRunning {
+                Label(reason, systemImage: "exclamationmark.circle")
+                    .font(Type.caption)
+                    .foregroundColor(Palette.lamp)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if queue.jobs.isEmpty {
-                Text("nothing queued. convert renders every clip in the list.")
+                Text("Convert renders every clip in the list.")
                     .font(Type.caption).foregroundColor(Palette.inkTertiary)
             } else {
                 // A BAR PER CLIP, not a percentage. A number tells you how far along something
@@ -85,6 +99,18 @@ struct QueuePanel: View {
         }
         .padding(Space.l)
         .background(Palette.panel)
+    }
+
+    /// Why Convert cannot run, in the words of whatever is actually stopping it. Nil when it can.
+    private var whyNot: String? {
+        if queue.isRunning { return "A conversion is already running." }
+        if model.clipNames.isEmpty { return "Add a clip first." }
+        if !model.project.delivery.reels && !model.project.delivery.feed {
+            return "Choose at least one deliverable: reels, feed, or both."
+        }
+        if let blocker = model.blockers.first { return blocker.description }
+        if model.outputDirectory == nil { return "Choose a folder to save into." }
+        return nil
     }
 
     /// How many clips ended in something other than success. A skipped clip counts: the engine

@@ -20,22 +20,38 @@ swift test --package-path app      # the app's own suite, about a minute
 ./scripts/check.sh --conformance   # plus: still byte-identical to the precursor?
 ```
 
-Four things about the app are worth knowing before using it:
+## Using it
 
-- **The picture follows every control.** While a control is moving the whole chain runs in the app
-  on a decoded source frame, which costs 4ms for a tone move and 15ms for a correction; when you
-  let go, the engine renders the same frame and that is what gets judged. The live picture is
-  within about 1.3 code values of the render, measured, and the panel always says which of the two
-  you are looking at. `docs/adr/0009_THE_PREVIEW_STAYS_EXACT_UNTIL_THE_DIVERGENCE_IS_EXPLAINED.md`
-  carries the numbers and what licenses each piece of maths that had to be written twice.
+Drop clips on the window, or File ▸ Add Clips. Pick one, open a stage in the inspector, and move a
+control: the picture follows it. Let go and the engine renders the same frame exactly. Choose the
+deliverables and a folder, then Convert.
+
+- **The picture follows every control**, including exposure and white balance, which run before
+  Apple's conversion and so cannot be recovered from a converted frame. While a control moves, the
+  whole chain runs in the app on a decoded source frame — 1ms for a tone move, 4ms for a film look.
+  The live picture is within about 1.3 code values of the render, measured on real footage, and the
+  panel always says which of the two you are looking at. There is no preview button: every path
+  that changes the look renders on release by itself.
 - **Build it optimised.** The live preview is a tight loop over half a million cube samples, and a
   debug build takes 1.5 seconds per frame against 12.7ms. That is why `make-app.sh` takes `--debug`
   rather than `--release`.
+- **Deliver at 1080 × 1920.** Instagram re-encodes to 1080 wide, so 2160 costs four times the
+  render for nothing downstream — and the grain and sharpener were tuned at 1080 and are merely
+  scaled above it. The delivery panel counts the render passes before you start, because two
+  deliverables plus stabilisation is three passes over every clip.
 - **The crop is dragged on the picture**, per clip, because the offset is a composition call and
-  one clip's framing applied to a batch produces files that all look done. A Feed render is blocked
-  until every clip has one.
+  one clip's framing applied to a batch produces files that all look done. It can also be typed and
+  nudged with the arrow keys. A Feed render is blocked until every clip has one, and Convert says
+  which clip is missing rather than just being grey.
 - **Clips are measured before they are accepted.** Already-converted footage is refused, since
   grading it again applies Apple's conversion twice.
+
+Two habits worth knowing: hold **C** to see the picture before the change you are making, and
+**double-click a control's name** to put it back to the preset's value.
+
+`docs/adr/0009_THE_PREVIEW_STAYS_EXACT_UNTIL_THE_DIVERGENCE_IS_EXPLAINED.md` carries the preview's
+measurements and what licenses each piece of maths that had to be written twice.
+`docs/APP_DESIGN.md` carries the interface decisions.
 
 **Why?** iPhone Pros 15th generation and newer are able to shoot in log which retains enough depth to edit professionally. Apple log preserves enough dynamic range, shadow detail, and color depth (10-bit) to be seamlessly edited alongside footage from professional cinema cameras.
 
