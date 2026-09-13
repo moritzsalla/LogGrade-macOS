@@ -10,6 +10,8 @@ import SwiftUI
 /// and named; the live one is neither, because it does answer the controls.
 struct PreviewView: View {
     @ObservedObject var model: GradeModel
+    /// Observed separately, so a new frame redraws the picture and nothing else.
+    @ObservedObject var preview: LivePreview
 
     /// Held on the keyboard, not clicked. The window's key monitor sets this.
     private var comparing: Bool { model.isComparing }
@@ -18,15 +20,15 @@ struct PreviewView: View {
         VStack(spacing: 12) {
             ZStack {
                 Rectangle().fill(Palette.well)
-                if let image = comparing ? (model.comparisonImage ?? model.previewImage)
-                                          : model.previewImage {
+                if let image = comparing ? (preview.comparison ?? preview.image)
+                                          : preview.image {
                     ZStack {
                         Image(nsImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             // Dimmed when the picture no longer answers the controls. A live
                             // frame does answer them, so it is not dimmed.
-                            .opacity(model.isStale && !model.isLive ? 0.55 : 1)
+                            .opacity(model.isStale && !preview.isLive ? 0.55 : 1)
                         // The crop is judged on the picture, because the question it answers is
                         // what is in the frame and no number answers that.
                         if model.project.delivery.feed, let geometry = model.cropGeometry {
@@ -38,20 +40,20 @@ struct PreviewView: View {
                     .padding(10)
                 } else {
                     Text(model.selectedClip == nil
-                         ? "drop Apple Log clips here to start"
-                         : "press preview for a still from this clip, graded as it will render")
+                         ? "Drop Apple Log clips here to start"
+                         : "Rendering the first frame of this clip…")
                         .font(.system(size: 12))
                         .foregroundColor(Palette.inkTertiary)
                 }
-                if model.isRendering {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(Palette.plate)
-                }
+                // NO SPINNER OVER THE WELL. It used to be an unaligned child of this stack, so it
+                // centred itself — on top of the picture when there was one, and squarely on top
+                // of the placeholder text when there was not. The status line below already says
+                // what is happening in words, so the spinner belongs in front of that, which is
+                // also where every native app puts one.
             }
 
             HStack(alignment: .top, spacing: 10) {
-                ScopesView(scopes: model.scopes)
+                ScopesView(scopes: preview.scopes)
                 // The curve lives with the picture rather than with its sliders, because the
                 // inspector scrolls and a readout you cannot see while you adjust is not a readout.
                 VStack(alignment: .leading, spacing: 4) {
@@ -62,18 +64,18 @@ struct PreviewView: View {
             }
 
             HStack(spacing: 12) {
-                Button(model.isStale ? "preview (out of date)" : "preview") { model.renderPreview() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(model.selectedClip == nil || model.isRendering)
+                // NO PREVIEW BUTTON. It had one job — ask for the exact frame — and every path
+                // that changes the look now does that on its own: live while you move a control,
+                // and an engine render the moment you let go. A button that re-does what just
+                // happened is a button that teaches you to distrust the picture.
                 Text("hold C for the picture before this change")
                     .font(.system(size: 11))
-                    .foregroundColor(model.comparisonImage == nil ? Palette.inkTertiary
+                    .foregroundColor(preview.comparison == nil ? Palette.inkTertiary
                                                                    : Palette.inkSecondary)
                 Spacer()
                 if comparing {
                     Readout(text: "before")
-                } else if model.isLive {
+                } else if preview.isLive {
                     Readout(text: "live")
                 } else if model.isStale {
                     Readout(text: "out of date")
@@ -82,14 +84,23 @@ struct PreviewView: View {
 
             // Said every time, not only on failure: a preview that quietly omits half the chain is
             // output that looks done, which is the failure this whole labelling exists to prevent.
-            Text(model.status.isEmpty
-                 ? "This is the grade. Grain, sharpening, denoise, the stabiliser and dither are "
-                   + "added when you convert."
-                 : model.status)
-                .font(.system(size: 10.5))
-                .foregroundColor(model.statusIsFailure ? Palette.lamp : Palette.inkTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if preview.isRendering {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.6)
+                        .frame(width: 11, height: 11)
+                        .tint(Palette.inkTertiary)
+                }
+                Text(preview.status.isEmpty
+                     ? "This is the grade. Grain, sharpening, denoise, the stabiliser and dither "
+                       + "are added when you convert."
+                     : preview.status)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(preview.statusIsFailure ? Palette.lamp : Palette.inkTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(18)
         .background(Palette.surround)
