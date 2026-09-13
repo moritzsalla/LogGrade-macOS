@@ -59,8 +59,8 @@ OUT="$WORK/dist/03-final/${CLIP}_${SUFFIX}.mp4"
 
 [ -f "$IN" ] || { echo "graded master not found: $IN — run 02-grade.sh first" >&2; exit 1; }
 check_disk_space "$WORK/dist" 2
-# Create the output directory rather than relying on the checked-in dist/*/.gitkeep markers:
-# with a work dir set, those live in the repo and the output does not.
+# Create the output directory. This used to rely on a checked-in dist/*/.gitkeep marker, which
+# is wrong the moment a work dir is set: the marker was in the repo and the output was not.
 mkdir -p "$(dirname "$OUT")"
 # Refuses a landscape master rather than squashing it into a vertical delivery, or cropping past
 # the frame edge. See require_portrait in lib.sh.

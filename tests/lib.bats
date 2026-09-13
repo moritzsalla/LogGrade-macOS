@@ -618,10 +618,11 @@ PY
 }
 
 @test "every stage creates its own output directory" {
-	# The staged scripts relied on dist/*/.gitkeep existing in the REPO, so with a work dir set
-	# they wrote into a directory that does not exist — and ffmpeg reported it only at the end of
-	# a full-length encode. The suite could not catch it, because the test above pre-creates every
-	# output folder. This one deliberately does not.
+	# The staged scripts once relied on a dist/*/.gitkeep existing in the REPO, so with a work dir
+	# set they wrote into a directory that does not exist — and ffmpeg reported it only at the end
+	# of a full-length encode. The markers have since been deleted, which makes this test the only
+	# thing standing between a fresh clone and that bug returning. The test above pre-creates every
+	# output folder and so cannot see it; this one deliberately does not.
 	local work="$BATS_TEST_TMPDIR/bare" s
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
@@ -1121,8 +1122,9 @@ JSON
 
 @test "every stage refuses a clip argument that escapes the work dir" {
 	# The clip name is used raw as a path component. `mkdir -p "$(dirname "$OUT")"` — added when the
-	# stages stopped relying on the checked-in dist/*/.gitkeep markers — is what turns a traversal
-	# argument into a successful write: before it, the absent directory stopped the render.
+	# stages stopped relying on checked-in dist/*/.gitkeep markers, which are now deleted — is what
+	# turns a traversal argument into a successful write: before it, the absent directory stopped
+	# the render by accident.
 	local work="$BATS_TEST_TMPDIR/escape" s
 	mkdir -p "$work/src" "$work/dist/01-baseline" "$work/dist/02-graded"
 	for s in 00-stabilise-detect 01-baseline 02-grade 03-final; do

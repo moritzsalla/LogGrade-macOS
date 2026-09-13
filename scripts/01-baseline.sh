@@ -34,8 +34,8 @@ OUT="$WORK/dist/01-baseline/${CLIP}_baseline.mov"
 	exit 1
 }
 check_disk_space "$WORK/dist" 10
-# Create the output directory rather than relying on the checked-in dist/*/.gitkeep
-# markers: with a work dir set, those live in the repo and the output does not.
+# Create the output directory. This used to rely on a checked-in dist/*/.gitkeep marker, which
+# is wrong the moment a work dir is set: the marker was in the repo and the output was not.
 mkdir -p "$(dirname "$OUT")"
 
 FILTER="lut3d=file='${LUT}':interp=tetrahedral"

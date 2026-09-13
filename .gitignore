@@ -2,17 +2,22 @@
 # never change, so they need a BACKUP, not version history. Keep them off the index deliberately.
 #
 # NOTE THE PATTERN: `src/*` and not `src/`. Git cannot re-include anything beneath an excluded
-# DIRECTORY, so `src/` would also swallow the .gitkeep markers that exist to make these folders
-# survive a clone — the pipeline writes into them and would otherwise fail on a fresh checkout.
-# Exclude the contents, keep the directory, re-admit the marker.
+# DIRECTORY, so `src/` would also swallow the .gitkeep marker. The marker is what makes the folder
+# survive a clone, and it earns its place: nothing CREATES src/ — it is where you put footage, and
+# an empty folder is the only thing in the repo that says so.
 src/*
 !src/.gitkeep
 
 # Everything a render wrote. Reconstructible from src/ + scripts/, and measured in gigabytes.
-dist/*
-!dist/*/
-dist/*/*
-!dist/*/.gitkeep
+#
+# `dist/` and not `dist/*`, because nothing under it is tracked any more. It used to carry a
+# .gitkeep in each of 01-baseline, 02-graded, 03-final and frames, on the reasoning that a stage
+# would fail on a fresh clone with nowhere to write. That stopped being true when every stage
+# started creating its own output directory — which it had to, because with a work dir set the
+# markers were in the REPO and the output was somewhere else entirely, and ffmpeg reported it only
+# at the end of a full-length encode. `tests/lib.bats` pins that behaviour, so the folders are
+# output like everything else here.
+dist/
 
 # Generated LUTs from the search that found the shipped one. The parameters that produce them live
 # in look.json, and scripts/make-tone-lut.py stamps them into each cube's TITLE, so the files
