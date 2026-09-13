@@ -32,6 +32,8 @@ swift test --package-path app      # the app's own suite, about a minute
 ./scripts/check.sh --conformance   # plus: still byte-identical to the precursor?
 ```
 
+![LogGrade](docs/app.png)
+
 ## Using it
 
 Drop clips on the window, or File ▸ Add Clips. Pick one, open a stage in the inspector, and move a
@@ -78,9 +80,12 @@ Getting that out of it is a tone problem, and tone is something ffmpeg can do pr
 
 ![Tone ladder](docs/grade-ladder-tone.png)
 
-![Workbench](docs/grade-bench.png)
+## Driving the engine directly
 
-## Usage
+The app is the way to use this. Everything below still works and is what the app drives — it sets
+these variables and reads the engine's events, and a test renders one clip both ways and asserts
+the bytes match. Reach for it when you want a batch without a window, or to see what the app is
+actually doing.
 
 ```sh
 # drop clips in src/, then:
@@ -121,11 +126,18 @@ rather than quietly applying one clip's framing to all of them. The full list of
 
 ## Tweaking the final pass LUT
 
+Open the app and move the sliders. The picture follows them, and letting go renders the same frame
+through the real chain. That is what this fork exists for.
+
+### The Bench, which the app replaced
+
 ![The Grade Bench](docs/grade-bench.png)
 
-The Bench is a browser tool for setting the look by eye. Export a frame, drop it in, drag sliders,
-and the image updates instantly — no render round-trip. The calibration readouts sit beside the
-sliders so you can see when a change pushes a known colour off its spec.
+`bench/` is the precursor's browser tool for setting the look by eye: export a frame, drop it in,
+drag sliders, no render round-trip. The app does the same job against the real chain rather than a
+pre-baked JPEG, so the Bench is kept for one reason only — `tests/grade-parity.py` slices its pixel
+function out and measures it against ffmpeg's own output, which is one of the two tests licensing
+the app's live preview. Everything below about it is inherited and still accurate.
 
 **Paste the current `look.json` into the Bench's load panel before you start**, or the emitted
 file comes back incomplete and every stage stops on the first missing key. `look()` has no
@@ -205,17 +217,20 @@ and makes them agree.
 
 ```
 src/            Drop footage here. Read-only, gitignored.
-dist/           Everything generated. Gitignored.
+dist/           Everything generated. Gitignored whole, and created on demand — every stage
+                makes its own output directory, so none of the folders below exists on a clone.
   01-baseline/    staged pipeline only: after the Log→Rec.709 conversion
   02-graded/      staged pipeline only: the ProRes master
   03-final/       deliverables
   proofs/         short renders through the real chain, for judging before a full render (PROOF=)
-  frames/         single graded stills for the app's preview (FRAME=)
+  frames/         stills for the app's preview: the graded one it judges, and the ungraded
+                  source frame it grades itself while a control is moving (FRAME=, FRAME_STAGE=)
   ladders/        side-by-side comparison stills, assembled by hand
   stab/           camera-motion transforms, per clip
   reports/        what each run did
 scripts/        The pipeline. Start at lib.sh.
-bench/          The Grade Bench (published as a browser tool).
+bench/          The precursor's browser Bench. The app replaced it; it is kept because the
+                parity harness measures its pixel function against ffmpeg's own output.
 luts/
   apple/          Apple's conversion LUTs — NOT committed, see SOURCE.txt to fetch them
   looks/          film-emulation LUTs (MIT)
@@ -241,9 +256,14 @@ discover mid-conversion that a guard had broken.
 Run everything with `./scripts/check.sh`:
 
 - **shellcheck** across every script.
-- **`tests/grade-parity.py`** — the important one. Runs the Bench's JavaScript and the Python
-  generator over the same inputs and fails if they disagree by more than one 8-bit code value. If
-  these drift, the browser preview stops predicting the render and nothing else would catch it.
+- **`tests/grade-parity.py`** — the important one. Measures the Bench's JavaScript against
+  ffmpeg's own output over a committed probe and fails on a disagreement bigger than the recorded
+  tolerance. It is one of the two tests that license the app's live preview to exist at all.
+- **`swift test --package-path app`** — the app's own suite, about a minute. Most of it needs no
+  ffmpeg, but the ones that matter most do: `LiveChainTests` grades a real frame in-process and
+  measures it against the engine's render of the same frame, `Cube3DTests` holds the interpolation
+  to ffmpeg's `lut3d` on a deliberately non-smooth cube, and `CorrectionCubeTests` compares every
+  one of 107,811 numbers against the generator it replaced. `check.sh` runs it too.
 - **`tests/lib.bats`** — the bats suite. Most of it covers the safety layer: colour-tag
   verification, the portrait guard, disk-space checks, work-dir resolution, transform freshness,
   and that neither a failed remux nor a failed re-render destroys the file it was replacing. A few
