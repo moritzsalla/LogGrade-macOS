@@ -63,6 +63,10 @@ public final class RenderQueue: ObservableObject {
     private var running: [UUID: Process] = [:]
     private var cancelled = false
 
+    /// Called on the main queue when a run ends, with how many clips were delivered and how many
+    /// were not. Nil unless somebody is listening.
+    public var onFinished: ((Int, Int) -> Void)?
+
     public init(engine: EngineLocation) { self.engine = engine }
 
     /// Sets a job's outcome directly.
@@ -140,6 +144,15 @@ public final class RenderQueue: ObservableObject {
         }
         group.wait()
         setRunning(false)
+        // A PLAIN CLOSURE, not a reference to anything in the app. This package knows nothing
+        // about windows or notifications, and should not start now; the app decides what a
+        // finished run looks like on screen.
+        let summary = jobs.reduce(into: (done: 0, failed: 0)) { total, job in
+            if case .done = job.state { total.done += 1 } else if job.state.isFinished {
+                total.failed += 1
+            }
+        }
+        DispatchQueue.main.async { self.onFinished?(summary.done, summary.failed) }
     }
 
     private func run(_ job: Job, environment: [String: String]) {

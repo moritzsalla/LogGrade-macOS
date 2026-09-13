@@ -42,7 +42,7 @@ struct PreviewView: View {
                     Text(model.selectedClip == nil
                          ? "Drop Apple Log clips here to start"
                          : "Rendering the first frame of this clip…")
-                        .font(.system(size: 12))
+                        .font(Type.label)
                         .foregroundColor(Palette.inkTertiary)
                 }
                 // NO SPINNER OVER THE WELL. It used to be an unaligned child of this stack, so it
@@ -57,7 +57,7 @@ struct PreviewView: View {
                 // The curve lives with the picture rather than with its sliders, because the
                 // inspector scrolls and a readout you cannot see while you adjust is not a readout.
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("curve").font(.system(size: 10)).foregroundColor(Palette.inkTertiary)
+                    Text("curve").font(Type.caption).foregroundColor(Palette.inkTertiary)
                     CurveView(curve: model.curve)
                         .frame(width: 78, height: 78)
                 }
@@ -69,7 +69,7 @@ struct PreviewView: View {
                 // and an engine render the moment you let go. A button that re-does what just
                 // happened is a button that teaches you to distrust the picture.
                 Text("hold C for the picture before this change")
-                    .font(.system(size: 11))
+                    .font(Type.label)
                     .foregroundColor(preview.comparison == nil ? Palette.inkTertiary
                                                                    : Palette.inkSecondary)
                 Spacer()
@@ -96,7 +96,7 @@ struct PreviewView: View {
                      ? "This is the grade. Grain, sharpening, denoise, the stabiliser and dither "
                        + "are added when you convert."
                      : preview.status)
-                    .font(.system(size: 10.5))
+                    .font(Type.caption)
                     .foregroundColor(preview.statusIsFailure ? Palette.lamp : Palette.inkTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }

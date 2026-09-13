@@ -40,16 +40,35 @@ struct QueuePanel: View {
 
             if queue.jobs.isEmpty {
                 Text("nothing queued. convert renders every clip in the list.")
-                    .font(.system(size: 10.5)).foregroundColor(Palette.inkTertiary)
+                    .font(Type.caption).foregroundColor(Palette.inkTertiary)
             } else {
+                // A BAR PER CLIP, not a percentage. A number tells you how far along something
+                // is; a bar tells you at a glance without reading, which is what you want from a
+                // panel you are not looking at. Determinate whenever the engine has said how many
+                // frames the clip has, indeterminate until then, and absent once it is finished —
+                // a full bar and a finished bar look the same, which is why it goes away.
                 ForEach(queue.jobs) { job in
-                    HStack(spacing: 8) {
+                    HStack(spacing: Space.s) {
                         Text(job.stem)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(Type.value)
                             .foregroundColor(Palette.ink)
                             .frame(width: 90, alignment: .leading)
+                        if job.state == .running {
+                            if let fraction = job.fractionDone {
+                                ProgressView(value: fraction)
+                                    .progressViewStyle(.linear)
+                                    .controlSize(.small)
+                                    .tint(Palette.plate)
+                                    .frame(width: 92)
+                            } else {
+                                ProgressView()
+                                    .progressViewStyle(.linear)
+                                    .controlSize(.small)
+                                    .frame(width: 92)
+                            }
+                        }
                         Text(describe(job))
-                            .font(.system(size: 10.5))
+                            .font(Type.caption)
                             .foregroundColor(colour(job.state))
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
@@ -58,13 +77,13 @@ struct QueuePanel: View {
                                 queue.retry(job.id)
                                 model.convert(queue: queue)
                             }
-                            .buttonStyle(.borderless).font(.system(size: 10.5))
+                            .buttonStyle(.borderless).font(Type.caption)
                         }
                     }
                 }
             }
         }
-        .padding(16)
+        .padding(Space.l)
         .background(Palette.panel)
     }
 

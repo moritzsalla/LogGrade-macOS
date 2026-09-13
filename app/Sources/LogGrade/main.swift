@@ -16,7 +16,37 @@ struct RootView: View {
     @ObservedObject var queue: RenderQueue
     var grade: GradeModel?
 
+    @ObservedObject var toaster: Toaster
+
     var body: some View {
+        content
+            // Top trailing, which is where macOS puts a notification, and clear of both the clip
+            // list and the controls.
+            .overlay(alignment: .topTrailing) {
+                ToastView(toaster: toaster).padding(Space.l)
+            }
+    }
+
+    private var content: some View {
+        // The startup screen stands in for the whole window until there is a clip. An empty
+        // three-column layout with a dimmed inspector looks broken rather than empty.
+        if clips.entries.isEmpty {
+            return AnyView(StartupView(
+                problems: problems,
+                recentProject: UserDefaults.standard.url(forKey: "lastProject"),
+                onOpenProject: { url in try? grade?.openProject(at: url) },
+                onChooseFiles: {
+                    let panel = NSOpenPanel()
+                    panel.allowsMultipleSelection = true
+                    panel.canChooseDirectories = true
+                    panel.prompt = "Add"
+                    if panel.runModal() == .OK { clips.add(panel.urls) }
+                }))
+        }
+        return AnyView(columns)
+    }
+
+    private var columns: some View {
         HSplitView {
             clipColumn.frame(minWidth: 240, idealWidth: 264, maxWidth: 340)
             if let grade {
@@ -24,10 +54,10 @@ struct RootView: View {
                 InspectorView(model: grade).frame(minWidth: 372, maxWidth: 420)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("no engine").font(.system(size: 13, weight: .medium))
+                    Text("no engine").font(Type.heading)
                         .foregroundColor(Palette.ink)
                     Text("point LOGGRADE_ENGINE at a checkout, or rebuild the bundle.")
-                        .font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
+                        .font(Type.label).foregroundColor(Palette.inkSecondary)
                     Spacer()
                 }
                 .padding(18)
@@ -47,13 +77,13 @@ struct RootView: View {
                     .foregroundColor(Palette.ink)
                 if let engine {
                     Text(engine.root.path)
-                        .font(.system(size: 9.5, design: .monospaced))
+                        .font(Type.value)
                         .foregroundColor(Palette.inkTertiary)
                         .lineLimit(2).truncationMode(.head)
                 }
                 ForEach(problems.indices, id: \.self) { i in
                     Text(problems[i].description)
-                        .font(.system(size: 10.5)).foregroundColor(Palette.lamp)
+                        .font(Type.caption).foregroundColor(Palette.lamp)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -62,12 +92,12 @@ struct RootView: View {
             if let grade {
                 HStack(spacing: 10) {
                     Button("open project") { openProject(grade) }
-                        .buttonStyle(.borderless).font(.system(size: 11))
+                        .buttonStyle(.borderless).font(Type.label)
                     Button("save project") { saveProject(grade) }
-                        .buttonStyle(.borderless).font(.system(size: 11))
+                        .buttonStyle(.borderless).font(Type.label)
                     if let url = grade.projectURL {
                         Text(url.lastPathComponent)
-                            .font(.system(size: 9.5, design: .monospaced))
+                            .font(Type.value)
                             .foregroundColor(Palette.inkTertiary)
                             .lineLimit(1).truncationMode(.head)
                     }
@@ -104,7 +134,7 @@ struct RootView: View {
             .frame(height: 56)
             .overlay(
                 Text("drop Apple Log clips")
-                    .font(.system(size: 11))
+                    .font(Type.label)
                     .foregroundColor(Palette.inkTertiary))
             .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                 // Real paths, which is the reason this is an app and not a page: a browser drop
@@ -138,10 +168,10 @@ struct RootView: View {
             thumbnail(entry)
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.stem)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(Type.value)
                     .foregroundColor(Palette.ink)
                 Text(entry.verdict.description)
-                    .font(.system(size: 10))
+                    .font(Type.caption)
                     .foregroundColor(entry.isUsable ? Palette.inkSecondary : Palette.lamp)
                     .fixedSize(horizontal: false, vertical: true)
                 if let f = entry.fields { Readout(text: f.summary, muted: true) }
@@ -150,7 +180,7 @@ struct RootView: View {
             Button {
                 clips.remove(entry.stem)
             } label: {
-                Image(systemName: "xmark").font(.system(size: 8))
+                Image(systemName: "xmark").font(Type.caption)
                     .foregroundColor(Palette.inkTertiary)
             }
             .buttonStyle(.plain)
@@ -312,9 +342,20 @@ renderQueue.concurrency = storedConcurrency > 0 ? storedConcurrency : 2
 
 let delegate = AppDelegate(clips: clipList, grade: gradeModel)
 app.delegate = delegate
+let toaster = Toaster()
+gradeModel?.toaster = toaster
+renderQueue.onFinished = { delivered, failed in
+    if failed == 0 {
+        toaster.show("checkmark.circle.fill", "Export finished",
+                     delivered == 1 ? "1 clip delivered" : "\(delivered) clips delivered")
+    } else {
+        toaster.show("exclamationmark.triangle.fill", "Export finished with problems",
+                     "\(delivered) delivered, \(failed) not — see the queue")
+    }
+}
 window.contentView = NSHostingView(rootView: RootView(engine: engine, problems: problems,
                                                       clips: clipList, queue: renderQueue,
-                                                      grade: gradeModel))
+                                                      grade: gradeModel, toaster: toaster))
 window.makeKeyAndOrderFront(nil)
 app.activate(ignoringOtherApps: true)
 app.run()

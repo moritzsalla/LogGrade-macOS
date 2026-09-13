@@ -23,34 +23,38 @@ struct InspectorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 presetRow
-                stage("Apple Log to Rec.709", mark: .locked) {
-                    Text("Turns the flat log picture into a viewable one. Always on, and not "
-                         + "adjustable: it is Apple's own conversion and it is more accurate "
-                         + "than anything this app could do instead.")
-                        .modifier(Note())
+                stage("Convert", mark: .locked,
+                      help: "Apple Log to Rec.709, using Apple's own conversion. It is always "
+                          + "applied and cannot be adjusted: its colour is more accurate than "
+                          + "anything this app could do instead, and the cube carries a display "
+                          + "rendering Apple has not published.") {
+                    Text("Apple Log to Rec.709")
+                        .font(Type.caption)
+                        .foregroundColor(Palette.inkTertiary)
                 }
-                stage("correct the shot", mark: .editable,
-                      note: "fix the exposure and the white balance before any look goes on") {
-                    control("exposure", $model.look.correct.exposure, -3...3, format: "%+.2f")
-                    control("temperature", $model.look.correct.temp, -1...1)
-                    control("tint", $model.look.correct.tint, -1...1)
-                    wheel(.offset, "lift")
-                    wheel(.power, "gamma")
-                    wheel(.slope, "gain")
-                    control("luminance mix", $model.look.correct.lumMix, 0...1)
-                    Text("These run before the conversion, on the log, so an exposure move keeps "
-                         + "the highlights instead of clipping them rather than flattening them "
-                         + "against a ceiling.")
-                        .modifier(Note())
-                    Text("Lift, gamma and gain are the three wheels, per channel. Luminance mix "
-                         + "decides how much of a wheel move lands on brightness against colour: "
-                         + "at 0 the move is colour only, because moving channels apart shifts "
-                         + "saturation whether you meant it to or not.")
-                        .modifier(Note())
+                stage("Correct", mark: .editable,
+                      help: "Exposure, white balance and the three wheels run before the "
+                          + "conversion, on the log picture, where twelve stops of highlight "
+                          + "still exist. Brightening here keeps the highlights instead of "
+                          + "flattening them against a ceiling.\n\nLuminance mix decides how much "
+                          + "of a wheel move lands on brightness against colour. At 0 the move is "
+                          + "colour only, because separating channels shifts saturation whether "
+                          + "you meant it to or not.") {
+                    control("Exposure", $model.look.correct.exposure, -3...3, format: "%+.2f")
+                    control("Temperature", $model.look.correct.temp, -1...1)
+                    control("Tint", $model.look.correct.tint, -1...1)
+                    wheel(.offset, "Lift")
+                    wheel(.power, "Gamma")
+                    wheel(.slope, "Gain")
+                    control("Luminance", $model.look.correct.lumMix, 0...1)
                 }
-                stage("look", mark: .editable, note: "the film stock, as a lookup") {
+                stage("Film look", mark: .editable,
+                      help: "A film-emulation lookup, applied after the conversion.\n\nThe tone "
+                          + "curve below was set with this cube already in the chain, so changing "
+                          + "one without the other is a different grade rather than another "
+                          + "stock. Switch them together using a preset.") {
                     Picker("", selection: $model.look.lookLUT) {
-                        Text("none").tag("none")
+                        Text("None").tag("none")
                         ForEach(model.availableLooks, id: \.self) { Text($0).tag($0) }
                     }
                     .labelsHidden()
@@ -58,38 +62,34 @@ struct InspectorView: View {
                         model.liveUpdate()      // instantly, from the cubes already in memory
                         model.renderPreview()   // then the exact frame, as with every control
                     }
-                    Text("The tone curve below was set with this cube already in the chain, so "
-                         + "changing one without the other is a different grade rather than "
-                         + "another stock. Switch them together with a preset.")
-                        .modifier(Note())
                 }
-                stage("tone", mark: .editable,
-                      note: "brightness and contrast, without touching the colour") {
-                    control("midtone", $model.look.tone.gamma, 1...2.6)
+                stage("Tone", mark: .editable,
+                      help: "Brightness and contrast, applied to the luma plane only so the "
+                          + "colour is untouched. Applying a curve per channel crushes a "
+                          + "saturated colour's two low channels harder than its high one, which "
+                          + "is what makes signage glow.\n\nMidtone is a gamma, so higher is "
+                          + "darker. The graph beside the picture is this curve.") {
+                    control("Midtone", $model.look.tone.gamma, 1...2.6)
                     appliedGammaNote
-                    control("contrast", $model.look.tone.contrast, 0.8...1.8)
-                    control("pivot", $model.look.tone.pivot, 0.25...0.65)
-                    control("shoulder", $model.look.tone.shoulder, 0...0.8)
-                    control("toe", $model.look.tone.toe, 0...0.8)
-                    control("black", $model.look.tone.black, -0.08...0.08, format: "%+.3f")
-                    Text("The graph beside the picture is this curve. Higher midtone is darker, "
-                         + "because it is a gamma.")
-                        .modifier(Note())
+                    control("Contrast", $model.look.tone.contrast, 0.8...1.8)
+                    control("Pivot", $model.look.tone.pivot, 0.25...0.65)
+                    control("Shoulder", $model.look.tone.shoulder, 0...0.8)
+                    control("Toe", $model.look.tone.toe, 0...0.8)
+                    control("Black", $model.look.tone.black, -0.08...0.08, format: "%+.3f")
                 }
-                stage("trims", mark: .editable, note: "the last small moves, after the curve") {
-                    control("saturation", $model.look.colour.saturation, 0.6...1.6)
-                    control("warmth", $model.look.colour.warmth, -0.12...0.12, format: "%+.3f")
-                    Text("Warmth acts on the midtones only, so it barely moves a bright sky or a "
-                         + "deep shadow.")
-                        .modifier(Note())
+                stage("Trims", mark: .editable,
+                      help: "The last small moves, after the curve. Warmth acts on the midtones "
+                          + "only, so it barely moves a bright sky or a deep shadow.") {
+                    control("Saturation", $model.look.colour.saturation, 0.6...1.6)
+                    control("Warmth", $model.look.colour.warmth, -0.12...0.12, format: "%+.3f")
                 }
-                stage("delivery", mark: .unpreviewed,
-                      note: "applied to the video, never to the preview", last: true) {
-                    control("grain", $model.look.grainStrength, 0...20, format: "%.0f")
-                    control("stabiliser", $model.look.stabilisationSmoothing, 0...60, format: "%.0f")
-                    Text("Both need moving footage to judge, so the preview leaves them out "
-                         + "rather than showing a version of them that is not what renders.")
-                        .modifier(Note())
+                stage("Delivery", mark: .unpreviewed,
+                      help: "Grain and stabilisation are applied to the video, never to the "
+                          + "preview. Both need moving footage to judge, so a still leaves them "
+                          + "out rather than showing a version that is not what renders.",
+                      last: true) {
+                    control("Grain", $model.look.grainStrength, 0...20, format: "%.0f")
+                    control("Stabiliser", $model.look.stabilisationSmoothing, 0...60, format: "%.0f")
                 }
             }
             .padding(.vertical, 18)
@@ -137,7 +137,7 @@ struct InspectorView: View {
     private var presetRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Text("preset").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
+                Text("preset").font(Type.label).foregroundColor(Palette.inkSecondary)
                 Picker("", selection: Binding(
                     get: { model.project.activePreset },
                     set: { model.apply(preset: $0) })) {
@@ -145,13 +145,13 @@ struct InspectorView: View {
                 }
                 .labelsHidden().frame(width: 150)
                 if model.hasUnsavedChanges {
-                    Text("adjusted").font(.system(size: 10)).foregroundColor(Palette.plate)
+                    Text("adjusted").font(Type.caption).foregroundColor(Palette.plate)
                 }
             }
             HStack(spacing: 6) {
                 TextField("save the grade as…", text: $newPresetName)
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11))
+                    .font(Type.label)
                     .frame(width: 160)
                     .onSubmit { model.savePreset(named: newPresetName); newPresetName = "" }
                 Button("save") {
@@ -159,7 +159,7 @@ struct InspectorView: View {
                                                                   : newPresetName)
                     newPresetName = ""
                 }
-                .buttonStyle(.borderless).font(.system(size: 11))
+                .buttonStyle(.borderless).font(Type.label)
             }
         }
         .padding(.leading, 37)
@@ -168,40 +168,52 @@ struct InspectorView: View {
 
     /// One stage, with its dot on the rail. The rail continues through the row, so the chain reads
     /// as one line from the conversion down to delivery.
-    private func stage<Content: View>(_ title: String, mark: Mark, note: String? = nil,
+    /// One stage of the chain, collapsible, with its dot on the rail.
+    ///
+    /// COLLAPSIBLE BECAUSE MOST OF IT IS NOT IN USE AT ONCE. Thirty-four controls in one column is
+    /// a wall, and a grading session touches one stage at a time. Which ones are open is
+    /// remembered, so the panel you left is the panel you come back to.
+    ///
+    /// The long explanation that used to sit under each stage is behind the help button now. Apple
+    /// puts reference text in a popover rather than in the panel, and a paragraph of prose under
+    /// every control is the fastest way to make a dense inspector unreadable.
+    private func stage<Content: View>(_ title: String, mark: Mark, help: String? = nil,
                                       last: Bool = false,
-                                      @ViewBuilder content: () -> Content) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+                                      @ViewBuilder content: @escaping () -> Content) -> some View {
+        let open = Binding(get: { model.openStages.contains(title) },
+                           set: { model.setStage(title, open: $0) })
+        return HStack(alignment: .top, spacing: Space.m) {
             Rail(mark: mark, last: last)
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 6) {
+            DisclosureGroup(isExpanded: open) {
+                VStack(alignment: .leading, spacing: Space.s) { content() }
+                    .padding(.top, Space.s)
+            } label: {
+                HStack(spacing: Space.xs) {
                     Text(title)
-                        .font(.system(size: 12.5, weight: .medium))
+                        .font(Type.heading)
                         .foregroundColor(Palette.ink)
                     if mark == .locked {
                         Image(systemName: "lock.fill")
-                            .font(.system(size: 8))
+                            .font(.system(size: 9))
                             .foregroundColor(Palette.inkTertiary)
                     }
-                    if let note {
-                        Text(note)
-                            .font(.system(size: 10.5))
-                            .foregroundColor(Palette.inkTertiary)
-                    }
+                    if let help { HelpButton(text: help) }
+                    Spacer(minLength: 0)
                 }
-                content()
+                .contentShape(Rectangle())
             }
-            .padding(.bottom, last ? 0 : 20)
+            .disclosureGroupStyle(.automatic)
+            .padding(.bottom, last ? 0 : Space.l)
         }
     }
 
-    /// A label, a track, and a readout you can type into. Dragging is for finding a value; typing
-    /// is for repeating one, and a grading tool needs both.
+    /// A label, a track, and a readout you can type into. Dragging finds a value; typing repeats
+    /// one, and a grading tool needs both.
     private func control(_ label: String, _ value: Binding<Double>,
                          _ range: ClosedRange<Double>, format: String = "%.3f") -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Space.s) {
             Text(label)
-                .font(.system(size: 11))
+                .font(Type.label)
                 .foregroundColor(Palette.inkSecondary)
                 .frame(width: 84, alignment: .leading)
             Slider(value: value, in: range) { editing in
@@ -213,27 +225,21 @@ struct InspectorView: View {
                     model.renderPreview()   // on release: the exact render confirms the live one
                 }
             }
-            // DURING the drag, not only after it. A grading control that shows nothing until you
-            // let go is a control you cannot find a value with: you guess, wait, and guess again.
-            // The live tier is an approximation held to the same golden as the render, so it can
-            // be dragged against; the render on release is what is judged.
-            .onChange(of: value.wrappedValue) { _ in model.liveUpdate() }
             .controlSize(.mini)
             .tint(Palette.inkTertiary)
+            // DURING the drag, not only after it. A grading control that shows nothing until you
+            // let go is a control you cannot find a value with.
+            .onChange(of: value.wrappedValue) { _ in model.liveUpdate() }
             TextField("", value: value, formatter: Self.formatter(format))
-                .font(.system(size: 11, design: .monospaced))
+                .font(Type.value)
                 .monospacedDigit()
                 .multilineTextAlignment(.trailing)
                 .textFieldStyle(.plain)
                 .foregroundColor(Palette.ink)
                 .frame(width: 52)
-                .onSubmit { model.refreshCurve(); model.renderPreview() }
         }
     }
 
-    /// CACHED BY FORMAT. `NumberFormatter` is expensive to build, and this was building one per
-    /// control per rebuild — thirty-four of them on every frame of a drag, for four distinct
-    /// formats. There are four now, for the life of the process.
     private static var formatters: [String: NumberFormatter] = [:]
 
     private static func formatter(_ format: String) -> NumberFormatter {
@@ -293,7 +299,7 @@ private struct Rail: View {
 private struct Note: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .font(.system(size: 10.5))
+            .font(Type.caption)
             .foregroundColor(Palette.inkTertiary)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: 300, alignment: .leading)

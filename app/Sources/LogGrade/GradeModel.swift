@@ -36,6 +36,18 @@ final class GradeModel: ObservableObject {
     /// the unit of work rather than a file.
     @Published var project: Project
 
+    /// Told when something finishes that you were not watching.
+    weak var toaster: Toaster?
+
+    /// Which inspector stages are open. Remembered across launches, because which part of the
+    /// chain you are working on outlives a window.
+    @Published var openStages: Set<String> = ["Tone"]
+
+    func setStage(_ title: String, open: Bool) {
+        if open { openStages.insert(title) } else { openStages.remove(title) }
+        UserDefaults.standard.set(Array(openStages), forKey: "openStages")
+    }
+
     /// The cubes on disk, read once: the interface offers what is there.
     let availableLooks: [String]
 
@@ -237,6 +249,7 @@ final class GradeModel: ObservableObject {
             // A new clip's pixels, so whatever was converted belongs to the old one.
             self.convertedFrame = nil
             self.convertedFor = nil
+            self.toaster?.show("photo", "\(clip.stem) ready", "Controls are live for this clip.")
             // The probe this render paid for. It is what the gamma solve needs, and recording it
             // here means the curve is the rendered one from the first drag rather than from the
             // first render.
@@ -277,6 +290,9 @@ final class GradeModel: ObservableObject {
         // Read once, here: it is 65 points and parsing it costs more than a frame does. A missing
         // cube is not fatal — preflight reports it, and the live tier simply does not start.
         self.conversionCube = try? Cube3D(contentsOf: engine.appleCube)
+        if let remembered = UserDefaults.standard.stringArray(forKey: "openStages") {
+            self.openStages = Set(remembered)
+        }
         refreshCurve()
     }
 

@@ -15,7 +15,7 @@ struct DeliveryPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("deliver")
-                .font(.system(size: 12.5, weight: .medium))
+                .font(Type.heading)
                 .foregroundColor(Palette.ink)
 
             HStack(spacing: 14) {
@@ -23,12 +23,12 @@ struct DeliveryPanel: View {
                 Toggle("feed, cropped to 4:5", isOn: $model.project.delivery.feed)
             }
             .toggleStyle(.checkbox)
-            .font(.system(size: 11))
+            .font(Type.label)
             .foregroundColor(Palette.inkSecondary)
 
             // Labels get room rather than wrapping mid-word, which is what "heig / ht" was.
             HStack(spacing: 8) {
-                Text("size").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
+                Text("size").font(Type.label).foregroundColor(Palette.inkSecondary)
                     .fixedSize()
                 // Spelled as dimensions, not as "1080p". The output is portrait, so 1080p means a
                 // height of 1920 — which is the number stored, and labelling it "height: 1080p"
@@ -40,7 +40,7 @@ struct DeliveryPanel: View {
                 }
                 .labelsHidden().frame(width: 108)
                 Spacer(minLength: 4)
-                Text("fps").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
+                Text("fps").font(Type.label).foregroundColor(Palette.inkSecondary)
                     .fixedSize()
                 Picker("", selection: fpsBinding) {
                     Text("source").tag(0)
@@ -57,19 +57,22 @@ struct DeliveryPanel: View {
             } else {
                 Text("Tick feed to place the 4:5 crop. Reels keeps the whole frame, so it needs "
                      + "no crop.")
-                    .font(.system(size: 10))
+                    .font(Type.caption)
                     .foregroundColor(Palette.inkTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: 8) {
-                Text("save to").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
+                Text("save to").font(Type.label).foregroundColor(Palette.inkSecondary)
                     .fixedSize()
                 Text(model.outputDirectory.map { $0.path } ?? "drop a clip first")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(Type.value)
                     .foregroundColor(Palette.inkTertiary)
                     .lineLimit(1).truncationMode(.head)
-                Button("choose") {
+                // A BORDERED BUTTON WITH A FOLDER ON IT. It was borderless text, which on a dark
+                // panel beside a dimmed path reads as a label rather than as the one control that
+                // decides where your work lands.
+                Button {
                     let panel = NSOpenPanel()
                     panel.canChooseDirectories = true
                     panel.canChooseFiles = false
@@ -77,13 +80,17 @@ struct DeliveryPanel: View {
                     if panel.runModal() == .OK, let url = panel.url {
                         model.chooseOutputDirectory(url)
                     }
+                } label: {
+                    Label("Choose…", systemImage: "folder")
+                        .font(Type.label)
                 }
-                .buttonStyle(.borderless).font(.system(size: 10.5))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
 
             ForEach(model.blockers.indices, id: \.self) { i in
                 Text(model.blockers[i].description)
-                    .font(.system(size: 10.5))
+                    .font(Type.caption)
                     .foregroundColor(Palette.lamp)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -93,12 +100,12 @@ struct DeliveryPanel: View {
             if model.project.delivery.fps != nil {
                 Text("A frame rate that does not divide the source evenly would have to be "
                      + "retimed, which judders. Those are refused before the render starts.")
-                    .font(.system(size: 10))
+                    .font(Type.caption)
                     .foregroundColor(Palette.inkTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(16)
+        .padding(Space.l)
         .background(Palette.panel)
     }
 
@@ -110,7 +117,7 @@ struct DeliveryPanel: View {
             Toggle("stabilise this clip", isOn: Binding(get: { model.stabilise },
                                                         set: { model.stabilise = $0 }))
                 .toggleStyle(.checkbox)
-                .font(.system(size: 11))
+                .font(Type.label)
                 .foregroundColor(Palette.inkSecondary)
                 .disabled(model.selectedClip == nil)
             Spacer()
@@ -119,7 +126,7 @@ struct DeliveryPanel: View {
 
     private var cropRow: some View {
         HStack(spacing: 10) {
-            Text("4:5 crop").font(.system(size: 11)).foregroundColor(Palette.inkSecondary)
+            Text("4:5 crop").font(Type.label).foregroundColor(Palette.inkSecondary)
             if let geometry = model.cropGeometry {
                 if model.cropOffset != nil {
                     // TYPED AS WELL AS DRAGGED. A drag finds a framing; only a number repeats one,
@@ -128,28 +135,28 @@ struct DeliveryPanel: View {
                     TextField("", value: Binding(get: { model.cropOffset ?? 0 },
                                                  set: { model.cropOffset = geometry.clamp($0) }),
                               formatter: Self.pixels)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(Type.value)
                         .monospacedDigit()
                         .multilineTextAlignment(.trailing)
                         .textFieldStyle(.plain)
                         .foregroundColor(Palette.ink)
                         .frame(width: 46)
                     Text("of \(geometry.maximumOffset) px from the top")
-                        .font(.system(size: 10.5)).foregroundColor(Palette.inkTertiary)
+                        .font(Type.caption).foregroundColor(Palette.inkTertiary)
                     Stepper("") { model.nudgeCrop(by: -8) } onDecrement: { model.nudgeCrop(by: 8) }
                         .labelsHidden()
                     Button("clear") { model.cropOffset = nil }
-                        .buttonStyle(.borderless).font(.system(size: 10.5))
+                        .buttonStyle(.borderless).font(Type.caption)
                 } else {
                     // Named as an action, because it is one and nothing else will do it: the
                     // framing is a composition call per clip and the engine will not render a
                     // feed without it.
                     Text("drag the picture to place it")
-                        .font(.system(size: 10.5)).foregroundColor(Palette.lamp)
+                        .font(Type.caption).foregroundColor(Palette.lamp)
                 }
             } else {
                 Text("select a clip first")
-                    .font(.system(size: 10.5)).foregroundColor(Palette.inkTertiary)
+                    .font(Type.caption).foregroundColor(Palette.inkTertiary)
             }
         }
     }

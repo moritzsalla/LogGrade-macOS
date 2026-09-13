@@ -21,7 +21,7 @@ struct ScopesView: View {
     private func panel<Content: View>(_ title: String,
                                       @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.system(size: 10)).foregroundColor(Palette.inkTertiary)
+            Text(title).font(Type.caption).foregroundColor(Palette.inkTertiary)
             content()
                 .frame(height: 78)
                 .background(Palette.well)
