@@ -1,11 +1,23 @@
 # ffgrade-macOS
 
 A Mac app for grading iPhone ProRes + AppleLog footage, built on a measured ffmpeg chain.
-**Personal use tool, never distributed.**
+**A personal tool, shared to read rather than to ship.**
+
+**Licence: [PolyForm Noncommercial 1.0.0](LICENSE).** Read it, run it, change it, share it — for
+anything that is not commercial, and keep the attribution with it. Selling it or using it in a
+business needs separate permission; ask. Two carve-outs, both in `LICENSE`: the film-emulation
+cubes in `luts/looks/` are somebody else's MIT-licensed work and keep their own terms, and Apple's
+conversion LUT is deliberately absent because its licence forbids redistributing it.
 
 **Where this came from.** The render chain is a fork of `ffgrade`, taken at one commit and frozen
 there. `PROVENANCE.md` records what was inherited, what debt came with it, and why the original is
 not being changed. Everything below Usage describes that inherited engine and is accurate today.
+
+**What a fresh clone cannot do.** Two things, both on purpose. Apple's conversion LUT is not here
+and has to be downloaded once — `luts/apple/SOURCE.txt` says how, and nothing renders until it is.
+And `tests/conformance.sh`, which asserts this fork still produces bytes identical to its
+precursor, needs that precursor checked out beside it; without it the test skips rather than
+failing. So the claim holds here and is not something you can verify from a clone.
 
 **What it is.** A Mac app over that engine: drop clips, see the graded picture, adjust, pick a
 crop and a delivery format, hit convert. The app sets environment variables and reads the engine's
