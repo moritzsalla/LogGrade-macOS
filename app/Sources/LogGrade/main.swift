@@ -20,7 +20,7 @@ struct RootView: View {
         HSplitView {
             clipColumn.frame(minWidth: 240, idealWidth: 264, maxWidth: 340)
             if let grade {
-                PreviewView(model: grade).frame(minWidth: 320)
+                PreviewView(model: grade, preview: grade.preview).frame(minWidth: 320)
                 InspectorView(model: grade).frame(minWidth: 372, maxWidth: 420)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -280,7 +280,7 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
     }
     switch key {
     case "c":
-        grade.isComparing = grade.comparisonImage != nil
+        grade.isComparing = grade.preview.comparison != nil
         return nil
     case "p", " ":
         grade.renderPreview()

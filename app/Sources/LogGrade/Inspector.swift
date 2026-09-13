@@ -54,7 +54,10 @@ struct InspectorView: View {
                         ForEach(model.availableLooks, id: \.self) { Text($0).tag($0) }
                     }
                     .labelsHidden()
-                    .onChange(of: model.look.lookLUT) { _ in model.renderPreview() }
+                    .onChange(of: model.look.lookLUT) { _ in
+                        model.liveUpdate()      // instantly, from the cubes already in memory
+                        model.renderPreview()   // then the exact frame, as with every control
+                    }
                     Text("The tone curve below was set with this cube already in the chain, so "
                          + "changing one without the other is a different grade rather than "
                          + "another stock. Switch them together with a preset.")
@@ -228,7 +231,19 @@ struct InspectorView: View {
         }
     }
 
+    /// CACHED BY FORMAT. `NumberFormatter` is expensive to build, and this was building one per
+    /// control per rebuild — thirty-four of them on every frame of a drag, for four distinct
+    /// formats. There are four now, for the life of the process.
+    private static var formatters: [String: NumberFormatter] = [:]
+
     private static func formatter(_ format: String) -> NumberFormatter {
+        if let cached = formatters[format] { return cached }
+        let made = buildFormatter(format)
+        formatters[format] = made
+        return made
+    }
+
+    private static func buildFormatter(_ format: String) -> NumberFormatter {
         let f = NumberFormatter()
         f.numberStyle = .decimal
         // POSIX, because these values are written into look.json, which uses dots. A German
