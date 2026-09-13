@@ -12,6 +12,10 @@ import SwiftUI
 struct InspectorView: View {
     @ObservedObject var model: GradeModel
 
+    /// The height of a stage's title row, shared by the rail so the dot lines up with the words
+    /// rather than with a guess.
+    static let headingRow: CGFloat = 18
+
     enum Mark2 {
         case locked      // filled: not yours to move
         case editable    // open
@@ -230,19 +234,48 @@ struct InspectorView: View {
             // DURING the drag, not only after it. A grading control that shows nothing until you
             // let go is a control you cannot find a value with.
             .onChange(of: value.wrappedValue) { _ in model.liveUpdate() }
-            TextField("", value: value, formatter: Self.formatter(format))
-                .font(Type.value)
-                .monospacedDigit()
-                .multilineTextAlignment(.trailing)
-                .textFieldStyle(.plain)
-                .foregroundColor(Palette.ink)
-                .frame(width: 52)
+            ValueField(value: value, format: format)
+        }
+    }
+
+    /// The number beside a slider: text until you click it, a field while you type.
+    ///
+    /// THE FIELD IS THE EXPENSIVE PART. A SwiftUI `TextField` on macOS is an `NSTextField` behind
+    /// a bridge, and the inspector rebuilds on every tick of a drag — so thirty-four live text
+    /// fields were being reconstructed sixty times a second, to show numbers nobody was typing
+    /// into. As `Text` they cost almost nothing, and the field appears on the one you click.
+    private struct ValueField: View {
+        @Binding var value: Double
+        let format: String
+        @State private var editing = false
+        @FocusState private var focused: Bool
+
+        var body: some View {
+            Group {
+                if editing {
+                    TextField("", value: $value, formatter: InspectorView.formatter(format))
+                        .textFieldStyle(.plain)
+                        .focused($focused)
+                        .onSubmit { editing = false }
+                        .onChange(of: focused) { if !$0 { editing = false } }
+                        .onAppear { focused = true }
+                } else {
+                    Text(String(format: format, value))
+                        .contentShape(Rectangle())
+                        .onTapGesture { editing = true }
+                }
+            }
+            .font(Type.value)
+            .monospacedDigit()
+            .multilineTextAlignment(.trailing)
+            .foregroundColor(Palette.ink)
+            .frame(width: 52, alignment: .trailing)
         }
     }
 
     private static var formatters: [String: NumberFormatter] = [:]
 
-    private static func formatter(_ format: String) -> NumberFormatter {
+    fileprivate static func formatter(_ format: String) -> NumberFormatter {
         if let cached = formatters[format] { return cached }
         let made = buildFormatter(format)
         formatters[format] = made
@@ -282,7 +315,10 @@ private struct Rail: View {
                         .frame(width: 7, height: 7)
                 }
             }
-            .padding(.top, 5)
+            // CENTRED ON THE TITLE'S LINE, not nudged down by a magic number. The dot used to
+            // carry a hand-tuned top padding that was correct for the old flat layout and wrong
+            // once each stage became a disclosure group with its own chevron and insets.
+            .frame(height: InspectorView.headingRow)
             if !last {
                 Rectangle()
                     .fill(mark == .unpreviewed ? Palette.hairline.opacity(0.5) : Palette.hairline)

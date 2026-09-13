@@ -26,9 +26,10 @@ struct PreviewView: View {
                         Image(nsImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            // Dimmed when the picture no longer answers the controls. A live
-                            // frame does answer them, so it is not dimmed.
-                            .opacity(model.isStale && !preview.isLive ? 0.55 : 1)
+                            // NOT DIMMED WHILE IT WORKS. Greying the picture out to say "busy"
+                            // makes the one thing you are trying to judge unjudgeable, at exactly
+                            // the moment you are judging it. The spinner in the corner says the
+                            // same thing and leaves the image alone.
                         // The crop is judged on the picture, because the question it answers is
                         // what is in the frame and no number answers that.
                         if model.project.delivery.feed, let geometry = model.cropGeometry {
@@ -37,7 +38,15 @@ struct PreviewView: View {
                                              contentMode: .fit)
                         }
                     }
-                    .padding(10)
+                    .padding(Space.s + 2)
+                    .overlay(alignment: .topTrailing) {
+                        if preview.isRendering {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.7)
+                                .padding(Space.s)
+                        }
+                    }
                 } else {
                     Text(model.selectedClip == nil
                          ? "Drop Apple Log clips here to start"
@@ -58,7 +67,7 @@ struct PreviewView: View {
                 // inspector scrolls and a readout you cannot see while you adjust is not a readout.
                 VStack(alignment: .leading, spacing: 4) {
                     Text("curve").font(Type.caption).foregroundColor(Palette.inkTertiary)
-                    CurveView(curve: model.curve)
+                    CurveView(curve: preview.curve)
                         .frame(width: 78, height: 78)
                 }
             }

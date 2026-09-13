@@ -50,6 +50,19 @@ struct DeliveryPanel: View {
                 .labelsHidden().frame(width: 84)
             }
 
+            // WHAT THIS COSTS, BEFORE IT COSTS IT. A 2160-tall delivery is four times the pixels
+            // of a 1080 one and takes proportionally longer, and Instagram re-encodes everything
+            // to 1080 wide anyway — so the larger sizes buy nothing downstream while multiplying
+            // the render. The look was also tuned at 1080: grain and the sharpener have radii in
+            // pixels, and scaling them with height is an assumption rather than a measurement.
+            if model.project.delivery.height > 1920 {
+                Label("Instagram re-encodes to 1080 wide. This renders \(model.project.delivery.height / 1920 * (model.project.delivery.height / 1920))× longer for no gain, and the grain was tuned at 1080.",
+                      systemImage: "info.circle")
+                    .font(Type.caption)
+                    .foregroundColor(Palette.inkTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             stabiliseRow
 
             if model.project.delivery.feed {
@@ -60,6 +73,15 @@ struct DeliveryPanel: View {
                     .font(Type.caption)
                     .foregroundColor(Palette.inkTertiary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // WHAT CONVERT IS ABOUT TO DO, counted rather than discovered. Two deliverables and
+            // stabilisation are each a separate pass over every clip, and the difference between
+            // one pass and four is the difference between minutes and an evening.
+            if !model.clipNames.isEmpty {
+                Text(workload)
+                    .font(Type.caption)
+                    .foregroundColor(Palette.inkTertiary)
             }
 
             HStack(spacing: 8) {
@@ -159,6 +181,21 @@ struct DeliveryPanel: View {
                     .font(Type.caption).foregroundColor(Palette.inkTertiary)
             }
         }
+    }
+
+    /// Passes over the footage, which is what actually decides how long convert takes.
+    private var workload: String {
+        let clips = model.clipNames.count
+        var passes = 0
+        if model.project.delivery.reels { passes += 1 }
+        if model.project.delivery.feed { passes += 1 }
+        let stabilised = model.clipNames.filter {
+            model.project.clips[$0]?.stabilise ?? true
+        }.count
+        let total = clips * passes + stabilised
+        guard total > 0 else { return "Nothing selected to deliver." }
+        return "\(clips) clip\(clips == 1 ? "" : "s"), \(total) render pass\(total == 1 ? "" : "es")"
+            + (stabilised > 0 ? " including \(stabilised) for stabilisation." : ".")
     }
 
     /// Whole pixels, POSIX, for the same reason the inspector's readouts are: this number is

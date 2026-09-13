@@ -9,8 +9,7 @@ import SwiftUI
 /// ObservableObject, not @Observable: the latter is macOS 14 and this builds against 13.
 final class GradeModel: ObservableObject {
     @Published var look: Look
-    @Published var curve: ToneCurve?
-    /// The picture, in its OWN observable. A new frame must not rebuild the inspector, which is
+        /// The picture, in its OWN observable. A new frame must not rebuild the inspector, which is
     /// what made a drag feel slow even though grading the frame took four milliseconds.
     let preview = LivePreview()
     // ONE PLACE, not every call site. A clip becomes the selected one from a drop, a click, the
@@ -166,7 +165,7 @@ final class GradeModel: ObservableObject {
 
     private func startGradeIfIdle() {
         guard !gradeInFlight, let wanted = pendingLook, let source = sourceImage,
-              let conversion = conversionCube, let curve = curve else { return }
+              let conversion = conversionCube, let curve = preview.curve else { return }
         pendingLook = nil
         gradeInFlight = true
 
@@ -314,8 +313,11 @@ final class GradeModel: ObservableObject {
                                                referenceYAVG: look.matchReferenceYAVG,
                                                referenceGamma: tone.gamma)
         }
-        appliedGamma = tone.gamma
-        curve = ToneCurve.generated(tone: tone)
+        // WRITTEN ONLY WHEN IT CHANGES. Both of these are @Published, and a redundant write to a
+        // published property is a full rebuild of every view observing this object — which during
+        // a drag is the inspector, sixty times a second, for a value that did not move.
+        if appliedGamma != tone.gamma { appliedGamma = tone.gamma }
+        preview.curve = ToneCurve.generated(tone: tone)
     }
 
     /// What the engine measured for each clip, mirrored here so the solve above needs no render

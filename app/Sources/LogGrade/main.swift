@@ -144,7 +144,6 @@ struct RootView: View {
                         guard let url else { return }
                         DispatchQueue.main.async {
                             for added in clips.add([url]) {
-                                clips.loadThumbnail(for: added.stem)
                                 selectIfNothingSelected(added)
                             }
                             grade?.clipNames = clips.usable.map(\.stem)
@@ -246,7 +245,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ sender: NSApplication, open urls: [URL]) {
         for added in clips.add(urls) {
-            clips.loadThumbnail(for: added.stem)
             if let grade, grade.selectedClip == nil, added.isUsable {
                 grade.selectedClip = added
                 grade.renderPreview()

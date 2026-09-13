@@ -41,6 +41,11 @@ public final class ClipList: ObservableObject {
             entries.append(entry)
             added.append(entry)
         }
+        // REQUESTED HERE, not by the caller. There were three places that added clips and each had
+        // to remember to ask for a thumbnail separately; a fourth was added and did not, so every
+        // clip imported through it showed a black rectangle. A list entry without its frame is not
+        // a state worth being able to express.
+        for entry in added { loadThumbnail(for: entry.stem) }
         return added
     }
 
@@ -53,13 +58,17 @@ public final class ClipList: ObservableObject {
     /// One frame, for the list. Not a preview of the grade — that comes from the engine, through
     /// the real chain, because a still decoded here has had no conversion applied and would
     /// mispredict every reading.
-    public func loadThumbnail(for stem: String, atSeconds seconds: Double = 1) {
+    private func loadThumbnail(for stem: String, atSeconds seconds: Double = 1) {
         guard let index = entries.firstIndex(where: { $0.stem == stem }) else { return }
         let url = entries[index].url
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let generator = AVAssetImageGenerator(asset: AVAsset(url: url))
             generator.appliesPreferredTrackTransform = true   // honour the display matrix
             generator.maximumSize = CGSize(width: 240, height: 240)
+            // Any nearby frame will do for a list thumbnail, and demanding an exact one makes the
+            // generator decode from the previous keyframe to reach it.
+            generator.requestedTimeToleranceBefore = .positiveInfinity
+            generator.requestedTimeToleranceAfter = .positiveInfinity
             let time = CMTime(seconds: seconds, preferredTimescale: 600)
             guard let image = try? generator.copyCGImage(at: time, actualTime: nil) else { return }
             DispatchQueue.main.async {

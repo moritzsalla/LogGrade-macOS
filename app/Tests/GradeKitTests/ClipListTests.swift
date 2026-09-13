@@ -59,8 +59,11 @@ final class ClipListTests: XCTestCase {
         list.add([clip])
         XCTAssertTrue(list.entries[0].isUsable, "got \(list.entries[0].verdict)")
 
+        // ADDING IS WHAT ASKS FOR IT. This used to call loadThumbnail directly, which tested the
+        // generator and not the contract — so when a fourth place to add clips forgot to make that
+        // second call, every clip imported through it showed a black rectangle and the suite
+        // stayed green.
         let loaded = expectation(description: "thumbnail")
-        list.loadThumbnail(for: list.entries[0].stem)
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) { loaded.fulfill() }
         wait(for: [loaded], timeout: 10)
         let image = list.entries[0].thumbnail

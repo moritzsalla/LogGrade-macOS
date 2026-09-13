@@ -23,6 +23,10 @@ final class LivePreview: ObservableObject {
     @Published var status = ""
     @Published var statusIsFailure = false
     @Published var isRendering = false
+    /// The tone curve, drawn beside the picture. It lives here rather than on the model because it
+    /// is regenerated on every control change, and on the model that meant every tick of a drag
+    /// invalidated the inspector for a graph the inspector does not contain.
+    @Published var curve: ToneCurve?
 
     /// What holding the compare key shows: the picture as it was before the adjustment in
     /// progress. Mid-drag that is the render the drag started from; once the render lands, that
