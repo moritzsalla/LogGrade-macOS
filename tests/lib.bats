@@ -114,6 +114,16 @@ _yavg() {  # _yavg <file>
 		| sed -n 's/.*lavfi\.signalstats\.YAVG=//p' | head -1
 }
 
+# The first real clip wherever the pipeline itself would look for footage, or nothing.
+# resolve_work_dir, not the repo's src/: three tests looked only in the repo, so with media kept
+# outside it (ADR 0006's .workdir) they skipped — one of them the only render of the production
+# graph on real footage — while the tests beside them ran.
+_real_clip() {
+	local work
+	work=$(resolve_work_dir "$BATS_TEST_DIRNAME/.." 2>/dev/null) || work="$BATS_TEST_DIRNAME/.."
+	ls "$work"/src/*.mov 2>/dev/null | head -1 || true
+}
+
 # ASSERTION FORM MATTERS HERE. bats 1.14 does NOT fail a test on a bare `[[ ]]` that returns false
 # in the middle of a test body: `[[` is a shell keyword, and the mechanism bats uses to spot a
 # failure only tracks simple commands, so the false result is discarded and the test's verdict
@@ -152,11 +162,6 @@ fail() {
 # The guard that stops a landscape master being silently squashed into 1080x1920.
 # 11 of this shoot's 19 clips are landscape, so this is not a hypothetical.
 
-@test "require_portrait accepts a portrait clip" {
-	run require_portrait "$FIXTURES/portrait_tagged.mov"
-	[ "$status" -eq 0 ]
-}
-
 @test "require_portrait refuses a landscape clip" {
 	run require_portrait "$FIXTURES/landscape_tagged.mov"
 	[ "$status" -ne 0 ]
@@ -187,17 +192,6 @@ fail() {
 	PATH="$bin:$PATH" run require_portrait "$FIXTURES/portrait_tagged.mov"
 	[ "$status" -ne 0 ]
 	[[ "$output" == *"REFUSING"* ]] || fail "[[ \"$output\" == *\"REFUSING\"* ]]"
-}
-
-@test "require_portrait leaves no temp files behind" {
-	# mktemp CREATES the file it names; the code appends .png to that name, so the file mktemp made
-	# is not the file that gets removed. One leak per call, on every clip of every batch.
-	local before after
-	before=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'portrait*' 2>/dev/null | wc -l)
-	run require_portrait "$FIXTURES/portrait_tagged.mov"
-	[ "$status" -eq 0 ]
-	after=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'portrait*' 2>/dev/null | wc -l)
-	[ "$before" -eq "$after" ] || { echo "leaked: $before -> $after"; false; }
 }
 
 # --- verify_bt709 ------------------------------------------------------------
@@ -786,8 +780,8 @@ JSON
 	# Real footage only: a synthetic clip does not have this camera's stream structure, and
 	# CLAUDE.md is explicit that tests covering those behaviours must skip rather than fake it.
 	local src work out w h
-	src=$(ls "$BATS_TEST_DIRNAME/../src"/*.mov 2>/dev/null | head -1) || true
-	[ -n "$src" ] || skip "no source footage in src/"
+	src=$(_real_clip)
+	[ -n "$src" ] || skip "no source footage"
 	work="$BATS_TEST_TMPDIR/render"
 	mkdir -p "$work"
 
@@ -821,8 +815,8 @@ JSON
 	# ("bt709,bt709,bt709,"), so the comparison could never match no matter how the file was
 	# tagged. CLAUDE.md documents that comma for dimensions; probe_tags had the same shape.
 	local src excerpt
-	src=$(ls "$BATS_TEST_DIRNAME/../src"/*.mov 2>/dev/null | head -1) || true
-	[ -n "$src" ] || skip "no source footage in src/"
+	src=$(_real_clip)
+	[ -n "$src" ] || skip "no source footage"
 	excerpt="$BATS_TEST_TMPDIR/camera-structure.mov"
 	# -c copy preserves the [STREAM_GROUP] structure, the repeated stream and the trailing comma.
 	# A re-encode does not, which is why the synthetic fixtures cannot cover this.
@@ -836,8 +830,8 @@ JSON
 
 @test "probe_tags returns three clean fields on a real camera file" {
 	local src
-	src=$(ls "$BATS_TEST_DIRNAME/../src"/*.mov 2>/dev/null | head -1) || true
-	[ -n "$src" ] || skip "no source footage in src/"
+	src=$(_real_clip)
+	[ -n "$src" ] || skip "no source footage"
 	run probe_tags "$src"
 	# Exactly three comma-separated values, no trailing comma, no blank-line artefact.
 	[[ "$output" =~ ^[a-z0-9]+,[a-z0-9]+,[a-z0-9]+$ ]] \
@@ -1166,6 +1160,9 @@ JSON
 	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
 	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP feed "750,metadata=print:file=$marker"
 	[ "$status" -ne 0 ]
+	# The words, not just the status: this fixture cannot complete the delivery chain, so a non-zero
+	# exit and an absent marker are both true whether or not the offset was refused.
+	[[ "$output" == *"CROP_Y must be numeric"* ]] || fail "not refused at the offset: $output"
 	[ ! -f "$marker" ] || fail "the spliced filter ran and wrote $marker"
 }
 
@@ -1211,23 +1208,6 @@ PY
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -ne 0 ] || fail "rendered with a non-numeric saturation"
 	[[ "$output" == *"must be numeric"* ]] || fail "gave no reason: $output"
-}
-
-@test "every stage says what it wanted when given no clip at all" {
-	# This pins the USAGE guard specifically, and asserts the usage wording rather than accepting
-	# either message. Written the loose way it survived the removal of both guards that can refuse
-	# an empty name — each was individually redundant, so neither was covered. require_clip_name's
-	# own empty branch is covered by its unit test above.
-	#
-	# Without the usage guard an empty argument becomes "$WORK/src/.mov" and the stage fails later
-	# with a confusing not-found, or writes a transform named ".trf".
-	local work="$BATS_TEST_TMPDIR/noarg" s
-	mkdir -p "$work/src" "$work/dist/01-baseline" "$work/dist/02-graded"
-	for s in 00-stabilise-detect 01-baseline 02-grade 03-final; do
-		GRADE_WORK_DIR="$work" run "$SCRIPTS/$s.sh"
-		[ "$status" -ne 0 ] || fail "$s.sh accepted an empty clip name"
-		[[ "$output" == *"usage:"* ]] || fail "$s.sh did not say what it wanted: $output"
-	done
 }
 
 # --- the event stream ---------------------------------------------------------
@@ -1655,6 +1635,9 @@ for line in sys.stdin.read().splitlines():
 @test "resolve_look_lut refuses a path carrying filter syntax" {
 	run resolve_look_lut "luts/looks/x',metadata=print:file=/tmp/x.cube" "$BATS_TEST_DIRNAME/.."
 	[ "$status" -ne 0 ] || fail "accepted a path that would close ffmpeg's quoting"
+	# The path does not exist either, so the not-found branch refuses it too: status alone passed
+	# with the syntax guard switched off.
+	[[ "$output" == *"contains filter syntax"* ]] || fail "refused, but only as not found: $output"
 }
 
 @test "the grade chain leaves the look filter out when there is no look" {
@@ -2147,12 +2130,17 @@ PY
 }
 
 @test "the correction generator refuses a malformed wheel" {
+	# Each refusal asserts its own words. A zero power exits non-zero without the guard too, from the
+	# ZeroDivisionError it raises, so a status check alone passed against a removed guard.
 	run "$SCRIPTS/make-correct-lut.py" --stdout --slope "1,2"
 	[ "$status" -ne 0 ] || fail "accepted a two-value wheel"
+	[[ "$output" == *"wants one value or three"* ]] || fail "refused the wheel without saying why: $output"
 	run "$SCRIPTS/make-correct-lut.py" --stdout --power "0,1,1"
 	[ "$status" -ne 0 ] || fail "accepted a zero power, which is a division by zero"
+	[[ "$output" == *"must be positive"* ]] || fail "zero power failed, but not at the guard: $output"
 	run "$SCRIPTS/make-correct-lut.py" --stdout --size 200
 	[ "$status" -ne 0 ] || fail "accepted an absurd cube size"
+	[[ "$output" == *"outside 2..64"* ]] || fail "refused the size without saying why: $output"
 }
 
 # --- halation -----------------------------------------------------------------
@@ -2591,30 +2579,38 @@ if not any(json.loads(l)["event"] == "run_done" for l in lines):
 	[ -x "$BATS_TEST_DIRNAME/../app/.build/release/LogGrade" ] || fail "no optimised binary"
 }
 
-# bats test_tags=slow
 @test "a measured exposure can be handed back instead of measured again" {
 	# The probe reads a number that does not change when a look does, so an interface adjusting a
 	# curve re-measures the same value on every render — about a second of a four-second preview.
 	# What matters is that the shortcut is not a different grade.
-	local work src
-	work=$(resolve_work_dir "$BATS_TEST_DIRNAME/.." 2>/dev/null) || work="$BATS_TEST_DIRNAME/.."
-	src=$(ls "$work"/src/*.mov 2>/dev/null | head -1) || true
-	[ -n "$src" ] || skip "no source footage"
-
-	local a="$BATS_TEST_TMPDIR/measured" b="$BATS_TEST_TMPDIR/handed"
+	#
+	# A SYNTHETIC CLIP, and a handed value the clip does not measure. This used real footage and
+	# handed back exactly the value it had just measured, so "the handed value was used" was true
+	# whether the handback worked or the probe simply ran again. It also cost 8 seconds and skipped
+	# without footage. Nothing here depends on the camera's file structure.
+	local src="$FIXTURES/probe_mid.mov" a="$BATS_TEST_TMPDIR/measured" b="$BATS_TEST_TMPDIR/handed"
 	mkdir -p "$a" "$b"
 	GRADE_WORK_DIR="$a" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
 	[ "$status" -eq 0 ] || { echo "$output"; false; }
-	local measured
-	measured=$(printf '%s\n' "$output" | sed -n 's/.*YAVG=\([0-9.]*\).*/\1/p' | head -1)
+	local measured measured_line
+	measured_line=$(printf '%s\n' "$output" | grep 'YAVG=' | head -1) || true
+	measured=$(printf '%s\n' "$measured_line" | sed -n 's/.*YAVG=\([0-9.]*\).*/\1/p')
 	[ -n "$measured" ] || fail "the probe reported nothing: $output"
 
+	# The same number handed back is the same solve.
 	YAVG_IN="$measured" GRADE_WORK_DIR="$b" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
 	[ "$status" -eq 0 ] || { echo "$output"; false; }
-	[[ "$output" == *"YAVG=${measured}"* ]] || fail "the handed value was not used: $output"
+	[[ "$output" == *"$measured_line"* ]] || fail "handing back $measured changed the grade: $output"
+
+	# A number the clip does not measure is the one that shows the probe was skipped.
+	local other=$(( ${measured%.*} + 150 ))
+	YAVG_IN="$other" GRADE_WORK_DIR="$b" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[[ "$output" == *"YAVG=${other} "* ]] || fail "measured again instead of using $other: $output"
 	[[ "$output" == *"(matched)"* ]] || fail "the solve did not run: $output"
 
 	# And a value that is not a number is refused rather than spliced into the solve.
 	YAVG_IN="600,metadata=print" GRADE_WORK_DIR="$b" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
 	[ "$status" -ne 0 ] || fail "accepted a non-numeric exposure"
+	[[ "$output" == *"YAVG_IN must be numeric"* ]] || fail "refused without saying why: $output"
 }

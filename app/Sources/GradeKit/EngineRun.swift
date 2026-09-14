@@ -22,16 +22,16 @@ public final class EngineRun {
 
     /// Stops a running engine and everything it spawned.
     ///
-    /// TERMINATING THE SHELL IS NOT ENOUGH. `grade.sh` spends its time inside ffmpeg, which is a
-    /// child process in the same group: kill the shell alone and the encode carries on, writing to
-    /// a staging file nobody is waiting for any more. So the descendants go first, and the shell
-    /// after them.
+    /// Ends the engine and everything it started, so no encode carries on writing to a staging file
+    /// nobody is waiting for any more.
     public static func stop(_ process: Process) {
-        // THE WHOLE TREE, deepest first. `grade.sh` runs ffmpeg, and ffmpeg is a grandchild once a
-        // subshell is involved — killing only the direct children leaves the encode running, and
-        // it keeps the stdout pipe open, so the run does not even return. Found by a test that
-        // asked whether the child was still alive rather than watching for a file it would write
-        // later.
+        // THE WHOLE TREE, deepest first, and then the group. Foundation starts the engine as the
+        // leader of its own process group and `terminate()` signals that group, so today every
+        // ffmpeg `grade.sh` starts dies from the last line alone — measured. The walk is for a
+        // descendant that has left the group, which nothing in scripts/ does yet and which would
+        // otherwise keep the encode running and the stdout pipe open, so the run would not even
+        // return. `RenderQueueTests` builds exactly that grandchild, because one that stays in the
+        // group passed with this loop removed.
         for pid in descendants(of: process.processIdentifier).reversed() {
             kill(pid, SIGTERM)
         }

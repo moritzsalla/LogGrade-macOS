@@ -725,9 +725,6 @@ median() {  # median  (values on stdin, one per line)  -> the middle one
 
 require_portrait() {
 	local file="$1" size w h
-	# mktemp CREATES the file it names, and ".png" is appended to that name — so the file mktemp
-	# made is not the file that gets removed. Both have to go, or every call leaks one temp file
-	# and a 19-clip batch leaves 19 behind.
 	if ! size="$(source_frame_size "$file")"; then
 		echo "REFUSING: could not measure a decoded frame from $file." >&2
 		echo "  Refusing rather than guessing — a wrong guess here squashes the delivery." >&2

@@ -6,22 +6,6 @@ import XCTest
 /// the two things that would break quietly: the filenames existing deliverables already have, and
 /// the project files already on disk.
 final class DeliverableTests: XCTestCase {
-    /// A project needs a preset that resolves, or `blockers` reports the missing one and the
-    /// assertions below read as failures of the thing they are actually testing.
-    private func aProject(targets: [Deliverable], height: Int = 1920) throws -> Project {
-        let json = #"""
-        {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
-         "power":"1,1,1","lum_mix":1},
-         "halation":{"strength":0,"threshold":1,"radius":0.006,"tint":"1,0.3,0.05"},"look":{"lut":"kodak_portra_400_nc","strength":1},"print":{"lut":"none","strength":1},
-         "tone":{"gamma":2.02,"pivot":0.39,"contrast":1.09,"toe":0,"shoulder":0.1,"black":0.025},
-         "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8,"shadows":1,"highlights":1},
-         "stabilisation":{"smoothing":30},"match":{"reference_yavg":609}}
-        """#
-        let look = try Look(data: Data(json.utf8))
-        return Project(presets: [.init(name: "P", look: look)], activePreset: "P",
-                       delivery: .init(targets: targets, height: height))
-    }
-
     // MARK: - The engine contract
 
     func testAPresetGoesToTheEngineAsItsBareName() throws {
@@ -134,23 +118,6 @@ final class DeliverableTests: XCTestCase {
         XCTAssertEqual(reread.delivery.targets, [.reels, square])
     }
 
-    // MARK: - What blocks a render
-
-    func testTheRefusalNamesTheShapesThatActuallyCrop() throws {
-        var project = try aProject(targets: [.reels, .feed])
-        project.clips["A"] = .init(cropOffset: 750)
-        project.clips["B"] = .init(cropOffset: nil)
-        let blockers = project.blockers(for: ["A", "B"])
-        XCTAssertEqual(blockers, [.cropWithoutOffset(deliverables: [.feed], clips: ["B"])],
-                       "reels does not crop, so it must not appear in the refusal")
-        XCTAssertTrue(blockers[0].description.contains("per-clip"),
-                      "the reason is the point of the refusal: \(blockers[0].description)")
-    }
-
-    func testNothingThatCropsMeansNothingToAsk() throws {
-        var project = try aProject(targets: [.reels])
-        project.clips["A"] = .init(cropOffset: nil)
-        XCTAssertTrue(project.blockers(for: ["A"]).isEmpty)
-        XCTAssertFalse(project.delivery.anyTargetCrops)
-    }
+    // What blocks a render is `ProjectTests.testACroppedRenderIsBlockedUntilEveryClipHasAnOffset`,
+    // which covers both the shape that crops and the one that does not. Two tests here repeated it.
 }

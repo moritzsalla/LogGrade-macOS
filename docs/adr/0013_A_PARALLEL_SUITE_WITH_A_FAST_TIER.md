@@ -32,6 +32,11 @@ is 37s alone. In Swift, five classes carry 76s of 103:
 
 bats reports whole seconds only, which is why its threshold is three rather than something finer.
 
+Two of those costs were a fixed wait and a needless input, since fixed the same day. `ClipListTests`
+slept six seconds for a thumbnail that lands in about one, and now polls: 2.1s. The exposure
+hand-back test rendered real footage to prove something a synthetic clip proves better, and no
+longer carries the `slow` tag.
+
 ## What changed
 
 **Both runners go parallel, and that is the larger win.** `swift test --parallel` took the Swift

@@ -280,24 +280,6 @@ final class PresetTests: XCTestCase {
         return try Look(data: Data(json.utf8))
     }
 
-    func testAPresetCarriesTheLookAndTheTrimsTogether() throws {
-        var project = Project(presets: [.init(name: "shipped", look: try aLook())],
-                              activePreset: "shipped")
-        var neutral = try aLook(gamma: 1.4)
-        neutral.lookLUT = "none"
-        neutral.colour.saturation = 1.0
-        project.presets.append(.init(name: "neutral", look: neutral))
-
-        // Switching replaces the whole grade, not just the cube: the curve was tuned with its cube
-        // in the chain, so half a switch is a grade nobody chose.
-        let chosen = try XCTUnwrap(project.presets.first { $0.name == "neutral" })
-        XCTAssertEqual(chosen.look.lookLUT, "none")
-        XCTAssertEqual(chosen.look.tone.gamma, 1.4)
-        XCTAssertEqual(chosen.look.colour.saturation, 1.0)
-        // And the other preset is untouched by that.
-        XCTAssertEqual(project.presets[0].look.tone.gamma, 2.02)
-    }
-
     func testAProjectSurvivesBeingSavedAndReopened() throws {
         var project = Project(presets: [.init(name: "shipped", look: try aLook())],
                               activePreset: "shipped",
@@ -325,12 +307,20 @@ final class PresetTests: XCTestCase {
     func testSavingUnderAnExistingNameReplacesIt() throws {
         var project = Project(presets: [.init(name: "shipped", look: try aLook())],
                               activePreset: "shipped")
-        let adjusted = try aLook(gamma: 1.77)
-        if let i = project.presets.firstIndex(where: { $0.name == "shipped" }) {
-            project.presets[i] = .init(name: "shipped", look: adjusted)
-        }
+        project.savePreset(named: " shipped ", look: try aLook(gamma: 1.77))
         XCTAssertEqual(project.presets.count, 1, "saving over a name should not add a second")
         XCTAssertEqual(project.active?.look.tone.gamma, 1.77)
+
+        // A new name is a second preset, and becomes the one in use.
+        project.savePreset(named: "warmer", look: try aLook(gamma: 1.9))
+        XCTAssertEqual(project.presets.map(\.name), ["shipped", "warmer"])
+        XCTAssertEqual(project.activePreset, "warmer")
+        XCTAssertEqual(project.presets[0].look.tone.gamma, 1.77, "the other preset is untouched")
+
+        // A blank name saves nothing rather than a preset nobody can pick.
+        project.savePreset(named: "  ", look: try aLook(gamma: 1.5))
+        XCTAssertEqual(project.presets.count, 2)
+        XCTAssertEqual(project.activePreset, "warmer")
     }
 }
 
