@@ -105,8 +105,8 @@ struct QueuePanel: View {
     private var whyNot: String? {
         if queue.isRunning { return "A conversion is already running." }
         if model.clipNames.isEmpty { return "Add a clip first." }
-        if !model.project.delivery.reels && !model.project.delivery.feed {
-            return "Choose at least one deliverable: reels, feed, or both."
+        if model.project.delivery.targets.isEmpty {
+            return "Choose at least one deliverable."
         }
         if let blocker = model.blockers.first { return blocker.description }
         if model.outputDirectory == nil { return "Choose a folder to save into." }

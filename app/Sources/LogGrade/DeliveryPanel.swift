@@ -18,13 +18,30 @@ struct DeliveryPanel: View {
                 .font(Type.heading)
                 .foregroundColor(Palette.ink)
 
+            // GENERATED FROM THE PRESET LIST, not written out one per line. Two hardcoded
+            // toggles is what made the set of shapes closed at two in the first place; a preset
+            // added to Deliverable.presets now appears here without a UI edit.
             HStack(spacing: 14) {
-                Toggle("reels, full frame", isOn: $model.project.delivery.reels)
-                Toggle("feed, cropped to 4:5", isOn: $model.project.delivery.feed)
+                ForEach(Deliverable.presets, id: \.self) { deliverable in
+                    Toggle(label(for: deliverable), isOn: binding(for: deliverable))
+                }
             }
             .toggleStyle(.checkbox)
             .font(Type.label)
             .foregroundColor(Palette.inkSecondary)
+
+            // A shape that is not a preset can only come from a project file or the engine's own
+            // DELIVERABLES, and an editor for arbitrary aspects is not built. It is LISTED anyway:
+            // silently hiding a deliverable someone chose would deliver files they cannot see the
+            // reason for, and unticking every visible box while one still rendered would read as a
+            // bug in the renderer.
+            if !customTargets.isEmpty {
+                Text("also rendering \(customTargets.map(\.spec).joined(separator: ", "))"
+                     + " — set in the project file, not editable here.")
+                    .font(Type.caption)
+                    .foregroundColor(Palette.inkTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             // Labels get room rather than wrapping mid-word, which is what "heig / ht" was.
             HStack(spacing: 8) {
@@ -65,11 +82,11 @@ struct DeliveryPanel: View {
 
             stabiliseRow
 
-            if model.project.delivery.feed {
+            if model.project.delivery.anyTargetCrops {
                 cropRow
             } else {
-                Text("Tick feed to place the 4:5 crop. Reels keeps the whole frame, so it needs "
-                     + "no crop.")
+                Text("Nothing selected crops the frame, so there is no crop to place. Tick a "
+                     + "shape that is not 9:16 and it appears here.")
                     .font(Type.caption)
                     .foregroundColor(Palette.inkTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -146,9 +163,33 @@ struct DeliveryPanel: View {
         }
     }
 
+    /// Named for the shape being placed rather than for "4:5", which stopped being the only
+    /// croppable aspect the moment the set opened up.
+    private var cropLabel: String {
+        let shapes = model.project.delivery.croppingTargets
+            .map { "\($0.aspectWidth):\($0.aspectHeight)" }
+        return (shapes.first ?? "4:5") + " crop"
+    }
+
+    /// The shapes carried by the project that have no checkbox, because they are not presets.
+    private var customTargets: [Deliverable] {
+        model.project.delivery.targets.filter { !Deliverable.presets.contains($0) }
+    }
+
+    private func label(for deliverable: Deliverable) -> String {
+        deliverable.cropsPortraitMaster
+            ? "\(deliverable.name), cropped to \(deliverable.aspectWidth):\(deliverable.aspectHeight)"
+            : "\(deliverable.name), full frame"
+    }
+
+    private func binding(for deliverable: Deliverable) -> Binding<Bool> {
+        Binding(get: { model.project.delivery.isSelected(deliverable) },
+                set: { model.project.delivery.setTarget(deliverable, selected: $0) })
+    }
+
     private var cropRow: some View {
         HStack(spacing: 10) {
-            Text("4:5 crop").font(Type.label).foregroundColor(Palette.inkSecondary)
+            Text(cropLabel).font(Type.label).foregroundColor(Palette.inkSecondary)
             if let geometry = model.cropGeometry {
                 if model.cropOffset != nil {
                     // TYPED AS WELL AS DRAGGED. A drag finds a framing; only a number repeats one,
@@ -186,9 +227,7 @@ struct DeliveryPanel: View {
     /// Passes over the footage, which is what actually decides how long convert takes.
     private var workload: String {
         let clips = model.clipNames.count
-        var passes = 0
-        if model.project.delivery.reels { passes += 1 }
-        if model.project.delivery.feed { passes += 1 }
+        let passes = model.project.delivery.targets.count
         let stabilised = model.clipNames.filter {
             model.project.clips[$0]?.stabilise ?? true
         }.count

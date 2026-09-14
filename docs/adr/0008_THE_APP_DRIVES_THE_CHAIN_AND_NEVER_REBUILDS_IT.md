@@ -27,12 +27,15 @@ verified byte-identical to its precursor.
 
 ## Consequences
 
-- **The preview's divergence is measured, and its cause is not yet known.** The browser bench sits
+- **The preview's divergence is measured, and its cause is not yet known.** The browser bench sat
   about 36 code values from the renderer on the tone case, and `tests/grade-parity.py` records
   which six explanations have been ruled out: the space, the clipping point, the filter order, the
   conversion matrix, the range, and which plane is curved. What remains to test is ffmpeg clamping
   out-of-gamut colour in YUV rather than in RGB. A GPU preview should start from that rather than
   from the assumption that the bench's algorithm is nearly right.
+  (Written while the bench existed. The cause was found — it modelled the chain's description
+  rather than its behaviour — and the bench has since been deleted, ADR 0007. The per-pixel
+  comparison runs against Swift's `LiveGrade` in `LiveGradeTests` now.)
 - **A GPU preview is still possible and is a separate decision.** What is forbidden is a second
   implementation of the *render*. A preview that approximates it must be measured against it, and
   the tolerances are a decision of their own, to be recorded when that preview exists.

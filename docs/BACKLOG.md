@@ -6,6 +6,63 @@ Everything raised and not finished. Ordered by what blocks what, not by size.
 as true of the engine; the app's own work is tracked outside this file. `PROVENANCE.md` says what
 came across.
 
+## The concept change: the tool stops assuming one shoot
+
+The pipeline was built for one shoot delivered to one platform. These are the pieces of that
+assumption, in the order they block each other. The first three are done; what remains is here so
+it is not re-derived.
+
+**Done — a deliverable is data** (ADR 0010). Any `name:aspect-w:aspect-h[:offset]`, with Instagram's
+two as presets. Byte-identical at defaults, confirmed against the precursor.
+
+**Done — the exposure reference can come from the shoot** (ADR 0011). `MATCH=batch`. The default is
+still `look.json`'s 609, which is one frame of one clip.
+
+**Done — the Bench is deleted** (ADR 0007, superseded). Three implementations of the tone and trim
+arithmetic became two.
+
+**Two-dimensional crop geometry.** The window is still as wide as the source with only a vertical
+offset, in the engine (`crop_prefix`) and in the app (`CropGeometry`). So a landscape deliverable is
+a horizontal band of the master and cannot be panned sideways, and a shape narrower than the source
+cannot be placed horizontally at all. Roughly doubles the deliverable work; deliberately left as its
+own decision.
+
+**The on-picture crop box is hardcoded to 4:5.** `CropGeometry` defaults to `aspectWidth: 4,
+aspectHeight: 5` and `GradeModel.cropGeometry` never passes an aspect, so the rectangle dragged on
+the preview draws a 4:5 window whatever the cropping deliverable actually is. Unreachable from the
+interface today, since the only cropping preset IS 4:5 — but a project file carrying, say, a 1:1
+target will show a box that does not match what the engine renders. Same seam as the 2D crop work
+above; fix them together.
+
+**The default crop offset is still one clip's composition.** `CROP_Y` defaults to 750, which is
+IMG_0609's framing, and it now applies to any shape that crops rather than to one. That is the same
+class of baked-in constant as `reference_yavg` was, and the same argument applies to it. Centre is
+the neutral default; what stops it being a one-line change is that it moves the output of an
+existing single-clip `feed` render, which is the reason the batch refusal exists instead. Decide it
+the way ADR 0011 decided the exposure reference — opt in, default unchanged.
+
+**Sharpen and grain at other frame sizes.** The sharpener's radius follows the output height and its
+amount does not, and the grain was sized at 1080 — an assumption, stated as one in
+`delivery_image_chain`, never a measurement. Opening the deliverable set up makes other sizes easy
+to reach, so this went from theoretical to reachable. It is a MEASUREMENT task, not a coding one:
+render the same clip at several heights and look at them. Until then the README and
+`03-final.sh`'s header both say other sizes are untuned.
+
+**An editor for arbitrary shapes in the app.** The engine and the project file carry any shape; the
+interface generates toggles from `Deliverable.presets` and lists anything else read-only. Adding a
+preset costs no UI work, which was the point; authoring one in the app is not built.
+
+**`USAGE.md` does not exist** and the README links to it. It is where the environment knobs belong —
+`DELIVERABLES`, `MATCH`, `WIDTH`, `CROP_Y` and the rest are currently documented only in
+`grade.sh`'s header, which is the one place that cannot go stale but is also the last place anyone
+looks.
+
+**The parity tolerance is carried forward, not measured.** `grade_worst_by_case` in the golden used
+to be computed from the Bench's JavaScript; with the Bench gone, `--regenerate` copies it forward
+and says so loudly. As a regression ceiling that is correct — a chain change that widens the real
+divergence turns `LiveGradeTests` red, which is the point. What is missing is a way to re-measure
+the ceiling deliberately when a change is meant to move it.
+
 ## Blocking the rest of the shoot
 
 **Sign off the v4 look.** The current proof carries four changes on top of the approved grade:
@@ -18,10 +75,6 @@ per-clip and must not be inherited from IMG_0609: the Feed crop offset, since 75
 composition only.
 
 ## Worth doing next
-
-**A drag-and-drop wrapper.** A Folder Action or droplet: drop a folder, finals appear, a plain
-report says what happened. `scripts/grade.sh` is already the engine — folder in, finals out, no
-intermediates. This is a thin wrapper over working, measured code.
 
 **Judge the grain strength by eye.** `GRAIN_STRENGTH=8` is a starting suggestion, not a decision.
 The measurements behind clustered-vs-per-pixel grain are settled (see `docs/PIPELINE.md`); the
@@ -36,11 +89,6 @@ rumble that is currently the loudest thing in the file, and a separate ambience 
 set down, not held) would get street detail that handheld capture cannot. Nothing to undo first.
 
 ## Cleanups
-
-**`spec` vs `target` in the Bench's code.** `CONTEXT.md` rules that a *spec* is the published RAL
-value you measure against and deliberately depart from; *target* is ruled out because it implies
-somewhere to arrive. The Bench's `SAMPLERS` still use `target:`. The code should change, not the
-glossary — README's "accuracy is not a grade" only parses under the ruled meaning.
 
 **`02-grade.sh`'s header uses "look" twice for two different things.** Once for the Portra LUT,
 once for the whole grade. One-line fix next time that file is open.
@@ -60,8 +108,14 @@ Kept here so they are not re-litigated from scratch.
   a different pipeline shape, not a drop-in swap.
 - **The scene-linear filmic route.** Architecturally correct and it lost on colour; kept in
   `luts/filmic/` with its measurements. See ADR-0002.
-- **Playwright tests for the Bench.** The property that actually matters — the Bench's curve maths
-  matching the renderer's — is tested directly by `tests/grade-parity.py`, which is cheaper and
-  more precise than driving a browser.
-- **An accessibility audit of the Bench.** Single-user desktop tool. Revisit if it is ever shared.
+- **Collapsing the tone curve and the trims into the shared cube.** The OpenColorIO shape: one
+  transform artifact consumed by the preview and the render both, so they agree by construction
+  rather than by test. The three colour cubes already work that way. Measured against it: flattening
+  stages onto one grid cost 55 code values against 48 for sampling in sequence, because the film
+  look's own grid is only 13 points. Deleting the Bench also took three implementations to two, so
+  the pressure this would relieve is largely gone.
+- **Rewriting the render natively**, in AVFoundation or Core Image. ADR 0008 has the three
+  measurements: the framework colour-matches every pixel and would reintroduce *bleached* through
+  the framework rather than through a tag, `h264_videotoolbox` has no CRF, and the chain is the
+  residue of measured failures that do not transfer.
 - **Python linting.** Two scripts, ~300 lines. Run `ruff` once if it bothers you.

@@ -1,15 +1,19 @@
 #!/bin/bash
 # Stage 3: graded master -> delivery.
-# Usage: ./03-final.sh IMG_XXXX [reels|feed] [CROP_Y]
+# Usage: ./03-final.sh IMG_XXXX [deliverable] [CROP_Y]
 #
-#   reels  9:16, 1080x1920 — Reels and Stories. The default.
-#   feed   4:5, 1080x1350 — a Feed post, cropped from the portrait master.
+#   deliverable  a preset — `reels` (9:16, the default) or `feed` (4:5) — or an arbitrary shape
+#          written `name:aspect-w:aspect-h[:offset]`, e.g. `square:1:1` or `wide:16:9:400`. The
+#          shapes are resolved by deliverable_spec in lib.sh, the same one grade.sh reads, so the
+#          two paths cannot disagree about what a name means. WIDTH=<px> sets the shared delivery
+#          width (default 1080) and the height follows the aspect.
 #
-#   CROP_Y applies to `feed` only: the vertical offset (in pixels on the 2160x3840 master) where
-#          the 2160x2700 crop window starts. Default 750 is IMG_0609's biased-up crop, which
-#          removes the parking-ceiling strip at the top and keeps the ivy plus a little more road
-#          at the bottom. It is NOT assumed correct for every clip's composition — eyeball a crop
-#          preview per clip and pass the right offset.
+#   CROP_Y applies to whichever deliverables actually crop this master: the vertical offset, in
+#          pixels on the master, where the crop window starts. Default 750 is IMG_0609's biased-up
+#          crop, which removes the parking-ceiling strip at the top and keeps the ivy plus a little
+#          more road at the bottom. It is NOT assumed correct for every clip's composition —
+#          eyeball a crop preview per clip and pass the right offset. A deliverable that is already
+#          the master's own shape takes no crop and ignores it.
 #
 #   ACCEPT_STALE=1 delivers even though the transform is older than its source, i.e. unstabilised
 #          on purpose. Without it a stale transform is refused: this stage has no detect pass, so
@@ -26,7 +30,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 # `${1:-}` so a no-argument run says what it wanted — see 00-stabilise-detect.sh.
 CLIP="${1:-}"
-[ -n "$CLIP" ] || { echo "usage: ./03-final.sh IMG_XXXX [reels|feed] [CROP_Y]" >&2; exit 1; }
+[ -n "$CLIP" ] || { echo "usage: ./03-final.sh IMG_XXXX [deliverable] [CROP_Y]" >&2; exit 1; }
 # ...and then the name itself: it becomes a path component AND reaches the filter graph.
 CLIP="$(require_clip_name "$CLIP")"
 TARGET="${2:-reels}"
@@ -37,21 +41,17 @@ WORK="$(resolve_work_dir "$ROOT")"
 SMOOTHING="$(require_number SMOOTHING "${SMOOTHING:-$(look .stabilisation.smoothing)}")"  # lowpass
 GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain.strength)}")"
 
-case "$TARGET" in
-	reels)
-		W=1080; H=1920; CROP=""
-		SUFFIX="reels-stories_9x16"
-		;;
-	feed)
-		W=1080; H=1350
-		CROP="crop=2160:2700:0:$(require_number CROP_Y "${3:-750}"),"
-		SUFFIX="feed_4x5"
-		;;
-	*)
-		echo "unknown delivery target: $TARGET (expected 'reels' or 'feed')" >&2
-		exit 1
-		;;
-esac
+# The shape is DATA, resolved by lib.sh. This was a two-branch `case` carrying its own sizes and
+# its own `crop=2160:2700:0:` — the width, the aspect and the master's dimensions all written in,
+# and all three wrong the moment any of them changed. The crop window is computed from the master
+# that is actually on disk, a few lines down, once it has been measured.
+read -r NAME AW AH OFF SUFFIX <<< "$(deliverable_spec "$TARGET")"
+W="$(require_number WIDTH "${WIDTH:-1080}")"; W=$(( W - W % 2 ))
+H="$(deliverable_height "$W" "$AW" "$AH")"
+# The positional offset still wins over the spec's own, because it is the more specific thing the
+# caller just typed.
+[ -z "${3:-}" ] || OFF="$(require_number CROP_Y "$3")"
+[ "$OFF" != "-" ] || OFF="$(require_number CROP_Y "${CROP_Y:-750}")"
 
 IN="$WORK/dist/02-graded/${CLIP}_graded.mov"
 SRC="$WORK/src/${CLIP}.mov"
@@ -63,8 +63,11 @@ check_disk_space "$WORK/dist" 2
 # is wrong the moment a work dir is set: the marker was in the repo and the output was not.
 mkdir -p "$(dirname "$OUT")"
 # Refuses a landscape master rather than squashing it into a vertical delivery, or cropping past
-# the frame edge. See require_portrait in lib.sh.
-require_portrait "$IN"
+# the frame edge. See require_portrait in lib.sh. The size it hands back is what the crop window is
+# computed from — measured, never assumed to be 2160x3840.
+IN_SIZE="$(require_portrait "$IN")"
+CROP="$(crop_prefix "${IN_SIZE% *}" "${IN_SIZE#* }" "$AW" "$AH" "$OFF")"
+echo "deliverable: $NAME  ${W}x${H}${CROP:+  cropped at $OFF}"
 
 # --- optional stabilisation -------------------------------------------------
 # If a transform exists (from 00-stabilise-detect.sh), the sway is smoothed out before the

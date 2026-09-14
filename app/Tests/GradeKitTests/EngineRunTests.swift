@@ -67,15 +67,15 @@ final class EngineRunTests: XCTestCase {
     func testAFailureKeepsItsExitCodeAndItsReason() throws {
         let engine = try stubEngine(script: """
         #!/bin/bash
-        echo 'REFUSING: FEED=1 across 2 clips with no CROP_Y.' >&2
-        echo 'GRADE_CODE=REFUSE_FEED_NO_CROP_Y' >&2
+        echo "REFUSING: 'feed' crops, across 2 clips, with no offset." >&2
+        echo 'GRADE_CODE=REFUSE_CROP_NO_OFFSET' >&2
         exit 1
         """)
         defer { try? FileManager.default.removeItem(at: engine.root) }
         let outcome = try EngineRun(engine: engine).run(arguments: ["a", "b"])
         XCTAssertFalse(outcome.succeeded)
         XCTAssertEqual(outcome.exitCode, 1)
-        XCTAssertEqual(outcome.codes, [.feedWithoutCropOffset])
+        XCTAssertEqual(outcome.codes, [.cropWithoutOffset])
         XCTAssertTrue(outcome.stderrText.contains("REFUSING"),
                       "the human sentence has to survive too: it is what a person reads")
     }

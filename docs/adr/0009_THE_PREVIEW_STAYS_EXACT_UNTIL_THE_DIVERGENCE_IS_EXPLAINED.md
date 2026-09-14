@@ -11,8 +11,10 @@ is built. The GPU tier is not deferred for time; it is refused on evidence.
 
 ## What was measured
 
-`tests/grade-parity.py` compares the browser bench's per-pixel grade against ffmpeg's own output
-over a probe image. On the shipped look the worst divergence is about 29 code values, and on the
+`tests/grade-parity.py` compared the browser bench's per-pixel grade against ffmpeg's own output
+over a probe image. (The bench has since been deleted — ADR 0007. That file still renders and
+guards the golden; the per-pixel comparison moved to `LiveGradeTests`, against the same numbers.)
+On the shipped look the worst divergence is about 29 code values, and on the
 tone case alone about 36. Seven models were fitted to explain it and every one was rejected:
 
 - the space, and the point at which channels are clipped. Adding one luma delta to R, G and B is

@@ -30,10 +30,9 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(resolve_work_dir "$ROOT")"
 BASELINE="$WORK/dist/01-baseline/${CLIP}_baseline.mov"
 TONE="$ROOT/luts/tone/shipped.cube"
-# Graded by eye in the Grade Bench (bench/), calibrated live against the RAL references in frame,
-# then sent back through the artifact db. Deliberately off-spec: saturation 1.27 puts the traffic
-# blue at B/G 2.39 against a 1.98 spec. That is a grade, not an error — accuracy is the reference
-# you depart from on purpose.
+# Graded by eye against the RAL references in frame, then sent back as data. Deliberately off-spec:
+# saturation 1.27 puts the traffic blue at B/G 2.39 against a 1.98 spec. That is a grade, not an
+# error — accuracy is the reference you depart from on purpose.
 #
 # THE NUMBERS ARE NOT HERE. They live in look.json, and ensure_tone_lut below regenerates
 # shipped.cube from it whenever the two disagree. This header used to carry its own copy of all six

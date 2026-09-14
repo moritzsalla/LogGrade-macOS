@@ -1,5 +1,5 @@
 {"event":"disk","dir":"<WORK>/dist","available_gb":"<GB>","wanted_gb":10}
-{"event":"run_start","clips":2,"saturation":1.27,"warmth":0.005,"grain":8,"stabilisation":1,"exposure_match":0,"proof":0,"dry":1,"report":"<REPORT>","out_dir":"<WORK>/dist/03-final"}
+{"event":"run_start","clips":2,"saturation":1.27,"warmth":0.005,"grain":8,"stabilisation":1,"exposure_match":0,"exposure_reference":609,"deliverables":"reels","proof":0,"dry":1,"report":"<REPORT>","out_dir":"<WORK>/dist/03-final"}
 {"event":"stabilisation","clip":"TALL","state":"none","transform":"<WORK>/dist/stab/TALL.trf"}
 {"event":"clip_planned","clip":"TALL","source":"<WORK>/src/TALL.mov","yavg":"-","gamma":2.02,"matched":0,"fps":"24/1"}
 {"event":"clip_skipped","clip":"WIDE","code":"REFUSE_NOT_PORTRAIT","source":"<WORK>/src/WIDE.mov"}

@@ -30,6 +30,12 @@ setup_file() {
 
 	# Tiny synthetic clips — one frame each, so the suite stays fast.
 	#
+	# 72x128 IS 9:16 EXACTLY, and that is load-bearing rather than arbitrary. These were 64x128,
+	# i.e. 1:2, for as long as the 9:16 deliverable took no crop: the delivery chain simply scaled
+	# them and quietly changed their aspect. Now that a deliverable is an ASPECT, a source that is
+	# not 9:16 gets cropped to reach it — correct, and it would make every fixture here exercise a
+	# crop path the real 2160x3840 camera source never takes.
+	#
 	# NOTE ON HOW THESE ARE BUILT. Passing -color_primaries/-color_trc/-colorspace to prores_ks
 	# does NOT produce a correctly tagged file: it writes "bt709,unknown,unknown". That is the
 	# very bug the pipeline's retag pass exists for, and the first version of this suite tripped
@@ -46,10 +52,31 @@ setup_file() {
 			"$out" -v error
 		rm -f "$out.raw.mov"
 	}
-	_mk 64 128 bt709 bt709 bt709 "$FIXTURES/portrait_tagged.mov"
-	_mk 128 64 bt709 bt709 bt709 "$FIXTURES/landscape_tagged.mov"
+	# TWO SECONDS, and three distinct luma levels. The exposure probe seeks to 1s, so a 0.1s clip
+	# measures nothing at all — which is why the fixtures above cannot exercise the exposure match
+	# and every test that uses them passes MATCH=0. These can, and the three levels are what make a
+	# median a median rather than "the only value there was".
+	# The level is a HEX COLOUR, not `gray@n`: the `@n` suffix is ALPHA, so three clips built that
+	# way are three identical greys and a median test over them proves nothing. Caught by a test
+	# that asserted the middle clip was the anchor and found all three reading 552.
+	_mk_probeable() {  # _mk_probeable <hex grey> <w> <h> <out>
+		ffmpeg -y -f lavfi -i "color=c=$1:s=${2}x${3}:d=2:r=24" \
+			-frames:v 48 -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le \
+			"$4" -v error
+	}
+	_mk_probeable 0x303030 72 128 "$FIXTURES/probe_dark.mov"
+	_mk_probeable 0x808080 72 128 "$FIXTURES/probe_mid.mov"
+	_mk_probeable 0xc0c0c0 72 128 "$FIXTURES/probe_bright.mov"
+	# Landscape AND measurable, so that a clip which gets skipped still occupies a slot carrying a
+	# distinctly different exposure. A skipped clip whose probe came back empty cannot tell a
+	# misaligned index from a correct one — the alignment test passed against a removed guard for
+	# exactly that reason.
+	_mk_probeable 0x303030 128 72 "$FIXTURES/probe_dark_landscape.mov"
+
+	_mk 72 128 bt709 bt709 bt709 "$FIXTURES/portrait_tagged.mov"
+	_mk 128 72 bt709 bt709 bt709 "$FIXTURES/landscape_tagged.mov"
 	# Deliberately MIStagged as bt2020 — the "bleached out" state this pipeline exists to prevent.
-	_mk 64 128 bt2020 bt709 bt2020nc "$FIXTURES/portrait_bt2020.mov"
+	_mk 72 128 bt2020 bt709 bt2020nc "$FIXTURES/portrait_bt2020.mov"
 }
 
 # NOTE ON THE FOOTAGE LOOKUPS BELOW. Each real-footage test finds a clip and skips without one,
@@ -122,7 +149,7 @@ fail() {
 
 @test "require_portrait reports the real dimensions, not a guess" {
 	run require_portrait "$FIXTURES/landscape_tagged.mov"
-	[[ "$output" == *"128x64"* ]] || fail "[[ \"$output\" == *\"128x64\"* ]]"
+	[[ "$output" == *"128x72"* ]] || fail "[[ \"$output\" == *\"128x72\"* ]]"
 }
 
 @test "require_portrait refuses a clip it cannot measure" {
@@ -495,7 +522,7 @@ fail() {
 @test "grade.sh takes its tone values from look.json, not from itself" {
 	# "Look values live in look.json, never hardcoded in a script" is a settled rule, and the
 	# production path was breaking it: it read colour, grain and stabilisation from look.json but
-	# carried its own copy of the whole tone block. So a grade sent from the Bench updated
+	# carried its own copy of the whole tone block. So a grade sent from the Bench (since removed) updated
 	# shipped.cube and the staged path while grade.sh kept rendering the previous tone — the
 	# two-copies-one-edited failure that look() exists to end, one layer up.
 	local work="$BATS_TEST_TMPDIR/lookwork" look="$BATS_TEST_TMPDIR/other-look.json"
@@ -651,14 +678,14 @@ PY
 	# and the deliverable was already gone — and per docs/adr/0004, getting it back means
 	# regenerating the baseline and the master first.
 	local out="$BATS_TEST_TMPDIR/approved.mp4" before
-	ffmpeg -y -f lavfi -i "color=c=gray:s=64x128:d=0.1:r=24" -frames:v 1 \
+	ffmpeg -y -f lavfi -i "color=c=gray:s=72x128:d=0.1:r=24" -frames:v 1 \
 		-c:v libx264 -pix_fmt yuv420p "$out" -v error
 	before=$(md5 -q "$out")
 
 	# A filter graph that fails at initialisation, which is the dangerous shape: ffmpeg has already
 	# opened the output by then.
 	run render_delivery "$out" "deliberately broken encode" \
-		-y -f lavfi -i "color=c=gray:s=64x128:d=0.1:r=24" \
+		-y -f lavfi -i "color=c=gray:s=72x128:d=0.1:r=24" \
 		-filter_complex "[0:v]nosuchfilter=1[o]" -map "[o]" -frames:v 1
 	[ "$status" -ne 0 ]
 	[ -s "$out" ] || { echo "the approved deliverable was destroyed"; false; }
@@ -669,7 +696,7 @@ PY
 @test "render_delivery installs a good render and tags it" {
 	local out="$BATS_TEST_TMPDIR/fresh.mp4"
 	run render_delivery "$out" "encode" \
-		-y -f lavfi -i "color=c=gray:s=64x128:d=0.1:r=24" \
+		-y -f lavfi -i "color=c=gray:s=72x128:d=0.1:r=24" \
 		-filter_complex "[0:v]${DELIVERY_SETPARAMS}[o]" -map "[o]" -frames:v 1 \
 		-c:v libx264 -pix_fmt yuv420p
 	[ "$status" -eq 0 ]
@@ -868,7 +895,7 @@ JSON
 	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
 
 	out="$work/dist/03-final/CLIP_reels-stories_9x16.mp4"
-	ffmpeg -y -f lavfi -i "color=c=red:s=64x128:d=0.1:r=24" -frames:v 1 \
+	ffmpeg -y -f lavfi -i "color=c=red:s=72x128:d=0.1:r=24" -frames:v 1 \
 		-c:v libx264 -pix_fmt yuv420p "$out" -v error
 	before=$(md5 -q "$out")
 
@@ -888,7 +915,7 @@ JSON
 	local out="$BATS_TEST_TMPDIR/untaggable.mp4"
 	safe_retag() { return 1; }     # the remux fails, however it fails
 	run render_delivery "$out" "encode" \
-		-y -f lavfi -i "color=c=gray:s=64x128:d=0.1:r=24" \
+		-y -f lavfi -i "color=c=gray:s=72x128:d=0.1:r=24" \
 		-filter_complex "[0:v]${DELIVERY_SETPARAMS}[o]" -map "[o]" -frames:v 1 \
 		-c:v libx264 -pix_fmt yuv420p
 	[ "$status" -ne 0 ] || fail "installed a file it could not tag, and reported success"
@@ -1043,9 +1070,9 @@ JSON
 # can write files (`metadata=print:file=`) and read them (`movie=`). There is no eval anywhere here,
 # so this is not shell injection; the ceiling is ffmpeg doing file I/O as whoever ran the script.
 #
-# It matters because neither input is hand-typed. look.json is transcribed from the Bench's artifact
-# db, which is shared and multi-writer, and a clip FILENAME arrives from the camera or from whoever
-# handed over the card. Nothing on the read side checked either one.
+# It matters because neither input is hand-typed. look.json is written by the app, and was written
+# before that by the Bench's artifact db, which was shared and multi-writer; a clip FILENAME arrives
+# from the camera or from whoever handed over the card. Nothing on the read side checked either one.
 #
 # Ported from a branch of the precursor that never landed, because it predates the chain dedupe and
 # would have reinstated an inlined copy of the graph. See PROVENANCE.md.
@@ -1248,10 +1275,10 @@ for i, line in enumerate(sys.stdin.read().splitlines(), 1):
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/B.mov"
 
 	# A Feed crop across several clips: the offset is a per-clip framing call.
-	FEED=1 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/A.mov" "$work/src/B.mov"
+	DELIVERABLES=reels,feed GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/A.mov" "$work/src/B.mov"
 	[ "$status" -ne 0 ]
-	[[ "$output" == *"GRADE_CODE=REFUSE_FEED_NO_CROP_Y"* ]] || fail "unnamed refusal: $output"
-	[[ "$output" == *"REFUSING: FEED=1"* ]] || fail "the human sentence was replaced, not kept"
+	[[ "$output" == *"GRADE_CODE=REFUSE_CROP_NO_OFFSET"* ]] || fail "unnamed refusal: $output"
+	[[ "$output" == *"REFUSING: 'feed' crops"* ]] || fail "the human sentence was replaced, not kept"
 
 	# A missing argument, and no arguments at all.
 	GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/NOPE.mov"
@@ -1298,7 +1325,7 @@ for i, line in enumerate(sys.stdin.read().splitlines(), 1):
 	# at -v error and none used -progress, so there was no signal at all to read.
 	local out="$BATS_TEST_TMPDIR/prog.mp4"
 	JSON=1 run render_delivery "$out" "encode" \
-		-y -f lavfi -i "color=c=gray:s=64x128:d=1:r=24" \
+		-y -f lavfi -i "color=c=gray:s=72x128:d=1:r=24" \
 		-filter_complex "[0:v]${DELIVERY_SETPARAMS}[o]" -map "[o]" \
 		-c:v libx264 -pix_fmt yuv420p
 	[ "$status" -eq 0 ]
@@ -1322,14 +1349,14 @@ for line in sys.stdin.read().splitlines():
 	# stayed green against the naive code for exactly that reason. A subshell that sources lib.sh
 	# gets lib.sh's own `set -euo pipefail`, which is what grade.sh actually renders under.
 	local out="$BATS_TEST_TMPDIR/keep.mp4" mode rc text
-	ffmpeg -v error -y -f lavfi -i "color=c=red:s=64x128:d=0.1:r=24" -frames:v 1 \
+	ffmpeg -v error -y -f lavfi -i "color=c=red:s=72x128:d=0.1:r=24" -frames:v 1 \
 		-c:v libx264 -pix_fmt yuv420p "$out"
 	local before; before=$(md5 -q "$out")
 	for mode in 0 1; do
 		rc=0
 		text=$(JSON=$mode bash -c '
 			source "$1/lib.sh"
-			render_delivery "$2" doomed -y -f lavfi -i "color=c=gray:s=64x128:d=0.1:r=24" \
+			render_delivery "$2" doomed -y -f lavfi -i "color=c=gray:s=72x128:d=0.1:r=24" \
 				-filter_complex "[0:v]nosuchfilter[o]" -map "[o]" -c:v libx264
 		' _ "$SCRIPTS" "$out" 2>&1) || rc=$?
 		[ "$rc" -ne 0 ] || fail "JSON=$mode: a broken graph reported success"
@@ -1343,8 +1370,8 @@ for line in sys.stdin.read().splitlines():
 
 # --- the preview frame --------------------------------------------------------
 # The app's exact preview. It exists because a slider has to be judged against what the render
-# actually produces, and the alternative — the Bench's pre-baked JPEG — bypasses both the real CST
-# and the look LUT, so it mispredicts every reading.
+# actually produces, and the alternative it replaced — the Bench's pre-baked JPEG — bypassed both
+# the real CST and the look LUT, so it mispredicted every reading.
 
 @test "FRAME renders one still through the grade chain and no deliverable" {
 	local work="$BATS_TEST_TMPDIR/frame"
@@ -1680,15 +1707,166 @@ PY
 	# So a caller that needs the source's dimensions does not decode a second frame to ask again.
 	run require_portrait "$FIXTURES/portrait_tagged.mov"
 	[ "$status" -eq 0 ]
-	[ "$output" = "64 128" ] || fail "expected the measured size, got: $output"
+	[ "$output" = "72 128" ] || fail "expected the measured size, got: $output"
 }
+# --- deliverables as data ------------------------------------------------------
+# A deliverable was a `case` branch carrying its own pixel sizes, so the set was closed at two and
+# every shape in it assumed this camera's frame. These cover the replacement: the shapes are data,
+# the geometry is computed from the source that is actually on disk, and the two presets still
+# resolve to exactly the numbers the branches hardcoded.
+
+@test "the presets still resolve to the sizes their case branches hardcoded" {
+	# The byte-identity guard, in the cheap form. tests/conformance.sh renders both engines and
+	# compares, which costs minutes; this fails in milliseconds and names which number moved.
+	run deliverable_spec reels
+	[ "$output" = "reels 9 16 - reels-stories_9x16" ] || fail "reels moved: $output"
+	run deliverable_spec feed
+	[ "$output" = "feed 4 5 - feed_4x5" ] || fail "feed moved: $output"
+	[ "$(deliverable_height 1080 9 16)" = "1920" ] || fail "reels is no longer 1080x1920"
+	[ "$(deliverable_height 1080 4 5)" = "1350" ] || fail "feed is no longer 1080x1350"
+}
+
+@test "a deliverable can be an arbitrary shape, not one of two names" {
+	run deliverable_spec square:1:1
+	[ "$status" -eq 0 ] || fail "refused a custom shape: $output"
+	[ "$output" = "square 1 1 - square_1x1" ] || fail "unexpected spec: $output"
+	run deliverable_spec wide:16:9:400
+	[ "$output" = "wide 16 9 400 wide_16x9" ] || fail "the per-deliverable offset was lost: $output"
+	[ "$(deliverable_height 1080 1 1)" = "1080" ] || fail "1:1 is not square"
+}
+
+@test "a deliverable name that would reach the filter graph is refused" {
+	# It becomes a path component and an ffmpeg argument, exactly like a clip name, so it goes
+	# through the same guard rather than a weaker one written beside it.
+	run deliverable_spec 'a/b:1:1'
+	[ "$status" -ne 0 ] || fail "accepted a name containing a path separator"
+	run deliverable_spec "q'x:1:1"
+	[ "$status" -ne 0 ] || fail "accepted a name containing filter syntax"
+	run deliverable_spec nope
+	[ "$status" -ne 0 ] || fail "accepted an unknown preset"
+	[[ "$output" == *"name:aspect-w:aspect-h"* ]] || fail "did not say what it wanted: $output"
+	run deliverable_spec 'a:0:1'
+	[ "$status" -ne 0 ] || fail "accepted a zero aspect term"
+}
+
+@test "a deliverable that is already the source's shape takes no crop filter" {
+	# THE BYTE-IDENTITY RULE. Every deliverable resolves its crop through crop_prefix now, where
+	# the 9:16 one used to be handed a literal empty string by its own branch. A no-op
+	# `crop=2160:3840:0:0` would render the same picture and still change the graph, which is a
+	# difference tests/conformance.sh sees.
+	run crop_prefix 2160 3840 9 16 750
+	[ "$status" -eq 0 ] || fail "refused the source's own shape: $output"
+	[ -z "$output" ] || fail "emitted a crop for a deliverable that does not crop: $output"
+	# ...and a shape that IS a crop still gets one, computed from the source rather than assumed.
+	run crop_prefix 2160 3840 4 5 750
+	[ "$output" = "crop=2160:2700:0:750," ] || fail "the 4:5 window moved: $output"
+}
+
+@test "whether a deliverable crops is decided by the source, not by its name" {
+	# 4:5 is a crop of a 9:16 master and the WHOLE FRAME of a 4:5 one. The refusal that uses this
+	# fires before any clip is opened, so it cannot ask crop_prefix — it has no offset yet.
+	deliverable_crops "2160 3840" 9 16 && fail "said 9:16 crops a 9:16 source"
+	deliverable_crops "2160 3840" 4 5 || fail "said 4:5 does not crop a 9:16 source"
+	deliverable_crops "2160 2700" 4 5 && fail "said 4:5 crops a 4:5 source"
+	# An unmeasurable source is ASSUMED to crop: the guard then fires when it need not have, which
+	# costs a re-run, where guessing the other way costs a batch of silently reframed files.
+	deliverable_crops "" 9 16 || fail "an unmeasurable source was assumed safe"
+}
+
+@test "a cropped deliverable across several clips is refused, and named" {
+	local work="$BATS_TEST_TMPDIR/crop"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/A.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/B.mov"
+	DELIVERABLES=reels,feed MATCH=0 STAB=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/A.mov" "$work/src/B.mov"
+	[ "$status" -ne 0 ] || fail "reframed a batch from one clip's composition"
+	[[ "$output" == *"GRADE_CODE=REFUSE_CROP_NO_OFFSET"* ]] || fail "unnamed refusal: $output"
+	[[ "$output" == *"'feed' crops"* ]] || fail "did not name the deliverable: $output"
+	# The UNCROPPED one must not trip it, or every folder run would refuse.
+	DELIVERABLES=reels MATCH=0 STAB=0 DRY=1 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/A.mov" "$work/src/B.mov"
+	[ "$status" -eq 0 ] || fail "an uncropped deliverable was refused across a batch: $output"
+}
+
+@test "a deliverable whose crop cannot fit the source is refused before it is delivered" {
+	local work="$BATS_TEST_TMPDIR/toofit"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	# 1:4 is TALLER than the 9:16 source, so there is no window to take.
+	DELIVERABLES=tall:1:4:0 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[[ "$output" == *"does not fit"* ]] || fail "gave no reason: $output"
+	[ -z "$(ls -A "$work/dist/03-final" 2>/dev/null)" ] || fail "delivered anyway"
+}
+
+# --- the exposure reference ----------------------------------------------------
+# MATCH=1 lands every clip on look.json's match.reference_yavg, which is a measurement of one frame
+# of one clip of one shoot. MATCH=batch anchors on the run's own median instead. See docs/adr/0011.
+
+@test "MATCH=batch anchors on the run's own clips, not on look.json's reference" {
+	local work="$BATS_TEST_TMPDIR/batch"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/probe_dark.mov"   "$work/src/A.mov"
+	cp "$FIXTURES/probe_mid.mov"    "$work/src/B.mov"
+	cp "$FIXTURES/probe_bright.mov" "$work/src/C.mov"
+	MATCH=batch STAB=0 DRY=1 JSON=1 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/A.mov" "$work/src/B.mov" "$work/src/C.mov"
+	[ "$status" -eq 0 ] || fail "batch mode failed: $output"
+	local reference; reference="$(printf '%s' "$output" | sed -n 's/.*"exposure_reference":\([0-9.]*\).*/\1/p' | head -1)"
+	[ -n "$reference" ] || fail "the run did not report what it anchored on: $output"
+	# THE MIDDLE CLIP, not the first and not an average of the outer two. B is the median, so it
+	# defines the reference and is the one clip left on look.json's own gamma; A and C move.
+	local b_yavg; b_yavg="$(printf '%s' "$output" | sed -n 's/.*"clip":"B","source":"[^"]*","yavg":\([0-9.]*\).*/\1/p')"
+	[ "$reference" = "$b_yavg" ] || fail "anchored on $reference, but the median clip reads $b_yavg"
+	[[ "$output" == *'"clip":"B"'*'"matched":0'* ]] || fail "the median clip was matched off itself: $output"
+	[[ "$output" == *'"clip":"A"'*'"matched":1'* ]] || fail "the dark clip was not matched: $output"
+	[[ "$output" == *'"clip":"C"'*'"matched":1'* ]] || fail "the bright clip was not matched: $output"
+}
+
+@test "MATCH refuses a mode it does not have, rather than picking one" {
+	local work="$BATS_TEST_TMPDIR/mode"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	MATCH=yes STAB=0 DRY=1 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -ne 0 ] || fail "accepted an unknown MATCH mode"
+	[[ "$output" == *"GRADE_CODE=REFUSE_MATCH_MODE"* ]] || fail "unnamed refusal: $output"
+}
+
+@test "the batch measurements stay aligned with their clips when one is skipped" {
+	# The measurements are found BY POSITION, so an early skip that did not advance the index would
+	# hand every clip after it the previous clip's exposure — a wrong grade on a file that looks
+	# finished, which is the whole failure class this pipeline is built against.
+	local work="$BATS_TEST_TMPDIR/align"
+	mkdir -p "$work/src"
+	# A is skipped for being landscape, and is DARK. B renders, and is BRIGHT. The lower median of
+	# the two measurements is A's, so if B reads A's slot it reports the reference exposure back
+	# and looks perfectly matched — the wrong grade on a file that looks finished.
+	cp "$FIXTURES/probe_dark_landscape.mov" "$work/src/A_skipped.mov"
+	cp "$FIXTURES/probe_bright.mov" "$work/src/B_kept.mov"
+	MATCH=batch STAB=0 DRY=1 JSON=1 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/A_skipped.mov" "$work/src/B_kept.mov"
+	[ "$status" -eq 0 ] || fail "the run failed: $output"
+	[[ "$output" == *'"clip":"A_skipped"'*'"code":"REFUSE_NOT_PORTRAIT"'* ]] \
+		|| fail "the landscape clip was not skipped: $output"
+	local reference b_yavg
+	reference="$(printf '%s' "$output" | sed -n 's/.*"exposure_reference":\([0-9.]*\).*/\1/p' | head -1)"
+	b_yavg="$(printf '%s' "$output" | sed -n 's/.*"clip":"B_kept","source":"[^"]*","yavg":\([0-9.]*\).*/\1/p')"
+	[ -n "$reference" ] || fail "no reference in the event stream: $output"
+	[ -n "$b_yavg" ] || fail "no measurement for the kept clip: $output"
+	[ "$b_yavg" != "$reference" ] || fail "the kept clip reported the skipped clip's exposure ($b_yavg)"
+	[[ "$output" == *'"clip":"B_kept"'*'"matched":1'* ]] \
+		|| fail "the kept clip was not matched, so it read the wrong slot: $output"
+}
+
 # --- the grade golden ---------------------------------------------------------
-# tests/grade-parity.py compares the Bench against ffmpeg's own output, recorded once in
-# tests/fixtures/grade-golden.json so the comparison runs without ffmpeg. That makes the golden a
-# claim about a chain, and a claim about a chain goes stale the moment the chain moves.
+# tests/grade-parity.py records ffmpeg's own output in tests/fixtures/grade-golden.json, and
+# LiveGradeTests holds Swift's model to it. That makes the golden a claim about a chain, and a claim
+# about a chain goes stale the moment the chain moves. It used to hold the browser Bench's
+# JavaScript to the same numbers; the Bench is gone and the golden outlived it.
 #
-# These two guards are the cheap half of that: they need neither node nor ffmpeg, so they run
-# everywhere the suite runs, and they fail by name rather than leaving the harness to discover it.
+# These two guards are the cheap half of that: they need no ffmpeg, so they run everywhere the suite
+# runs, and they fail by name rather than leaving the harness to discover it.
 
 @test "the grade golden still describes the chain in lib.sh" {
 	# By CONTENT, never mtime: git does not preserve mtime, so on a fresh clone the committed
@@ -1858,7 +2036,15 @@ PY
 	# It is also the fixture the app's own tests read, so they need no ffmpeg and no footage.
 	local fixture="$BATS_TEST_DIRNAME/fixtures/events.jsonl" now
 	[ -f "$fixture" ] || fail "no recorded stream at $fixture"
-	now="$("$BATS_TEST_DIRNAME/make-event-fixture.sh" --check)" || skip "fixture generator skipped"
+	# SKIP ONLY ON 3, which is the generator's documented "no ffmpeg". A bare `|| skip` swallowed
+	# every other failure as a pass, and it hid a real one: the generator's own clips were 1:2, so
+	# once a deliverable became an aspect its two-clip run was refused, the generator exited 1, and
+	# this test reported a skip instead of the broken contract it exists to catch. A missing tool is
+	# a skip; a generator that fails is a failure.
+	local rc=0
+	now="$("$BATS_TEST_DIRNAME/make-event-fixture.sh" --check)" || rc=$?
+	[ "$rc" -ne 3 ] || skip "ffmpeg not installed"
+	[ "$rc" -eq 0 ] || fail "the fixture generator failed (exit $rc): $now"
 	if [ "$now" != "$(cat "$fixture")" ]; then
 		printf 'recorded:\n%s\nnow:\n%s\n' "$(cat "$fixture")" "$now"
 		fail "the event stream changed. If that was intended, re-run tests/make-event-fixture.sh and say in the commit what moved."

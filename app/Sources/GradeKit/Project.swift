@@ -44,13 +44,48 @@ public struct Project: Equatable {
     }
 
     public struct Delivery: Equatable {
-        public var reels: Bool
-        public var feed: Bool
+        /// What to render, in render order. Order is preserved because it is the order the engine
+        /// works through, and a person watching a queue should see what they asked for first.
+        public var targets: [Deliverable]
         public var height: Int
         /// Nil keeps the source's rate, which is the only lossless answer.
         public var fps: Int?
-        public init(reels: Bool = true, feed: Bool = false, height: Int = 1920, fps: Int? = nil) {
-            self.reels = reels; self.feed = feed; self.height = height; self.fps = fps
+        public init(targets: [Deliverable] = [.reels], height: Int = 1920, fps: Int? = nil) {
+            self.targets = targets; self.height = height; self.fps = fps
+        }
+
+        /// Whether anything selected needs a crop offset picked before a render can start.
+        public var anyTargetCrops: Bool { targets.contains { $0.cropsPortraitMaster } }
+
+        /// The shapes that crop, for a refusal that names them rather than saying "one of these".
+        public var croppingTargets: [Deliverable] { targets.filter { $0.cropsPortraitMaster } }
+
+        public func isSelected(_ deliverable: Deliverable) -> Bool {
+            targets.contains(deliverable)
+        }
+
+        /// Ticking and unticking a shape.
+        ///
+        /// A SELECTED PRESET LANDS IN PRESET ORDER, not at the end of the list. Appending would
+        /// make the render order depend on the order the boxes happened to be clicked, so
+        /// unticking reels and ticking it again would quietly move it behind feed — and the order
+        /// is what the queue shows and what the engine works through. Shapes that are not presets
+        /// keep their own order after them; nothing here can reorder them.
+        public mutating func setTarget(_ deliverable: Deliverable, selected: Bool) {
+            guard selected else {
+                targets.removeAll { $0 == deliverable }
+                return
+            }
+            guard !targets.contains(deliverable) else { return }
+            guard let rank = Deliverable.presets.firstIndex(of: deliverable) else {
+                targets.append(deliverable)
+                return
+            }
+            let insertAt = targets.firstIndex {
+                guard let other = Deliverable.presets.firstIndex(of: $0) else { return true }
+                return other > rank
+            } ?? targets.count
+            targets.insert(deliverable, at: insertAt)
         }
     }
 
@@ -82,14 +117,21 @@ public struct Project: Equatable {
     /// them from the engine's refusal, which is the same rule the engine follows itself.
     public enum Blocker: Equatable, CustomStringConvertible {
         case noActivePreset(String)
-        case feedWithoutCropOffset([String])
+        /// Which shapes crop, and which clips have not been framed for them yet. The deliverables
+        /// are carried as well as the clips because the set is open now: "the 4:5 crop" was a
+        /// complete description when there were two shapes and is not one when there are any.
+        case cropWithoutOffset(deliverables: [Deliverable], clips: [String])
 
         public var description: String {
             switch self {
             case .noActivePreset(let name):
                 return "no preset named \(name)"
-            case .feedWithoutCropOffset(let clips):
-                return "the 4:5 crop offset is a per-clip framing call, and \(clips.count) "
+            case .cropWithoutOffset(let deliverables, let clips):
+                // "a per-clip framing call" is load-bearing wording, not decoration: it is the
+                // whole reason this refusal exists rather than a default nobody saw.
+                let shapes = deliverables.map { "\($0.aspectWidth):\($0.aspectHeight)" }
+                    .joined(separator: " and ")
+                return "the \(shapes) crop offset is a per-clip framing call, and \(clips.count) "
                     + "clip(s) have none yet: \(clips.sorted().joined(separator: ", "))"
             }
         }
@@ -98,9 +140,12 @@ public struct Project: Equatable {
     public func blockers(for clipNames: [String]) -> [Blocker] {
         var found: [Blocker] = []
         if active == nil { found.append(.noActivePreset(activePreset)) }
-        if delivery.feed {
+        if delivery.anyTargetCrops {
             let undecided = clipNames.filter { clips[$0]?.cropOffset == nil }
-            if !undecided.isEmpty { found.append(.feedWithoutCropOffset(undecided)) }
+            if !undecided.isEmpty {
+                found.append(.cropWithoutOffset(deliverables: delivery.croppingTargets,
+                                                clips: undecided))
+            }
         }
         return found
     }
@@ -111,7 +156,9 @@ public struct Project: Equatable {
         var env: [String: String] = ["LOOK_FILE": lookFile.path]
         env["HEIGHT"] = String(delivery.height)
         if let fps = delivery.fps { env["FPS_OUT"] = String(fps) }
-        env["FEED"] = delivery.feed ? "1" : "0"
+        // The whole set, comma separated, in order. This was `FEED=1`, which could only ever say
+        // one thing about one shape.
+        env["DELIVERABLES"] = delivery.targets.map(\.spec).joined(separator: ",")
         if let offset = clips[clip]?.cropOffset { env["CROP_Y"] = String(offset) }
         env["STAB"] = (clips[clip]?.stabilise ?? true) ? "1" : "0"
         return env
@@ -119,6 +166,32 @@ public struct Project: Equatable {
 }
 
 // MARK: - On disk
+
+extension Project.Delivery {
+    /// The selected shapes out of a serialised `delivery` block.
+    ///
+    /// THE `reels`/`feed` BOOLEANS ARE STILL READ. Every project file written before the set was
+    /// opened up carries that pair and no `targets` array, and a reader that ignored them would
+    /// open such a project silently showing the default rather than what was saved — a delivery
+    /// someone chose, replaced by one nobody did. Dropped only when a `targets` array is present,
+    /// which is what this build writes.
+    static func targets(fromSerialised d: [String: Any]) -> [Deliverable] {
+        if let raw = d["targets"] as? [[String: Any]] {
+            let parsed: [Deliverable] = raw.compactMap {
+                guard let name = $0["name"] as? String,
+                      let w = ($0["aspect_width"] as? NSNumber)?.intValue,
+                      let h = ($0["aspect_height"] as? NSNumber)?.intValue,
+                      w > 0, h > 0 else { return nil }
+                return Deliverable(name: name, aspectWidth: w, aspectHeight: h)
+            }
+            return parsed
+        }
+        var legacy: [Deliverable] = []
+        if (d["reels"] as? NSNumber)?.boolValue ?? true { legacy.append(.reels) }
+        if (d["feed"] as? NSNumber)?.boolValue ?? false { legacy.append(.feed) }
+        return legacy
+    }
+}
 
 extension Project {
     public func serialised() throws -> Data {
@@ -146,7 +219,11 @@ extension Project {
             "presets": presetList,
             "active_preset": activePreset,
             "delivery": [
-                "reels": delivery.reels, "feed": delivery.feed, "height": delivery.height,
+                "targets": delivery.targets.map {
+                    ["name": $0.name, "aspect_width": $0.aspectWidth,
+                     "aspect_height": $0.aspectHeight]
+                },
+                "height": delivery.height,
             ],
             "clips": clipMap,
         ]
@@ -171,6 +248,7 @@ extension Project {
             loaded.append(Preset(name: name, look: look))
         }
         let d = root["delivery"] as? [String: Any] ?? [:]
+        let targets = Delivery.targets(fromSerialised: d)
         var clipMap: [String: ClipSettings] = [:]
         for (name, raw) in (root["clips"] as? [String: [String: Any]] ?? [:]) {
             var override: Look?
@@ -185,8 +263,7 @@ extension Project {
         }
         self.init(presets: loaded,
                   activePreset: root["active_preset"] as? String ?? loaded.first?.name ?? "",
-                  delivery: Delivery(reels: (d["reels"] as? NSNumber)?.boolValue ?? true,
-                                     feed: (d["feed"] as? NSNumber)?.boolValue ?? false,
+                  delivery: Delivery(targets: targets,
                                      height: (d["height"] as? NSNumber)?.intValue ?? 1920,
                                      fps: (d["fps"] as? NSNumber)?.intValue),
                   clips: clipMap,

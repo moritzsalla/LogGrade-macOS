@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import GradeKit
 
-/// The live grade against the same oracle the browser bench is measured against: ffmpeg's own
+/// The live grade against the oracle: ffmpeg's own
 /// output over the committed probe. This is the gate that makes a second implementation of the
 /// image allowable at all, so it reads the golden rather than restating tolerances of its own.
 final class LiveGradeTests: XCTestCase {
@@ -73,8 +73,13 @@ final class LiveGradeTests: XCTestCase {
                 worst = max(worst, abs(got.1 - want.1))
                 worst = max(worst, abs(got.2 - want.2))
             }
-            // The SAME tolerance the JavaScript is held to: both model the same renderer, so a
-            // separate allowance for this one would be a way of not noticing it is worse.
+            // A CEILING CARRIED FORWARD, not a measurement of this code. The per-case tolerances
+            // were measured against the browser Bench's JavaScript, which modelled the same
+            // renderer; the Bench is gone and `--regenerate` now copies the numbers rather than
+            // recomputing them, saying so loudly. That is what makes this a regression gate: the
+            // ceiling is fixed, so a chain change that widens the real divergence turns this red.
+            // What it cannot do is LOWER the ceiling when a change is meant to move it — see
+            // docs/BACKLOG.md.
             XCTAssertLessThanOrEqual(worst, tolerance + margin,
                                      "\(name): \(worst) code values against \(tolerance)")
             checked += 1

@@ -31,9 +31,11 @@ being worked on.
 _Avoid_: temp files, working files, cache, "the ProRes masters" (a baseline is not a master)
 
 **Deliverable**:
-A named delivery format at a fixed frame size. Two exist: **Reels/Stories** (9:16) and **Feed**
-(4:5).
-_Avoid_: format, aspect, cut, version, crop
+A named shape to deliver in: a name, an aspect, and an optional crop offset, resolved by
+`deliverable_spec`. Two ship as presets — **Reels/Stories** (9:16) and **Feed** (4:5) — and the set
+is open: `DELIVERABLES` takes any `name:aspect-w:aspect-h`. It is a *shape*, not a size; the height
+follows the aspect off the shared delivery width. See ADR 0010.
+_Avoid_: format, aspect, cut, version, crop; also "the two deliverables", which was true and is not
 
 **Final**:
 The delivered H.264 file for one clip in one deliverable.
@@ -107,8 +109,7 @@ _Avoid_: **target** — a spec is a place to measure from, not a number to hit; 
 ground truth
 
 **Sampler**:
-A probe placed over a reference in the Bench. Its position is per-shoot: a plate or a sign is
-wherever it is.
+A probe placed over a reference. Its position is per-shoot: a plate or a sign is wherever it is.
 _Avoid_: picker, eyedropper, probe, point
 
 **Patch**:
@@ -136,8 +137,10 @@ channels harder than the high one, so signage glows. The reason the tone stage i
 _Avoid_: oversaturated, clipped
 
 **Squashed**:
-A landscape clip scaled into a vertical frame with no error and no warning. The batch failure
-that produces files which all look done.
+A clip scaled into a frame of another shape with no error and no warning. The batch failure that
+produces files which all look done. `require_portrait` catches the landscape-into-vertical case;
+since ADR 0010 a source that is merely the wrong aspect is cropped to the deliverable's shape
+rather than stretched into it.
 _Avoid_: stretched, wrong aspect
 
 **Engine**:
@@ -147,13 +150,14 @@ _Avoid_: backend, core, the scripts
 
 ## Working
 
-**Grade Bench** (the Bench):
-The browser tool where the grade is decided by eye, with every reference read live beside the
-picture.
-_Avoid_: grader — in this trade a grader is a person; also workbench, the tool, the artifact
+**Grade Bench** (the Bench): _retired._
+The browser tool where the grade used to be decided by eye. The app replaced it and `bench/` was
+deleted; the substance survived, since the grade is still judged against references in frame and
+still leaves as `look.json`. See ADR 0007. Kept here only so the phrase is recognisable in old
+notes — as with **Rotation class** below, this file is right and any surviving mention is wrong.
 
 **Grading session**:
-One sitting at the Bench over one clip's frames, ending in a grade sent back.
+One sitting at the app over one clip's frames, ending in a grade saved to `look.json`.
 _Avoid_: round trip, review
 
 **Rotation class**: _retired._
