@@ -39,7 +39,7 @@ Every hand-rolled alternative tried during development measured worse.
 The LogToLin LUT is what makes the scene-linear route possible (log -> linear ->
 filmic tone map -> Rec.709). That route is implemented in
 scripts/make-filmic-lut.py but is NOT what ships — see docs/PIPELINE.md,
-"Approach A", for why it lost to the simpler path.
+"Tried and rejected", for why it lost to the simpler path.
 
 Licence / redistribution — NOT IN THIS REPO
 -------------------------------------------
@@ -64,4 +64,4 @@ AppleLogToRec709-v1.0.cube is NOT. Apple Log decodes to linear values up to 12.0
 diffuse white, about 3.6 stops above it — and a Rec.709 display tops out at diffuse white, so that
 cube contains a display rendering — a tone map and gamut handling — which Apple has not published. That is a sharper statement of why the from-scratch route
 lost than "the transfer function is proprietary", and it is the reason nothing here should try to
-replace that cube. See docs/adr/0002_KEEP_APPLES_CST.md.
+replace that cube.

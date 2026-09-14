@@ -1,104 +1,58 @@
 # Backlog
 
-Everything raised and not finished. Ordered by what blocks what, not by size. Finished work is not
-kept here: its reasoning lives in the ADR or commit that did it.
+Open work only. Finished work lives in git.
 
-Most entries were inherited from the precursor and written about its one shoot; `PROVENANCE.md`
-says what came across. The universal-app work has its own plan in `docs/UNIVERSAL_APP_PLAN.md`.
-
-## The point of the app
-
-Give iPhone Apple Log footage an incredible look, very easily. Today it takes lots of input and still
-doesn't look good. Judge every entry below by that, and by whether a non-technical photographer
-could use the result.
+**The point of the app:** give iPhone Apple Log footage an incredible look, very easily. Today it
+takes lots of input and still doesn't look good. Judge entries by that, and by whether a
+non-technical photographer could use the result.
 
 ## Next, in order
 
-**1. The look, judged against the partner's analog scans.** The Portra LUT is a coarse community
-emulation, so matching it means nothing; the reference is the partner's scanned film work. Needs a
-few scans and iPhone clips of similar scenes. Measure tone, colour and grain against the scans; the
-user judges by eye. ADR 0014 allows the default image to move (`tests/render-golden.sh --regenerate
-"<why>"`). The v4 sign-off and the grain strength below are part of this.
-
-**2. The universal app (#10)**, so the partner can run it on the Apple silicon Mac.
-`docs/UNIVERSAL_APP_PLAN.md`.
-
-**3. Landscape footage.** Must work; this reverses ADR 0005's portrait-only rule. Keep its
-underlying guard: never silently squash landscape into a portrait deliverable. Unblocks 2D crop.
-
-**4. Every film stage switchable off**, down to a plain Apple-CST colour-corrected export. Check what
-is already possible before building.
+1. **The look, judged against the partner's analog scans**, not the Portra LUT (a coarse community
+   emulation). Needs scans and iPhone clips of similar scenes. Measure tone, colour and grain against
+   them, and the user judges by eye. The default image may move (`render-golden.sh --regenerate`).
+   This includes the unsigned v4 look and the grain strength (8, never judged by eye).
+2. **Verify the universal app on the Apple silicon Mac** (built in #10). Launch shows Kind: Apple for
+   LogGrade and ffmpeg; one render with stabilisation; how far it differs from this Mac's render
+   (arm64 ffmpeg is OSXExperts 9.0, x86 is evermeet 9.0.1); jq 1.8.2 (minos 14) runs if that Mac is
+   on macOS 13. `docs/UNIVERSAL_APP_PLAN.md`.
+3. **Landscape footage.** Reverses the portrait-only guard; still never squash. Unblocks 2D crop.
+4. **Every film stage switchable off,** down to a plain CST export. Check what already works first.
 
 ## The app, as it feels to use
 
-**An auto button.** One press gives a good starting grade for the clip, so most clips need no input.
-
-**Sliders must feel instant on the Intel Mac.** The controls currently wait on the preview: the UI
-feels coupled to how fast a frame grades. The slider has to move immediately and the picture follow
-when it can (optimistic UI).
-
-**Export is slow on the Intel Mac.** Measure where the time goes before choosing a fix.
-
-**Sort the control sections in a logical order.** Currently not in the order someone grading thinks.
-
-**Remove the time-progression UI next to the control sections.** The user finds it weird and has no
-use for it.
-
-**Question the print stage in the interface.** The user does not see why they would add a print look
-to video footage. Either explain it in plain words or hide it; the engine keeps it.
-
-**Replace the startup screen with a brief splash.** Like Photoshop's: show the licence for a moment,
-then the normal window. Not a separate upload screen.
-
-**Short, plain labels and help text.** Many labels are still long and quirky. Help text must be
-understandable by anyone, not only by someone who knows grading.
-
-## Needs an eye
-
-**Sign off the v4 look.** The proof carries four changes on top of the approved grade: black point
-0.015 → 0.025 with gamma 2.09 → 2.02 (shadow detail), stabilisation, chroma-only denoise for the
-sign shimmer, and clustered grain moved after the sharpener. The whole shoot has been rendered
-against it, so judge it on those renders.
+- **An auto button:** one press gives a good starting grade.
+- **Sliders feel instant on the Intel Mac.** The UI currently waits on the preview; the slider
+  should move immediately and the picture follow (optimistic UI).
+- **Export is slow on the Intel Mac.** Measure where the time goes first.
+- **Control sections in a logical order.**
+- **Remove the time-progression UI** next to the control sections.
+- **The print stage:** the user doesn't see why to add a print look to video. Explain it plainly or
+  hide it; the engine keeps it.
+- **A brief splash instead of the startup screen,** like Photoshop's licence splash.
+- **Short, plain labels and help text** anyone understands.
 
 ## Open work
 
-**Judge the grain strength by eye.** `grain.strength` is 8, a starting suggestion. The
-clustered-vs-per-pixel measurements are settled (`docs/PIPELINE.md`); the amplitude is the one
-number that wants an eye. Override with `GRAIN_STRENGTH=n`.
-
-**Sharpen and grain at other frame sizes.** The sharpener's radius follows output height and its
-amount does not; the grain was sized at 1080. Both are assumptions, stated as such in
-`delivery_image_chain`, the README and `USAGE.md`. Deliverables as data made other sizes reachable.
-A MEASUREMENT task: render one clip at several heights and look.
-
-**An editor for arbitrary deliverable shapes in the app.** The engine and project file carry any
-shape; the app toggles `Deliverable.presets` and lists anything else read-only.
-
-**Audio.** Measured clean — PCM stereo, unclipped, 24 dB crest, real L/R decorrelation (0.54), never
-lossy. Available: a 60–80 Hz high-pass for the rumble that is currently the loudest thing in the
-file, and a separate ambience recording (phone set down) for street detail handheld capture misses.
-
-**Two-dimensional crop geometry — follows landscape footage (Next, 3).** `crop_prefix` always
-takes the full source width at x=0, because with portrait-only ingest there is no horizontal
-freedom. Once landscape sources are accepted, a 2D picker has something behind it.
-
-**Three defaults kept only for the precursor's sake (ADR 0014).** Decide on the merits: ADR 0011's
-`MATCH=1` default; the exposure probe's inherited, unmeasured `-ss 1` and `scale=320:-1`; the
-stabiliser's `unsharp=5:5:0.2`.
+- **Judge sharpen and grain at other heights by eye.** Measured (`docs/PIPELINE.md`, sheets in
+  `dist/measure-sizes/`). Grain stays ~1 output px, so it is 1.7× coarser relative to the picture at
+  960 than at 1920.
+- **Rename "look" where it means the whole grade.** `look.json`, `grade.sh` and `LOOK_FILE` say look;
+  CONTEXT.md defines look as the film LUT. Built into file and variable names, so a rename.
+- **Audio:** a separate ambience recording for street detail handheld capture misses.
+- **Optional: tighten the parity ceilings.** A dry-run remeasure found seven loose by 0.1–0.9 code
+  values and `extreme` 0.25 above its ceiling (inside the margin).
+  `tests/grade-parity.py --remeasure "<why>"`.
+- **2D crop geometry**, once landscape is accepted.
+- **Defaults kept only for the precursor's sake** (ADR 0014): `MATCH=1`, the probe's `-ss 1` and
+  `scale=320:-1`, and the stabiliser's `unsharp=5:5:0.2`.
 
 ## Considered and declined
 
-Kept here so they are not re-litigated from scratch.
-
-- **A better Portra LUT.** Every freely reachable one is the same coarse 13³ G'MIC grid. The
-  reference is now the partner's scans instead (Next, 1), not a better copy of this LUT. The
-  print-film emulation this once called out of reach was not: the same source has Kodak 2383 for
-  Rec.709. It is the `print` stage; see `luts/print/SOURCE.txt`.
-- **The scene-linear filmic route.** Architecturally correct, lost on colour. ADR 0002.
-- **Collapsing the tone curve and trims into the shared cube** (the OpenColorIO shape). Flattening
-  stages onto one grid cost 55 code values against 48 for sampling in sequence, because the film
-  look's grid is only 13 points. Deleting the Bench already relieved most of the pressure.
-- **Rewriting the render natively** in AVFoundation or Core Image. ADR 0008: the framework
-  colour-matches every pixel and would reintroduce *bleached*, `h264_videotoolbox` has no CRF, and
-  the chain's measured failures do not transfer.
-- **Python linting.** A handful of small generator scripts. Run `ruff` once if it bothers you.
+- **A better Portra LUT.** Every free one is the same 13³ G'MIC grid; the scans are the reference
+  instead. Kodak 2383 is the `print` stage (`luts/print/SOURCE.txt`).
+- **The filmic route.** It lost on colour (`docs/PIPELINE.md`).
+- **Collapsing tone and trims into the shared cube.** 55 code values of error against 48 sampled in
+  sequence, because the look's grid is 13 points.
+- **A native render in AVFoundation.** ADR 0008.
+- **Python linting.** Run `ruff` once if it bothers you.

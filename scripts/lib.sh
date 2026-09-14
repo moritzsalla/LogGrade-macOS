@@ -1070,9 +1070,8 @@ load_delivery_look() {
 # channels harder than its high one, so saturated things get more saturated — the traffic signage
 # went visibly neon long before it was measured. Curving luma and merging the ORIGINAL chroma back
 # gives the same tone with colour untouched. `0x001112` = plane 0 from input 0 (the toned luma),
-# planes 1 and 2 from input 1. Measurements in docs/PIPELINE.md, "The fix: apply the tone curve to
-# LUMA ONLY"; the consequences are ADR 0003, including why the brick's lost saturation must NOT be
-# won back with a uniform boost.
+# planes 1 and 2 from input 1. Measurements and consequences in ADR 0003; why the lost saturation
+# must NOT be won back with a uniform boost is in docs/PIPELINE.md, "Tried and rejected".
 #
 # `format=yuv444p10le` ON BOTH BRANCHES is required, not decoration: mergeplanes needs matching
 # plane dimensions and 4:2:2 chroma is half width, so without it the graph dies on a bare
@@ -1364,8 +1363,8 @@ render_deliverable() {  # render_deliverable <final-out> <label> <input> <w> <h>
 # WHY THIS EXISTS. `ffmpeg -y` pointed straight at the delivery path TRUNCATES the existing file
 # before it knows whether the filter graph even initialises. Measured: an approved mp4 re-rendered
 # with a graph that fails at init was left at 0 bytes, ffmpeg exiting 234. require_nonempty then
-# reports the failure loudly — but the approved deliverable is already gone, and per
-# docs/adr/0004 getting it back means regenerating the baseline and the master first.
+# reports the failure loudly — but the approved deliverable is already gone, and getting it back
+# means regenerating the baseline and the master first.
 #
 # This is the same incident this file's header describes for the retag remux, and the same staging
 # 00-stabilise-detect.sh uses for its .trf. The render path was the only one without it.

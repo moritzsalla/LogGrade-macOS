@@ -16,7 +16,7 @@ WHO READS THE GOLDEN, AND WHY THE COMPARISON IS NOT HERE ANY MORE
 It used to be the browser Bench, whose page reimplemented the grade in JavaScript, and this
 file ran that JavaScript under node and compared it against the cases below. The Bench is gone —
 the Mac app's inspector replaced it, and app/Sources/GradeKit/Scopes.swift carries the same RAL
-references its samplers did. docs/adr/0007 records that decision.
+references its samplers did.
 
 So the per-pixel comparison lives in app/Tests/GradeKitTests/LiveGradeTests.swift, which reads this
 same golden and holds Swift's `LiveGrade` to the numbers in it. Removing the Bench took the tone
