@@ -1,5 +1,6 @@
 #!/bin/bash
-# Stage 2: baseline -> graded master (look LUT + tone curve + colour, i.e. the whole grade).
+# Stage 2: baseline -> master (look + print + tone + colour trims; Grade without correction and
+# halation, which this path refuses — see below).
 # Usage: ./02-grade.sh IMG_XXXX
 # Reads dist/01-baseline/<clip>_baseline.mov, writes dist/02-graded/<clip>_graded.mov.
 #
@@ -7,15 +8,17 @@
 # ("milky"): nothing reaches black and the whole frame sits ~25% too high. shipped.cube fixes that.
 # Don't drop it thinking it's redundant — see docs/PIPELINE.md, "Tone shaping".
 #
-# The graph itself is grade_chain in lib.sh, shared with grade.sh so a look cannot move on one
+# The graph itself is grade_chain in lib.sh, shared with grade.sh so a grade cannot move on one
 # path and not the other. Its header carries the reasoning — luma-only tone, and why both branches
 # must be yuv444p10le. This stage adds only the ProRes encode: no CST (stage 01 did it) and no
 # setparams (nothing downstream here negotiates a colourspace).
 #
-# The saturation and warmth below are a CREATIVE choice made by eye, not a correction. Measured against the standardised colours in frame, the Apple CST's own colour is
-# already accurate (traffic blue lands at B/G 1.99 against a 1.98 spec with nothing applied). The
-# values here deliberately depart from that. Change them because the look should change, never
-# because a reading looks "wrong" — being off-spec here is the intent.
+# The saturation and warmth trims are a CREATIVE choice made by eye, not colour correction.
+# Measured against the standardised colours in frame, the Apple CST's own colour is already
+# accurate (traffic blue lands at B/G 1.99 against a 1.98 spec with nothing applied). They
+# deliberately depart from that. Change them because the grade should change, never because a
+# reading looks "wrong" — being off-spec here is the intent. See the comment above load_grade_look
+# for where the values live.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -35,7 +38,7 @@ TONE="$ROOT/luts/tone/shipped.cube"
 #
 # THE NUMBERS ARE NOT HERE. They live in look.json, and ensure_tone_lut below regenerates
 # shipped.cube from it whenever the two disagree. This header used to carry its own copy of all six
-# tone values plus a regenerate command whose path pointed outside the repo — two copies of a look,
+# tone values plus a regenerate command whose path pointed outside the repo — two copies of a grade,
 # which is the drift look.json exists to end.
 #
 # Worth keeping from that copy: `toe` was measured to do NOTHING at pivot 0.39 — identical
