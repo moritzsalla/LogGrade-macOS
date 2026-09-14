@@ -491,6 +491,18 @@ ffprobe -v error -select_streams v:0 -show_entries stream_side_data=rotation -of
 **Check two renders actually differ** before concluding a parameter had no effect — `md5` the raw
 output. That is how `-sws_dither ed` was shown to be a no-op.
 
+**What a filter costs** — compare CPU time, never wall clock:
+
+```bash
+ffmpeg -benchmark -threads 1 -filter_threads 1 -filter_complex_threads 1 \
+  -i FILE -frames:v 24 -vf "SOMEFILTER" -f null - 2>&1 | grep -oE "utime=[0-9.]+s"
+```
+
+This Intel laptop throttles under sustained load, so the same wall-clock benchmark repeated
+minutes apart disagreed badly enough that runs had to wait out a cool-down. Single-threaded `utime`
+does not depend on how hot the machine is or on what else is running, so it is the number to
+compare. It measures cost, not speed: multiply back up only when a real render's duration matters.
+
 ## "no path between colorspaces" — an untagged branch poisons the whole graph
 
 `zscale` must know the space it is converting FROM. If any frame reaching it carries no colour

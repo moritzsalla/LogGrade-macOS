@@ -108,6 +108,23 @@ public struct Project: Equatable {
 
     public var active: Preset? { presets.first { $0.name == activePreset } }
 
+    /// Keeps a grade under a name and makes it the active preset. A new name adds one; an existing
+    /// name replaces it, which is how you save over a preset you have been adjusting. A blank name
+    /// is ignored.
+    ///
+    /// Here rather than in the app's model because the model's target cannot be imported by the
+    /// tests: the test for this rule used to re-implement it inline and so tested nothing.
+    public mutating func savePreset(named name: String, look: Look) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        if let index = presets.firstIndex(where: { $0.name == trimmed }) {
+            presets[index] = .init(name: trimmed, look: look)
+        } else {
+            presets.append(.init(name: trimmed, look: look))
+        }
+        activePreset = trimmed
+    }
+
     /// The look a clip renders with: its own departure, or the project's preset.
     public func look(for clip: String) -> Look? {
         clips[clip]?.lookOverride ?? active?.look

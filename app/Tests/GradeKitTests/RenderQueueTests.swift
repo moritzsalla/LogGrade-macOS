@@ -113,15 +113,23 @@ final class RenderQueueTests: XCTestCase {
         let pidFile = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("\(UUID().uuidString).pid")
         // The pid written is the GRANDCHILD's: shell, subshell, sleep. That is the shape that
-        // matters, because ffmpeg sits at the same depth once a subshell is involved, and killing
-        // only direct children leaves it running. `$!` rather than `$BASHPID`, which does not
-        // exist in the bash 3.2 macOS ships — the trap this project keeps finding.
+        // matters, because ffmpeg sits at the same depth once a subshell is involved. `$!` rather
+        // than `$BASHPID`, which does not exist in the bash 3.2 macOS ships.
+        //
+        // AND IT LEAVES THE PROCESS GROUP. Foundation starts the engine as the leader of its own
+        // group and `Process.terminate()` signals that whole group, so a grandchild that stays in
+        // it dies with no help from `EngineRun.stop`'s walk of descendants. Written that way, this
+        // test stayed green with the walk replaced by a no-op. `setpgrp` puts the grandchild where
+        // only the walk can reach it, which is the case the walk exists for.
         let engine = try stubEngine(script: """
         #!/bin/bash
-        ( sleep 30 & echo $! > "\(pidFile.path)"; wait ) &
+        ( perl -e 'setpgrp(0, 0); exec "sleep", "30"' & echo $! > "\(pidFile.path)"; wait ) &
         wait
         """)
+        var pid: Int32 = 0
         defer {
+            // A failure here would otherwise leave a sleep running for thirty seconds.
+            if pid > 0 { kill(pid, SIGKILL) }
             try? FileManager.default.removeItem(at: engine.root)
             try? FileManager.default.removeItem(at: pidFile)
         }
@@ -133,22 +141,28 @@ final class RenderQueueTests: XCTestCase {
             queue.start(environment: { _ in [:] })
             finished.fulfill()
         }
-        let started = expectation(description: "child started")
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) { started.fulfill() }
-        wait(for: [started], timeout: 10)
-
-        let pid = Int32(try String(contentsOf: pidFile, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        // POLLED, not a fixed wait. It was 1.5 seconds, which held when the suite ran serially and
+        // failed under `swift test --parallel`: with the render tests starting at the same moment,
+        // the stub had not written its pid yet and the read threw before the cancel was reached.
+        let deadline = Date().addingTimeInterval(15)
+        while pid == 0 && Date() < deadline {
+            pid = (try? String(contentsOf: pidFile, encoding: .utf8))
+                .flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+            if pid == 0 { Thread.sleep(forTimeInterval: 0.05) }
+        }
         XCTAssertGreaterThan(pid, 0, "the stub engine never reported a child")
         XCTAssertEqual(kill(pid, 0), 0, "the child was not running before the cancel")
 
         queue.cancel()
         wait(for: [finished], timeout: 15)
-        let settle = expectation(description: "settle")
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) { settle.fulfill() }
-        wait(for: [settle], timeout: 10)
+        // Polled too: SIGTERM is asynchronous, but five seconds is far past any honest delivery.
+        let gone = Date().addingTimeInterval(5)
+        while kill(pid, 0) == 0 && Date() < gone { Thread.sleep(forTimeInterval: 0.05) }
 
-        XCTAssertNotEqual(kill(pid, 0), 0, "the child outlived the cancel")
+        let survived = kill(pid, 0) == 0
+        XCTAssertFalse(survived, "the child outlived the cancel")
+        // Forget a pid that is already gone, so the cleanup cannot signal whatever reuses it.
+        if !survived { pid = 0 }
     }
 
     func testSweepingLeavesNoStagingFileBehind() throws {

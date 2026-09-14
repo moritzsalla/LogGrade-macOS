@@ -390,17 +390,9 @@ final class GradeModel: ObservableObject {
         renderPreview()
     }
 
-    /// Keeps the current grade under a name. A new name adds one; an existing name replaces it,
-    /// which is how you save over a preset you have been adjusting.
+    /// Keeps the current grade under a name. The rule is `Project.savePreset`, where it is tested.
     func savePreset(named name: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        if let index = project.presets.firstIndex(where: { $0.name == trimmed }) {
-            project.presets[index] = .init(name: trimmed, look: look)
-        } else {
-            project.presets.append(.init(name: trimmed, look: look))
-        }
-        project.activePreset = trimmed
+        project.savePreset(named: name, look: look)
     }
 
     /// The grade differs from the preset it came from. Worth showing: an unsaved adjustment that

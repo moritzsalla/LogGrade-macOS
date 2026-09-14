@@ -63,9 +63,13 @@ final class ClipListTests: XCTestCase {
         // generator and not the contract — so when a fourth place to add clips forgot to make that
         // second call, every clip imported through it showed a black rectangle and the suite
         // stayed green.
-        let loaded = expectation(description: "thumbnail")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { loaded.fulfill() }
-        wait(for: [loaded], timeout: 10)
+        //
+        // POLLED on the main run loop, where the thumbnail lands. A fixed six-second wait made this
+        // the fifth most expensive test in the suite when the frame arrives in about one.
+        let deadline = Date().addingTimeInterval(15)
+        while list.entries[0].thumbnail == nil && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
         let image = list.entries[0].thumbnail
         XCTAssertNotNil(image, "no frame came back")
         if let image {

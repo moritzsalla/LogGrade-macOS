@@ -10,14 +10,25 @@ what you measure against and depart from deliberately, and a *baseline* is not a
 ## Run this before trusting any change
 
 ```sh
-./scripts/check.sh        # shellcheck, grade parity, the bats suite
+./scripts/check.sh          # everything: shellcheck, grade parity, Swift, bats — before a commit
+./scripts/check.sh --fast   # leaves out the renders and app builds — while iterating
 ```
+
+`--fast` is not a pass for a commit, and it says what it skipped. Both runs are parallel; the
+timings, and why the full run stays the default, are in `docs/adr/0013`. A new bats test that
+renders real footage or builds the app gets `# bats test_tags=slow`; one that writes outside
+`$BATS_TEST_TMPDIR` gets `serial`. The top of `tests/lib.bats` says why. **Wait for a condition,
+never a duration:** a fixed 1.5s sleep held serially and failed the first parallel run.
 
 A **missing tool now fails the run** rather than skipping quietly. This command used to exit 0
 having run only bats, so "green" could mean "linted nothing and never compared the curves". Use
 `--allow-skips` to accept a partial run on purpose. Don't write the test count down anywhere: it is
 printed, and a number in prose goes stale by construction — the README said 20 while the suite said
 42.
+
+`--conformance` renders through this fork and the frozen precursor, so it costs minutes. Run it
+**once, before merging a change to the chain** — not after every edit on the way there. It answers
+"did the image move", which only the finished change can.
 
 **shellcheck and bats are not substitutes for each other.** shellcheck reported ZERO issues in
 scripts that contained two shipped, load-bearing bugs. bats found both, because it runs the code on
@@ -102,6 +113,10 @@ single-line ffprobe answer without checking what it actually printed.
   passed against a *removed* guard before this was done, and two more passed against a removed
   guard again afterwards for the `[[ ]]` reason above. Apply the mutation and *verify it applied* —
   a `perl -0pi -e` whose pattern silently fails to match proves nothing, and looked like a pass.
+  **Run only the covering test against the mutation** — `bats -f '<test name>' tests/` or
+  `swift test --package-path app --filter <Class>`. The suite takes minutes on this machine, and
+  running all of it per mutation is where much of a session's waiting went. The full run is the
+  final check, once, after the mutations are reverted.
 - **The production filter graph needs a real render.** shellcheck cannot see inside a filter
   string, the parity check touches only the tone curve, and a `DRY=1` run never builds the graph.
   `PROOF=<seconds>` renders through the identical chain, which is what the suite uses.
