@@ -38,6 +38,14 @@ public struct CropGeometry: Equatable {
 
     public var maximumOffset: Int { max(0, sourceHeight - windowHeight) }
 
+    /// Where the engine puts a `centre` window: half the slack, rounded down to even. A copy of
+    /// `crop_prefix` in scripts/lib.sh, held to it by `CropGeometryTests` on an odd slack, because
+    /// a box drawn a row off the render is the crop that lies.
+    public var centreOffset: Int {
+        let y = maximumOffset / 2
+        return y - y % 2
+    }
+
     public func clamp(_ offset: Int) -> Int { min(maximumOffset, max(0, offset)) }
 
     public func isValid(_ offset: Int) -> Bool { offset >= 0 && offset <= maximumOffset }

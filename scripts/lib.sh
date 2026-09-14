@@ -763,8 +763,21 @@ deliverable_spec() {  # deliverable_spec <spec>  -> "<name> <aw> <ah> <offset|->
 	# The name reaches a path component and the deliverable label in the event stream, so it goes
 	# through the same guard a clip name does rather than a weaker one written here.
 	name="$(require_clip_name "$name")" || return 1
-	case "$aw$ah" in
-		''|*[!0-9]*)
+	# Whitespace is refused HERE and not in require_clip_name, because the hazard is this
+	# function's own output: every caller `read`s it whitespace-delimited, so `a b:1:1` resolved
+	# with status 0 and came back as name `a`, aspect `b`. A clip name never passes through that
+	# line, and refusing a space in one would break clips that render today.
+	case "$name" in
+		*[[:space:]]*)
+			echo "REFUSING: deliverable name '$name' contains whitespace." >&2
+			echo "  The resolved spec is read as space-separated fields, so it would split." >&2
+			return 1;;
+	esac
+	# Each term on its own, not "$aw$ah": concatenated, `x::1` read as the valid-looking `1`, and
+	# the empty term then failed the `-le` test below by erroring, which `if` reads as false. It
+	# resolved with status 0 and an empty aspect.
+	case "$aw:$ah" in
+		:*|*:|*[!0-9:]*)
 			echo "REFUSING: deliverable '$name' has a non-integer aspect '${aw}:${ah}'." >&2
 			return 1;;
 	esac

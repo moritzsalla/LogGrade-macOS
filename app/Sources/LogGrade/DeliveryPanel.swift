@@ -11,8 +11,7 @@ import SwiftUI
 /// discovered from its exit code.
 struct DeliveryPanel: View {
     @ObservedObject var model: GradeModel
-    @State private var showEditor = false
-    @State private var editingDeliverable: Deliverable?
+    @State private var shapeEditor: ShapeEditorMode?
 
     private static let cropStepperPixels = 8
 
@@ -34,8 +33,8 @@ struct DeliveryPanel: View {
         }
         .padding(Space.l)
         .background(Palette.panel)
-        .sheet(isPresented: $showEditor) {
-            DeliverableEditor(project: $model.project, existingDeliverable: editingDeliverable)
+        .sheet(item: $shapeEditor) { mode in
+            DeliverableEditor(mode: mode) { model.saveShape($0, replacing: mode.original) }
         }
     }
 
@@ -53,52 +52,35 @@ struct DeliveryPanel: View {
         .foregroundColor(Palette.inkSecondary)
     }
 
-    // MARK: - Custom deliverable editor
-    // Shows custom deliverables loaded from the project file, with controls to edit or remove them.
-    @ViewBuilder private var customTargetsSection: some View {
-        if customTargets.isEmpty {
-            HStack(spacing: 8) {
-                Button(action: { showEditor = true }) {
-                    Label("Add shape", systemImage: "plus")
-                        .font(Type.label)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                Spacer()
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
+    // Shapes that are not presets have no checkbox: they exist only while selected, so removing
+    // one is unticking it. They were listed read-only before an editor existed, and are still
+    // listed rather than hidden, because a deliverable rendering with no visible reason reads as a
+    // bug in the renderer.
+    private var customTargetsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(customTargets, id: \.self) { deliverable in
                 HStack(spacing: 8) {
-                    Text("custom shapes").font(Type.label).foregroundColor(Palette.inkSecondary)
-                    Button(action: { showEditor = true }) {
-                        Label("Add", systemImage: "plus")
-                            .font(Type.label)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    Spacer()
-                }
-                ForEach(customTargets, id: \.self) { deliverable in
-                    HStack(spacing: 8) {
-                        Text(deliverable.spec)
-                            .font(Type.value)
-                            .foregroundColor(Palette.ink)
-                        Spacer()
-                        Button(action: { editingDeliverable = deliverable; showEditor = true }) {
-                            Label("Edit", systemImage: "pencil")
-                                .font(Type.caption)
-                        }
-                        .buttonStyle(.borderless)
-                        Button(action: {
-                            model.project.delivery.targets.removeAll { $0 == deliverable }
-                        }) {
-                            Label("Remove", systemImage: "minus")
-                                .font(Type.caption)
-                        }
-                        .buttonStyle(.borderless)
+                    Text(deliverable.spec)
+                        .font(Type.value)
+                        .foregroundColor(Palette.ink)
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    Button("edit") { shapeEditor = .editing(deliverable) }
+                    Button("remove") {
+                        model.project.delivery.targets.removeAll { $0 == deliverable }
                     }
                 }
+                .buttonStyle(.borderless)
+                .font(Type.caption)
             }
+            Button {
+                shapeEditor = .adding
+            } label: {
+                Label("Add shape", systemImage: "plus")
+                    .font(Type.label)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
     }
 
@@ -154,8 +136,14 @@ struct DeliveryPanel: View {
     }
 
     @ViewBuilder private var cropSection: some View {
-        if model.project.delivery.anyTargetCrops {
+        if model.project.delivery.anyTargetNeedsClipOffset {
             cropRow
+        } else if let centred = model.project.delivery.cropBoxTarget {
+            Text("The \(centred.aspectWidth):\(centred.aspectHeight) crop sits at the centre of "
+                 + "every clip, so there is nothing to place.")
+                .font(Type.caption)
+                .foregroundColor(Palette.inkTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         } else {
             Text("Nothing selected crops the frame, so there is no crop to place. Tick a "
                  + "shape that is not 9:16 and it appears here.")
@@ -243,7 +231,7 @@ struct DeliveryPanel: View {
     /// Named for the shape being placed rather than for "4:5", which stopped being the only
     /// croppable aspect the moment the set opened up.
     private var cropLabel: String {
-        model.project.delivery.croppingTargets.first
+        model.project.delivery.clipFramedTargets.first
             .map { "\($0.aspectWidth):\($0.aspectHeight) crop" } ?? "crop"
     }
 
@@ -344,6 +332,9 @@ struct DeliveryPanel: View {
 struct CropOverlay: View {
     @ObservedObject var model: GradeModel
     let geometry: CropGeometry
+    /// False for a shape that carries `centre`: its box is drawn where the engine will cut, and
+    /// dragging it would change a per-clip offset that shape ignores.
+    let framedPerClip: Bool
 
     /// Where the box was when this drag started.
     ///
@@ -355,7 +346,9 @@ struct CropOverlay: View {
     var body: some View {
         GeometryReader { geo in
             let height = geo.size.height * geometry.windowFraction
-            let offset = geometry.fraction(forOffset: model.cropOffset ?? 0) * geo.size.height
+            let offset = geometry.fraction(
+                forOffset: framedPerClip ? model.cropOffset ?? 0 : geometry.centreOffset
+            ) * geo.size.height
             ZStack(alignment: .top) {
                 // Everything outside the window is dimmed rather than hidden: you are choosing
                 // what to leave out, so you have to see it.
@@ -391,6 +384,7 @@ struct CropOverlay: View {
                     }
                     .onEnded { _ in startedAt = nil }
             )
+            .allowsHitTesting(framedPerClip)
         }
     }
 }

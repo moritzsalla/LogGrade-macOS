@@ -65,14 +65,25 @@ public struct Project: Equatable {
             self.targets = targets; self.height = height; self.fps = fps
         }
 
-        /// Whether anything selected needs a per-clip crop offset picked before a render can start.
-        ///
-        /// A DELIVERABLE WITH A FIXED CENTRE OFFSET CROPS BUT DOES NOT NEED PER-CLIP FRAMING. It is
-        /// excluded from this check, which is about deliverables that crop and must ask every clip.
-        public var anyTargetCrops: Bool { targets.contains { $0.needsClipOffset } }
+        /// Whether anything selected crops the master, and so has a box to draw.
+        public var anyTargetCrops: Bool { targets.contains { $0.cropsPortraitMaster } }
 
-        /// The shapes that crop and need per-clip framing, for a refusal that names them.
-        public var croppingTargets: [Deliverable] { targets.filter { $0.needsClipOffset } }
+        public var croppingTargets: [Deliverable] { targets.filter { $0.cropsPortraitMaster } }
+
+        /// The cropping shapes that take their offset from the clip, for the blocker that names
+        /// them. KEPT APART FROM `croppingTargets`: when these were one predicate, excluding a
+        /// `centre` shape from the blocker also removed its box from the picture and made the
+        /// panel say nothing crops.
+        public var clipFramedTargets: [Deliverable] { targets.filter { $0.needsClipOffset } }
+
+        public var anyTargetNeedsClipOffset: Bool { targets.contains { $0.needsClipOffset } }
+
+        /// The shape the one crop box is drawn in. One the clip frames wins over a `centre` one,
+        /// because it is the box that has to be dragged; a `centre` shape alone still gets a box,
+        /// fixed, so what it will cut is visible before it is rendered.
+        public var cropBoxTarget: Deliverable? {
+            clipFramedTargets.first ?? croppingTargets.first
+        }
 
         public func isSelected(_ deliverable: Deliverable) -> Bool {
             targets.contains(deliverable)
@@ -100,6 +111,21 @@ public struct Project: Equatable {
                 return other > rank
             } ?? targets.count
             targets.insert(deliverable, at: insertAt)
+        }
+
+        /// Saving a shape from the editor. An edit replaces the shape it was opened on, in place,
+        /// so the render order does not move; nil adds.
+        ///
+        /// THE ORIGINAL IS PASSED, NOT REMEMBERED. The editor used to find what it was editing in a
+        /// view variable that Add never cleared, so Add after Edit opened as that edit and Save
+        /// replaced the shape. An edit whose shape has since been removed adds rather than
+        /// dropping the save.
+        public mutating func save(_ deliverable: Deliverable, replacing original: Deliverable?) {
+            if let original, let index = targets.firstIndex(of: original) {
+                targets[index] = deliverable
+            } else {
+                targets.append(deliverable)
+            }
         }
     }
 
@@ -176,10 +202,10 @@ public struct Project: Equatable {
     public func blockers(for clipNames: [String]) -> [Blocker] {
         var found: [Blocker] = []
         if active == nil { found.append(.noActivePreset(activePreset)) }
-        if delivery.anyTargetCrops {
+        if delivery.anyTargetNeedsClipOffset {
             let undecided = clipNames.filter { clips[$0]?.cropOffset == nil }
             if !undecided.isEmpty {
-                found.append(.cropWithoutOffset(deliverables: delivery.croppingTargets,
+                found.append(.cropWithoutOffset(deliverables: delivery.clipFramedTargets,
                                                 clips: undecided))
             }
         }
@@ -218,10 +244,12 @@ extension Project.Delivery {
                       let w = ($0["aspect_width"] as? NSNumber)?.intValue,
                       let h = ($0["aspect_height"] as? NSNumber)?.intValue,
                       w > 0, h > 0 else { return nil }
+                // A file without the key was written before a shape could carry an offset, and
+                // every shape then followed CROP_Y, which is what nil still means.
                 let offset: DeliverableCropOffset? =
                     ($0["crop_offset"] as? String) == "centre" ? .centre : nil
                 return Deliverable(name: name, aspectWidth: w, aspectHeight: h,
-                                 cropOffset: offset)
+                                   cropOffset: offset)
             }
             return parsed
         }
@@ -262,13 +290,9 @@ extension Project {
         }
         var deliveryBlock: [String: Any] = [
             "targets": delivery.targets.map { d in
-                var entry: [String: Any] = [
-                    "name": d.name, "aspect_width": d.aspectWidth,
-                    "aspect_height": d.aspectHeight
-                ]
-                if let offset = d.cropOffset, offset == .centre {
-                    entry["crop_offset"] = "centre"
-                }
+                var entry: [String: Any] = ["name": d.name, "aspect_width": d.aspectWidth,
+                                            "aspect_height": d.aspectHeight]
+                if d.cropOffset == .centre { entry["crop_offset"] = "centre" }
                 return entry
             },
             "height": delivery.height,

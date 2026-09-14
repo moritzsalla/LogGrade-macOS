@@ -1842,6 +1842,26 @@ PY
 	[ "$status" -ne 0 ] || fail "accepted a zero aspect term"
 }
 
+@test "a deliverable with an empty aspect term is refused, not resolved" {
+	# Concatenating the two terms before checking them made `x::1` look like `1`, and the empty one
+	# then slipped past `-le 0` by erroring. Both sides, because the concatenation hid either.
+	for spec in 'x::1' 'x:1:' 'x::'; do
+		run deliverable_spec "$spec"
+		[ "$status" -ne 0 ] || fail "accepted $spec as: $output"
+		[[ "$output" == *"has a non-integer aspect"* ]] || fail "$spec: $output"
+	done
+}
+
+@test "a deliverable name with whitespace is refused, because its callers split on it" {
+	# It resolved with status 0 and `read -r name aw ah off suffix` then took `a` as the name and
+	# `b` as the aspect — a silent misparse, not an error.
+	run deliverable_spec 'a b:1:1'
+	[ "$status" -ne 0 ] || fail "accepted a name containing a space: $output"
+	[[ "$output" == *"deliverable name 'a b' contains whitespace"* ]] || fail "$output"
+	run require_clip_name 'IMG 0609'
+	[ "$status" -eq 0 ] || fail "a clip name with a space: $output"
+}
+
 @test "a deliverable that is already the source's shape takes no crop filter" {
 	# THE BYTE-IDENTITY RULE. Every deliverable resolves its crop through crop_prefix now, where
 	# the 9:16 one used to be handed a literal empty string by its own branch. A no-op

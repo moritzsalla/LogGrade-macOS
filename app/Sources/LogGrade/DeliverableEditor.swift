@@ -1,119 +1,78 @@
-import AppKit
 import GradeKit
 import SwiftUI
 
-/// Editor for adding or modifying a custom deliverable.
+/// A sheet for one custom shape: its name, its aspect, and whether it crops at the centre.
+///
+/// IT DOES NOT JUDGE THE SHAPE. Save hands the typed text to `save`, which asks the engine, and a
+/// refusal is shown in the words it came back in. A rule restated here would be a second opinion
+/// about what the renderer accepts, and the first one written here was already wrong.
 struct DeliverableEditor: View {
-    @Environment(\.dismiss) var dismiss
-    @Binding var project: Project
-    let existingDeliverable: Deliverable?
+    let mode: ShapeEditorMode
+    let save: (ShapeDraft) -> ShapeRefusal?
 
-    @State private var name: String = ""
-    @State private var aspectWidth: String = ""
-    @State private var aspectHeight: String = ""
-    @State private var centreOffset = false
-    @State private var errorMessage: String?
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: ShapeDraft
+    @State private var refusal: ShapeRefusal?
+
+    init(mode: ShapeEditorMode, save: @escaping (ShapeDraft) -> ShapeRefusal?) {
+        self.mode = mode
+        self.save = save
+        _draft = State(initialValue: mode.draft)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(existingDeliverable == nil ? "New shape" : "Edit shape")
-                .font(.system(.headline, design: .default))
-
-            Form {
-                Section("Name") {
-                    TextField("square, tall, wide, …", text: $name)
-                        .monospacedDigit()
-                        .font(Type.value)
-                }
-
-                Section("Aspect") {
-                    HStack(spacing: 8) {
-                        TextField("width", text: $aspectWidth)
-                            .monospacedDigit()
-                            .font(Type.value)
-                            .frame(maxWidth: 60)
-                        Text(":")
-                            .font(Type.value)
-                        TextField("height", text: $aspectHeight)
-                            .monospacedDigit()
-                            .font(Type.value)
-                            .frame(maxWidth: 60)
-                    }
-                }
-
-                Section("Crop") {
-                    Toggle("Fixed centre", isOn: $centreOffset)
-                        .font(Type.label)
-                }
-
-                if let error = errorMessage {
-                    Section {
-                        Text(error)
-                            .font(Type.caption)
-                            .foregroundColor(Palette.lamp)
-                    }
+        VStack(alignment: .leading, spacing: Space.m) {
+            Text(mode.original == nil ? "New shape" : "Edit shape")
+                .font(Type.heading)
+                .foregroundColor(Palette.ink)
+            field("name") {
+                TextField("square", text: $draft.name)
+                    .font(Type.value)
+            }
+            field("aspect") {
+                HStack(spacing: Space.xs) {
+                    TextField("w", text: $draft.aspectWidth)
+                        .font(Type.value).frame(width: 48)
+                    Text(":").font(Type.value).foregroundColor(Palette.inkSecondary)
+                    TextField("h", text: $draft.aspectHeight)
+                        .font(Type.value).frame(width: 48)
+                    Spacer()
                 }
             }
-
-            HStack(spacing: 12) {
-                Button("Cancel") { dismiss() }
-                    .buttonStyle(.bordered)
+            // Said beside the toggle because it is the difference between a shape that blocks
+            // Convert until every clip is framed and one that never asks.
+            Toggle("crop at the centre of every clip", isOn: $draft.centre)
+                .toggleStyle(.checkbox)
+                .font(Type.label)
+                .foregroundColor(Palette.inkSecondary)
+            if let refusal {
+                Text(refusal.description)
+                    .font(Type.caption)
+                    .foregroundColor(Palette.lamp)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: Space.m) {
                 Spacer()
-                Button("Save") { save() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Palette.plate)
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    refusal = save(draft)
+                    if refusal == nil { dismiss() }
+                }
+                .keyboardShortcut(.defaultAction)
             }
-            .padding(.top, 8)
         }
         .padding(Space.l)
-        .frame(maxWidth: 280)
-        .onAppear { loadExisting() }
+        .frame(width: 320)
+        .background(Palette.panel)
     }
 
-    private func loadExisting() {
-        guard let existing = existingDeliverable else { return }
-        name = existing.name
-        aspectWidth = String(existing.aspectWidth)
-        aspectHeight = String(existing.aspectHeight)
-        centreOffset = existing.cropOffset == .centre
-    }
-
-    private func save() {
-        errorMessage = nil
-
-        let trimmedName = name.trimmingCharacters(in: .whitespaces)
-        var allDeliverables = project.delivery.targets
-        if let existing = existingDeliverable {
-            allDeliverables.removeAll { $0 == existing }
+    private func field<Content: View>(_ label: String,
+                                      @ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: Space.s) {
+            Text(label).font(Type.label).foregroundColor(Palette.inkSecondary)
+                .frame(width: 44, alignment: .leading)
+            content()
         }
-
-        if let error = Deliverable.validateName(trimmedName, against: allDeliverables) {
-            errorMessage = error.description
-            return
-        }
-
-        guard let w = Int(aspectWidth), let h = Int(aspectHeight) else {
-            errorMessage = "Aspect must be whole numbers."
-            return
-        }
-
-        if let error = Deliverable.validateAspect(width: w, height: h) {
-            errorMessage = error.description
-            return
-        }
-
-        let offset: DeliverableCropOffset? = centreOffset ? .centre : nil
-        let deliverable = Deliverable(name: trimmedName, aspectWidth: w, aspectHeight: h,
-                                     cropOffset: offset)
-
-        if existingDeliverable == nil {
-            project.delivery.targets.append(deliverable)
-        } else {
-            if let index = project.delivery.targets.firstIndex(of: existingDeliverable!) {
-                project.delivery.targets[index] = deliverable
-            }
-        }
-
-        dismiss()
     }
 }

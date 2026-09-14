@@ -314,7 +314,7 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
     // The crop, by the pixel. Arrow keys only mean the crop while something that crops is asked
     // for; otherwise they belong to whatever has focus. Shift moves by ten, the way a nudge does
     // everywhere else on this platform.
-    if grade.project.delivery.anyTargetCrops, grade.cropGeometry != nil {
+    if grade.cropIsPerClip, grade.cropGeometry != nil {
         let step = event.modifierFlags.contains(.shift) ? 10 : 1
         if event.keyCode == KeyCode.upArrow { grade.nudgeCrop(by: -step); return nil }
         if event.keyCode == KeyCode.downArrow { grade.nudgeCrop(by: step); return nil }

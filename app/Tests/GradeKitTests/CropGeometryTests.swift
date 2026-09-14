@@ -108,10 +108,44 @@ final class CropGeometryTests: XCTestCase {
     func testTheFirstCroppingTargetIsTheOneWithABox() {
         let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
         var delivery = Project.Delivery(targets: [.reels, .feed, square])
-        XCTAssertEqual(delivery.croppingTargets.first, .feed,
+        XCTAssertEqual(delivery.cropBoxTarget, .feed,
                        "reels does not crop a 9:16 master, so it must not claim the box")
         delivery = Project.Delivery(targets: [.reels])
-        XCTAssertNil(delivery.croppingTargets.first,
-                     "nothing crops, so there is no box to draw")
+        XCTAssertNil(delivery.cropBoxTarget, "nothing crops, so there is no box to draw")
+    }
+
+    /// A `centre` shape is out of the blocker and still in the picture. The first version of the
+    /// editor took it out of both with one predicate, so a centred square cropped the render with
+    /// no box to show where, and the panel said nothing selected crops.
+    func testACentreShapeStillHasABoxButTheClipFramedOneOwnsIt() {
+        let centred = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
+                                  cropOffset: .centre)
+        var delivery = Project.Delivery(targets: [.reels, centred])
+        XCTAssertTrue(delivery.anyTargetCrops)
+        XCTAssertFalse(delivery.anyTargetNeedsClipOffset)
+        XCTAssertEqual(delivery.cropBoxTarget, centred, "a centred crop lost its box")
+        delivery = Project.Delivery(targets: [centred, .feed])
+        XCTAssertEqual(delivery.cropBoxTarget, .feed,
+                       "the box that has to be dragged gave way to one that cannot be")
+    }
+
+    /// The fixed box for a `centre` shape is drawn where the engine puts it, so this asks the
+    /// engine. The slacks are chosen so that half of one is odd and one is itself odd, because the
+    /// round-down-to-even step is the part a copy gets wrong.
+    func testTheCentreBoxIsWhereTheEngineCentres() throws {
+        let engine = try engineCheckout()
+        let cases = [(2160, 3840, 4, 5), (2160, 3842, 4, 5), (2160, 3841, 4, 5),
+                     (1081, 3840, 4, 5), (2160, 3840, 1, 1)]
+        for (width, height, aw, ah) in cases {
+            let label = "\(aw):\(ah) on \(width)x\(height)"
+            let geometry = CropGeometry(sourceWidth: width, sourceHeight: height,
+                                        aspectWidth: aw, aspectHeight: ah)
+            let ran = try libSh(engine, "crop_prefix",
+                                [width, height, aw, ah].map(String.init) + ["centre"])
+            XCTAssertEqual(ran.status, 0, "\(label): \(ran.stderr)")
+            XCTAssertEqual(ran.stdout,
+                           "crop=\(width):\(geometry.windowHeight):0:\(geometry.centreOffset),\n",
+                           "\(label): the centred box is not where the engine crops")
+        }
     }
 }

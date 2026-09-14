@@ -100,8 +100,8 @@ final class DeliverableTests: XCTestCase {
     }
 
     func testAShapeWithNoCheckboxSurvivesSelectingOneThatHasOne() throws {
-        // The interface has no editor for arbitrary aspects, so the only thing that must not
-        // happen is losing one that a project file carries.
+        // A custom shape has no checkbox, so ticking a preset is not a moment anyone is watching
+        // it, and losing it here would be silent.
         let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
         var delivery = Project.Delivery(targets: [square])
         delivery.setTarget(.feed, selected: true)
@@ -144,176 +144,59 @@ final class DeliverableTests: XCTestCase {
     // What blocks a render is `ProjectTests.testACroppedRenderIsBlockedUntilEveryClipHasAnOffset`,
     // which covers both the shape that crops and the one that does not. Two tests here repeated it.
 
-    // MARK: - Custom deliverable validation
+    // MARK: - A shape carrying its own offset
 
-    func testEmptyNameIsRefused() throws {
-        XCTAssertEqual(Deliverable.validateName("", against: []), .emptyName)
+    func testACentreShapeSaysSoInItsSpecAndAnUnoffsetOneDoesNot() throws {
+        let centred = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
+                                  cropOffset: .centre)
+        XCTAssertEqual(centred.spec, "square:1:1:centre")
+        XCTAssertEqual(Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1).spec,
+                       "square:1:1")
     }
 
-    func testNamesWithFilterSyntaxAreRefused() throws {
-        let badChars = ["a/b", "a'b", "a\"b", "a,b", "a;b", "a[b", "a]b", "a\\b", "a:b"]
-        for name in badChars {
-            XCTAssertNotNil(Deliverable.validateName(name, against: []),
-                           "\(name) should be refused")
-        }
+    /// The engine lets a deliverable's own offset beat `CROP_Y`, so a `centre` shape has nothing
+    /// for a clip to decide, while one without an offset still takes the clip's.
+    func testOnlyAShapeWithoutItsOwnOffsetWaitsForTheClip() throws {
+        let centred = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
+                                  cropOffset: .centre)
+        var project = Project(presets: [.init(name: "p", look: try lookFixture())],
+                              activePreset: "p", delivery: .init(targets: [centred]))
+        XCTAssertEqual(project.blockers(for: ["IMG_0609"]), [],
+                       "a centred shape blocked Convert on a framing it ignores")
+        project.delivery.targets.append(.feed)
+        XCTAssertEqual(project.blockers(for: ["IMG_0609"]),
+                       [.cropWithoutOffset(deliverables: [.feed], clips: ["IMG_0609"])],
+                       "the blocker must name only the shape that takes the clip's offset")
     }
 
-    func testValidNameIsPassed() throws {
-        XCTAssertNil(Deliverable.validateName("square", against: []))
-        XCTAssertNil(Deliverable.validateName("tall_portrait", against: []))
-        XCTAssertNil(Deliverable.validateName("test-name", against: []))
+    func testTheEngineReadsACentreShapeAsCentred() throws {
+        let engine = try engineCheckout()
+        let centred = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
+                                  cropOffset: .centre)
+        XCTAssertEqual(engine.resolveDeliverable(name: centred.name, spec: centred.spec),
+                       .resolved(.init(name: "square", aspectWidth: "1", aspectHeight: "1",
+                                       offset: "centre", suffix: "square_1x1")))
     }
 
-    func testDuplicateNameIsRefused() throws {
-        let existing = [Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)]
-        XCTAssertEqual(Deliverable.validateName("square", against: existing), .duplicateName)
-    }
-
-    func testZeroOrNegativeAspectsAreRefused() throws {
-        XCTAssertEqual(Deliverable.validateAspect(width: 0, height: 1), .zeroAspect)
-        XCTAssertEqual(Deliverable.validateAspect(width: 1, height: 0), .zeroAspect)
-        XCTAssertEqual(Deliverable.validateAspect(width: -1, height: 1), .zeroAspect)
-        XCTAssertEqual(Deliverable.validateAspect(width: 1, height: -1), .zeroAspect)
-    }
-
-    func testValidAspectsArePassed() throws {
-        XCTAssertNil(Deliverable.validateAspect(width: 1, height: 1))
-        XCTAssertNil(Deliverable.validateAspect(width: 9, height: 16))
-        XCTAssertNil(Deliverable.validateAspect(width: 100, height: 200))
-    }
-
-    // MARK: - Custom deliverable centre offset
-
-    func testACentreOffsetEmitsInTheSpec() throws {
-        let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
-                                cropOffset: .centre)
-        XCTAssertEqual(square.spec, "square:1:1:centre")
-    }
-
-    func testNoOffsetEmitsOnlyTheNameAndAspect() throws {
-        let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
-        XCTAssertEqual(square.spec, "square:1:1")
-    }
-
-    func testACentreDeliverableDoesNotNeedPerClipOffset() throws {
-        let centred = Deliverable(name: "feed_centred", aspectWidth: 4, aspectHeight: 5,
-                                 cropOffset: .centre)
-        XCTAssertFalse(centred.needsClipOffset,
-                      "centre offset is explicit, so per-clip is not needed")
-    }
-
-    func testANonCentreClippingDeliverableNeedsPerClipOffset() throws {
-        let clipping = Deliverable(name: "feed", aspectWidth: 4, aspectHeight: 5)
-        XCTAssertTrue(clipping.needsClipOffset,
-                     "no offset means it follows CROP_Y")
-    }
-
-    func testAPresetEmitsBareNameAndHasNilOffset() throws {
-        // Presets are created with nil offset and should not allow setting it.
-        XCTAssertEqual(Deliverable.reels.cropOffset, nil)
-        XCTAssertEqual(Deliverable.reels.spec, "reels")
-        XCTAssertFalse(Deliverable.reels.needsClipOffset)
-    }
-
-    // MARK: - Centre offset survives the project file
-
-    func testACentreOffsetRoundTripsTheProjectFile() throws {
-        let centred = Deliverable(name: "square_centre", aspectWidth: 1, aspectHeight: 1,
-                                 cropOffset: .centre)
+    /// Both directions, because a serialiser that dropped the key would read every shape back as
+    /// nil and still pass a test that only saves shapes without one.
+    func testACentreOffsetSurvivesTheProjectFileAndItsAbsenceReadsAsNone() throws {
+        let centred = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
+                                  cropOffset: .centre)
+        let plain = Deliverable(name: "tall", aspectWidth: 2, aspectHeight: 3)
         let project = Project(presets: [], activePreset: "",
-                             delivery: .init(targets: [.reels, centred]))
+                              delivery: .init(targets: [.reels, centred, plain]))
         let reread = try Project(data: try project.serialised())
-        XCTAssertEqual(reread.delivery.targets.count, 2)
-        guard let restored = reread.delivery.targets.first(where: { $0.name == "square_centre" })
-        else {
-            XCTFail("square_centre not found in round-trip")
-            return
-        }
-        XCTAssertEqual(restored.cropOffset, .centre, "centre offset was lost in round-trip")
-    }
+        XCTAssertEqual(reread.delivery.targets, [.reels, centred, plain])
 
-    func testANoOffsetCustomDeliverableRoundTripsWithNilOffset() throws {
-        let noOffset = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
-        let project = Project(presets: [], activePreset: "",
-                             delivery: .init(targets: [noOffset]))
-        let reread = try Project(data: try project.serialised())
-        guard let restored = reread.delivery.targets.first(where: { $0.name == "square" })
-        else {
-            XCTFail("square not found in round-trip")
-            return
-        }
-        XCTAssertNil(restored.cropOffset, "no offset should round-trip as nil")
-    }
-
-    // MARK: - Centre offset and blockers
-
-    func testACentreOffsetDeliverableThatCropsIsNotInBlockers() throws {
-        let centred = Deliverable(name: "feed_centred", aspectWidth: 4, aspectHeight: 5,
-                                 cropOffset: .centre)
-        let delivery = Project.Delivery(targets: [centred])
-        XCTAssertFalse(delivery.anyTargetCrops,
-                      "centre offset is explicit, so there is no blocker")
-        XCTAssertTrue(delivery.croppingTargets.isEmpty)
-    }
-
-    func testAPerClipOffsetDeliverableThatCropsIsInBlockers() throws {
-        let cropping = Deliverable(name: "feed", aspectWidth: 4, aspectHeight: 5)
-        let delivery = Project.Delivery(targets: [cropping])
-        XCTAssertTrue(delivery.anyTargetCrops,
-                     "no explicit offset means per-clip offset is needed")
-        XCTAssertEqual(delivery.croppingTargets, [cropping])
-    }
-
-    // MARK: - Engine tie-in for custom deliverables
-
-    func testTheEngineReadsCustomShapesWithoutOffset() throws {
-        let engine = try engineCheckout()
-        let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
-        let resolved = try libSh(engine, "deliverable_spec", [square.spec])
-        XCTAssertEqual(resolved.status, 0,
-                       "the engine refused \(square.spec): \(resolved.stderr)")
-        let fields = resolved.stdout.split(separator: " ").map {
-            $0.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        XCTAssertEqual(fields.count, 5)
-        guard fields.count == 5 else { return }
-        XCTAssertEqual(fields[0], "square")
-        XCTAssertEqual(fields[1...2], ["1", "1"])
-    }
-
-    func testTheEngineReadsCustomShapesWithCentreOffset() throws {
-        let engine = try engineCheckout()
-        let square = Deliverable(name: "square_centred", aspectWidth: 1, aspectHeight: 1,
-                                cropOffset: .centre)
-        let resolved = try libSh(engine, "deliverable_spec", [square.spec])
-        XCTAssertEqual(resolved.status, 0,
-                       "the engine refused \(square.spec): \(resolved.stderr)")
-        let fields = resolved.stdout.split(separator: " ").map {
-            $0.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        XCTAssertEqual(fields.count, 5)
-        guard fields.count == 5 else { return }
-        XCTAssertEqual(fields[0], "square_centred")
-        XCTAssertEqual(fields[1...2], ["1", "1"])
-        XCTAssertEqual(String(fields[3]), "centre")
-    }
-
-    func testTheEngineRefusesZeroAspects() throws {
-        let engine = try engineCheckout()
-        let bad = Deliverable(name: "bad", aspectWidth: 0, aspectHeight: 1)
-        let resolved = try libSh(engine, "deliverable_spec", [bad.spec])
-        XCTAssertNotEqual(resolved.status, 0, "zero aspect should be refused")
-        XCTAssertTrue(resolved.stderr.contains("zero aspect"),
-                     "error should mention zero aspect")
-    }
-
-    func testTheEngineRefusesNamesWithSlash() throws {
-        let engine = try engineCheckout()
-        let bad = Deliverable(name: "bad/name", aspectWidth: 1, aspectHeight: 1)
-        let resolved = try libSh(engine, "deliverable_spec", [bad.spec])
-        XCTAssertNotEqual(resolved.status, 0, "slash in name should be refused")
-        // The error mentions the rejection reason — either directly or as unknown format
-        XCTAssertTrue(resolved.stderr.contains("REFUSING"),
-                     "should contain a refusal message")
+        // Written before a shape could carry an offset: every shape then followed CROP_Y.
+        let older = """
+        {"version": 2, "presets": [], "active_preset": "",
+         "delivery": {"targets": [{"name": "square", "aspect_width": 1, "aspect_height": 1}]},
+         "clips": {}}
+        """
+        let opened = try Project(data: Data(older.utf8))
+        XCTAssertEqual(opened.delivery.targets,
+                       [Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)])
     }
 }

@@ -1,9 +1,10 @@
 import Foundation
 
-/// How a custom deliverable handles its crop offset.
+/// A crop offset a deliverable carries for itself, which the engine lets beat the run's `CROP_Y`.
 ///
-/// PRESETS NEVER HAVE AN OFFSET: they emit bare names and always follow the clip's CROP_Y.
-/// Custom deliverables can specify `.centre` to crop to a fixed centre, or nil to follow CROP_Y.
+/// ONLY CENTRE, not a pixel count. A pixel offset is a composition call about one clip, and this
+/// value applies to every clip in the project; `centre` is resolved per clip against the frame the
+/// engine measured, which is the one fixed offset that means the same thing on all of them.
 public enum DeliverableCropOffset: Equatable, Hashable {
     case centre
 }
@@ -20,9 +21,11 @@ public enum DeliverableCropOffset: Equatable, Hashable {
 /// the engine is what renders. Carrying a second copy of it in Swift is exactly the duplication
 /// ADR 0008 exists to prevent.
 ///
-/// CROPOFFSET ON CUSTOM SHAPES ONLY. Presets always emit their bare name; adding an offset would
-/// change their output filename, breaking existing renders. Custom deliverables can specify a fixed
-/// centre offset (emitting `name:aw:ah:centre`) or follow the clip's `CROP_Y` (emitting `name:aw:ah`).
+/// A PRESET WITH AN OFFSET IS NOT THE PRESET. Equality includes `cropOffset`, so a project file
+/// entry `reels` 9:16 `centre` is a custom shape and goes to the engine as `reels:9:16:centre`,
+/// writing `reels_9x16` rather than the preset's file. Nothing stops a hand-edited project file
+/// saying that; the editor refuses a preset's name, which is what keeps the interface from
+/// producing it.
 public struct Deliverable: Equatable, Hashable {
     public let name: String
     public let aspectWidth: Int
@@ -54,11 +57,8 @@ public struct Deliverable: Equatable, Hashable {
     /// preset would silently start writing `reels_9x16.mp4` beside somebody's existing files.
     public var spec: String {
         if Self.presets.contains(self) { return name }
-        var result = "\(name):\(aspectWidth):\(aspectHeight)"
-        if let offset = cropOffset, offset == .centre {
-            result += ":centre"
-        }
-        return result
+        let shape = "\(name):\(aspectWidth):\(aspectHeight)"
+        return cropOffset == .centre ? shape + ":centre" : shape
     }
 
     /// Whether this shape is a crop of a 9:16 master, by cross-multiplication rather than by name:
@@ -74,61 +74,11 @@ public struct Deliverable: Equatable, Hashable {
         aspectWidth * 16 != aspectHeight * 9
     }
 
-    /// Whether this deliverable crops and needs a per-clip offset to be decided.
-    ///
-    /// A DELIVERABLE WITH CENTRE OFFSET DOES NOT NEED PER-CLIP FRAMING. It crops but has a fixed
-    /// centre, so Convert can run without asking. One that follows CROP_Y is blocked per-clip.
+    /// Whether this shape crops AND takes its offset from the clip's `CROP_Y`, which is what has to
+    /// be decided per clip before Convert can run. A shape carrying `centre` still crops — its box
+    /// is still drawn — but the engine lets its own offset beat `CROP_Y`, so there is nothing to
+    /// ask.
     public var needsClipOffset: Bool {
         cropsPortraitMaster && cropOffset == nil
-    }
-
-    /// Validation error for custom deliverables.
-    public enum ValidationError: Equatable, CustomStringConvertible {
-        case emptyName
-        case invalidNameCharacters
-        case duplicateName
-        case zeroAspect
-        case negativeAspect
-        case nonIntegerAspect
-
-        public var description: String {
-            switch self {
-            case .emptyName:
-                return "Name cannot be empty."
-            case .invalidNameCharacters:
-                return "Name contains characters ffmpeg reads as filter syntax."
-            case .duplicateName:
-                return "A deliverable with this name already exists."
-            case .zeroAspect:
-                return "Aspect must be greater than zero."
-            case .negativeAspect:
-                return "Aspect must be greater than zero."
-            case .nonIntegerAspect:
-                return "Aspect must be whole numbers."
-            }
-        }
-    }
-
-    /// Check if a name is valid for a deliverable.
-    ///
-    /// THE NAME GUARD MIRRORS require_clip_name IN lib.sh: it rejects names that would reach
-    /// ffmpeg's filter graph or break path composition. Presets bypass this because they are
-    /// known-good constants.
-    public static func validateName(_ name: String, against existing: [Deliverable]) -> ValidationError? {
-        if name.isEmpty { return .emptyName }
-        let invalidChars = Set("/'\",;[]\\:")
-        if name.contains(where: { invalidChars.contains($0) }) {
-            return .invalidNameCharacters
-        }
-        if existing.contains(where: { $0.name == name }) {
-            return .duplicateName
-        }
-        return nil
-    }
-
-    /// Check if aspects are valid for a deliverable.
-    public static func validateAspect(width: Int, height: Int) -> ValidationError? {
-        if width <= 0 || height <= 0 { return .zeroAspect }
-        return nil
     }
 }
