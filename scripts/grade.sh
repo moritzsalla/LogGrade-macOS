@@ -4,7 +4,8 @@
 # Usage:
 #   ./scripts/grade.sh <folder|clip.mov> [...]   process a shoot folder or named clips
 #
-# Every knob is an environment variable, and this list is the only place they are documented:
+# Every knob is an environment variable. This list is the complete one; USAGE.md groups the same
+# set by what it is for, and went looking for exactly the two that used to be missing here.
 #   DELIVERABLES=<list>  what to render, comma separated. Default 'reels'. Each entry is either a
 #                     preset — 'reels' (9:16) or 'feed' (4:5) — or 'name:aspect-w:aspect-h[:offset]',
 #                     e.g. 'reels,feed' or 'square:1:1,wide:16:9:400'. Height follows the aspect off
@@ -42,6 +43,11 @@
 #   JSON=1            emit one machine-readable event per line on stdout instead of the human
 #                     lines, which then go only to the run report. Named codes go to stderr
 #                     either way. This is what the app drives the engine through.
+#   GRADE_WORK_DIR=<dir>  where src/ is read from and dist/ is written, instead of the repo. A
+#                     `.workdir` file beside the repo does the same thing; resolve_work_dir in
+#                     lib.sh picks between them. The whole bats suite runs through this.
+#   LOOK_FILE=<path>  which look.json every stage reads (lib.sh). Changing it changes the grade,
+#                     so it is a knob like any other rather than an implementation detail.
 #
 # WHY ONE PASS. The staged pipeline (01-baseline -> 02-grade -> 03-final) writes two ~2.5GB ProRes
 # intermediates per clip and decodes the footage three times. Those intermediates existed so the
