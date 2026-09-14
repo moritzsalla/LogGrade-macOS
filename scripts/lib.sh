@@ -1225,16 +1225,14 @@ stab_prefix() {  # stab_prefix <trf> <smoothing>
 delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-prefix>
 	# The sharpener's 5x5 was measured at 1080x1920, and its radius is in PIXELS — so at another
 	# output height it sharpens a different real-world detail size and the look changes. The radius
-	# formula r = 5*h/1920 scales with height and the amount does not, which is an ASSUMPTION
-	# rather than a measurement: only 1920 has been looked at.
+	# scales with height and the amount does not, which is an ASSUMPTION rather than a measurement:
+	# only 1920 has been looked at. It is stated here so the next reader knows which of the two
+	# numbers has evidence behind it.
 	#
-	# MEASURED (docs/PIPELINE.md §Sharpen and grain at other heights):
-	# The formula quantises: heights 960 and 1280 both compute to r=3 (minimum, clamped).
-	# At 960px: 3px kernel is 0.31% of frame height (detail equiv ~6px @ 1920p).
-	# At 1280px: 3px kernel is 0.23% of frame height (detail equiv ~4.5px @ 1920p).
-	# At 1920px (reference): 5px kernel is 0.26% of frame height (detail equiv ~5px @ 1920p).
-	# At 2560px: 7px kernel is 0.27% of frame height (detail equiv ~5.2px @ 1920p).
-	# The clamping to 3 and to odd size puts 960/1280 out of step; whether that is wanted is unjudged.
+	# Measured at 960-2560, not yet judged by eye (PIPELINE.md, "Sharpen and grain at other
+	# heights"): the sharpening residual stays ~3 code values, but its width grows less than the
+	# radius, so at taller frames it touches relatively finer detail. Grain stays ~1px wide at
+	# every height, so it is coarser relative to a shorter frame.
 	#
 	# unsharp needs odd sizes and rejects anything below 3.
 	local r

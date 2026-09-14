@@ -172,41 +172,64 @@ expense of another.
   to hold that. Both weights at 1 leave the mask out of the graph.
 - **Sharpen AFTER downscale** — mild, corrective (compensating for the softening the resize
   itself causes), not a stylistic push. Luma only.
-
-## Sharpen and grain at other heights
-
-The delivery chain scales to different frame heights via the `HEIGHT` environment variable. Both
-sharpening (unsharp kernel) and grain (half-resolution plate) are **assumed** to scale with height,
-but the scaling is quantised and untested at sizes other than 1080×1920.
-
-**Sharpening radius formula and quantisation:**
-
-Formula: `r = 5 × h / 1920`, clamped to minimum 3, rounded up to odd.
-
-| Height | Width | Kernel (px) | % of height | Detail equiv @ 1920p |
-|--------|-------|-------------|-------------|----------------------|
-| 960    | 540   | 3           | 0.31 %      | ~6.0 px              |
-| 1280   | 720   | 3           | 0.23 %      | ~4.5 px              |
-| 1920   | 1080  | 5           | 0.26 %      | ~5.0 px (reference)  |
-| 2560   | 1440  | 7           | 0.27 %      | ~5.2 px              |
-
-The quantisation creates a flat step at the bottom: heights 960 and 1280 both compute to kernel
-size 3, which is 0.31 % and 0.23 % of frame height respectively. Both sizes therefore sharpen
-the same pixel kernel size through different real-world proportions of the frame. Whether this
-clamping effect (for small heights) is wanted is unjudged.
-
-Measurement method: Formula analysis only; no visual comparison across heights yet.
-
-**Grain:** Generated on a `gray` plate at half output resolution (w/2 × h/2), then bilinear-scaled
-back to full size. No explicit height scaling in the measurement formula (`noise=c0s=STRENGTH`),
-but spatial correlation changes with the upscale factor: at 960p, half-res correlation is ~0.5px
-(1:2 upscale), at 1920p it's ~1.0px (1:2 upscale), at 2560p it's ~1.3px (1:2 upscale). Visual
-difference across heights has not been measured.
-
 - **Encode**: H.264 High Profile, yuv420p (dithered down from the master's 10-bit, not
   truncated), CRF 18, AAC 192k, `+faststart`. Instagram recompresses everything it receives
   regardless — feeding it high quality just means less of what it does have to throw away.
   Same color-tag verification as every other stage.
+
+## Sharpen and grain at other heights
+
+Both were set at 1920. The sharpener's radius follows output height (`unsharp=3` at 960 and 1280,
+5 at 1920, 7 at 2560, read back from each render's report), its amount does not, and the grain
+plate is half the output size at every height. Measured on IMG_0607, frame 12 of a one-second
+proof at each height, luma only. Three renders per height: shipped (`default`), `GRAIN_STRENGTH=0`
+(`grain_off`), and `grain_off` again through a copy of `scripts/` whose delivery `unsharp` amount
+is 0 (`nosharp`). Not yet judged by eye; the sheets exist so that it is cheap to.
+
+| Height | r | Grain RMS | Grain corr px | Corr %h | Sharpen RMS | Edge residual | Sharpen hw %h |
+|--------|---|-----------|---------------|---------|-------------|---------------|---------------|
+| 960    | 3 | 3.14      | 1.03          | 0.108   | 3.17        | 5.56          | 0.070         |
+| 1280   | 3 | 3.06      | 1.10          | 0.086   | 2.92        | 4.97          | 0.053         |
+| 1920   | 5 | 3.00      | 1.21          | 0.063   | 3.04        | 5.52          | 0.043         |
+| 2560   | 7 | 2.94      | 1.26          | 0.049   | 2.95        | 5.44          | 0.038         |
+
+- **Grain** is `default − grain_off` in a square 10% of frame height, centred at (0.533, 0.250) of
+  the frame: flat sky, luma ≈99. RMS in code values, and the lag where the horizontal
+  autocorrelation falls below 0.5, both averaged over frames 6, 12 and 18.
+- **Sharpening** is `grain_off − nosharp`. RMS over the whole frame; edge residual is mean
+  |residual| where `nosharp`'s gradient magnitude is in its top 5%; half-width as for grain, over
+  every second row of the whole frame: 0.67, 0.67, 0.82 and 0.96 px. Over a detailed region alone
+  it agrees within 0.1 px.
+- **Every residual is the difference of two separate CRF 18 encodes.** `grain_off − nosharp` in
+  the flat sky, where there is little for the sharpener to act on, is 1.6 RMS at every height, so
+  about half of each sharpen RMS cannot be told apart from encode noise.
+- **Same source frame:** `grain_off` and `nosharp` differ by 0.42–0.45 mean code values on 8×8
+  block means at every height, against 0.85–1.55 for `nosharp`'s neighbouring frames 11 and 13.
+  An earlier run of the same `default` and `grain_off` commands wrote byte-identical files.
+
+What the numbers show. Grain strength holds (≈3 code values) and its correlation stays near one
+output pixel, as a half-size plate predicts, so relative to the picture it is 1.7× coarser at 960
+than at 1920 and 0.78× at 2560. Sharpening's size in code values holds too, both overall and at
+edges, because the amount is fixed. Its residual widens with the kernel but by less than the
+kernel does, and 960 and 1280 share a kernel and measure the same 0.67 px, so as a fraction of
+frame height the sharpened detail gets finer as the frame gets taller rather than staying put.
+Whether any of this is visible, or wanted, is for an eye to decide.
+
+Reproduce: for H in 960 1280 1920 2560, from a work dir per render so no two renders share a path,
+
+```sh
+GRADE_WORK_DIR=<dir> PROOF=1 STAB=0 HEIGHT=$H                  ./scripts/grade.sh src/IMG_0607.mov
+GRADE_WORK_DIR=<dir> PROOF=1 STAB=0 HEIGHT=$H GRAIN_STRENGTH=0 ./scripts/grade.sh src/IMG_0607.mov
+GRADE_WORK_DIR=<dir> PROOF=1 STAB=0 HEIGHT=$H GRAIN_STRENGTH=0 <copy>/scripts/grade.sh \
+	src/IMG_0607.mov
+ffmpeg -i <render>.mp4 -vf "select=eq(n\,12),extractplanes=y" -frames:v 1 \
+	-f rawvideo -pix_fmt gray <frame>.gray
+```
+
+where `<copy>` has `unsharp=%s:%s:0.0` in `delivery_image_chain`. `STAB=0` leaves the warp's own
+master-resolution `unsharp` out, which is not the one in question. `extractplanes` rather than a
+`gray` conversion, because the conversion rescales limited range: this frame's brightest luma
+reads 218 through `extractplanes` and 235 converted.
 
 ## The tone stage is not literally luma-only
 
