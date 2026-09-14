@@ -48,18 +48,22 @@ refused rather than deferred.
 
 ---
 
-## The old version is the reference
+## The default image is recorded, and moves on purpose
 
-The chain is a fork of an earlier CLI, frozen at one commit and never touched again.
+The chain is a fork of an earlier CLI, frozen at one commit and never touched again. It used to be the
+reference: the default render had to match it byte for byte. That proved the fork survived, and then
+it stopped the image from ever getting better than the old edit.
 
 ```sh
-./scripts/check.sh --conformance   # still byte-identical to the precursor?
+./tests/render-golden.sh                        # is the default render the recorded one?
+./tests/render-golden.sh --regenerate "<why>"   # it moved on purpose; record it, with the reason
+./scripts/check.sh --conformance                # has it departed from the precursor yet? (information)
 ```
 
-Fixes here never reach it, which is the price. What it buys is something to be wrong against: the
-engine can be rewritten and instrumented, and a diff says whether the image survived.
+A hash says the image changed, not that it improved. Both renders are kept in `dist/golden/` to judge
+by eye.
 
-→ [`PROVENANCE.md`](PROVENANCE.md)
+→ [`adr/0014`](docs/adr/0014_THE_PRECURSOR_IS_PROVENANCE_NOT_THE_ORACLE.md) · [`PROVENANCE.md`](PROVENANCE.md)
 
 ---
 
@@ -132,8 +136,8 @@ meaningless for anyone else's, and applied silently either way.
 MATCH=batch ./scripts/grade.sh src/     # anchor on the median of these clips instead
 ```
 
-The default is unchanged, because changing it would change every existing render and the fork's
-whole claim is that it still renders what its precursor did.
+The default is unchanged. It was kept to stay byte-identical to the precursor, a reason ADR 0014
+withdrew, so whether it should change is an open question.
 
 → [`adr/0011`](docs/adr/0011_THE_EXPOSURE_REFERENCE_CAN_COME_FROM_THE_SHOOT.md)
 

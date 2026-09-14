@@ -39,8 +39,10 @@ Check: `lipo -archs dist/LogGrade.app/Contents/MacOS/LogGrade` prints `x86_64 ar
   down. That source is also the first place to look for an arm64 build.
 - **Both halves must be the same ffmpeg version and configuration.** A different build on the
   Apple Mac is a different renderer, and "did the image move" would then depend on which Mac
-  rendered it. If no matching arm64 build exists, replace the Intel half too, then run
-  `./scripts/check.sh --conformance` on this Mac, because the engine has changed.
+  rendered it. If no matching arm64 build exists, replace the Intel half too. `tests/render-golden.sh`
+  will then skip, because the golden names the old build. Compare a render from the new build with
+  the one kept in `dist/golden/`, then re-record with `--regenerate "ffmpeg replaced: <build>"`.
+  `--conformance` cannot catch this, because both of its sides run the same new binary.
 - Required in both halves: `zscale` (zimg), `libx264`, `prores_ks`. Check with
   `ffmpeg -filters | grep zscale` and `ffmpeg -encoders | grep -E 'libx264|prores_ks'`.
 - Statically linked only. A Homebrew ffmpeg depends on libraries under `/opt/homebrew`, so it

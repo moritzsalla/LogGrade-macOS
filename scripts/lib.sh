@@ -672,7 +672,7 @@ crop_prefix() {  # crop_prefix <src-w> <src-h> <aspect-w> <aspect-h> <offset|cen
 	# not an error — there is exactly one window, so there is nothing to place. This is what keeps
 	# the 9:16 deliverable byte-identical now that EVERY deliverable resolves its crop through
 	# here: it used to be the one whose case branch handed the chain a literal empty string, and a
-	# no-op `crop=2160:3840:0:0` in the graph is a change tests/conformance.sh would see.
+	# no-op `crop=2160:3840:0:0` in the graph is a change tests/render-golden.sh would see.
 	if [ "$ch" -eq "$sh" ]; then
 		return 0
 	fi
@@ -955,7 +955,7 @@ DELIVERY_CHROMA="hqdn3d=0:5:0:6,"
 DELIVERY_BLEND="blend=all_mode=grainmerge:shortest=1"
 
 # Every output flag a deliverable is encoded with. Both delivery paths passed their own copy, and
-# conformance renders only grade.sh's, so a change to one reached a file nobody compared.
+# the byte comparisons render only grade.sh's, so a change to one reached a file nobody compared.
 # CRF 18, preset slow and AAC 192k: the platform recompresses whatever it receives, so it is fed
 # quality (docs/PIPELINE.md, "Encode"), and grain survival through that re-encode was measured
 # against exactly this encode (ADR 0008).
@@ -1281,10 +1281,10 @@ delivery_grain_branch() {  # delivery_grain_branch <w> <h> <strength>
 # property the plate was built grey for. Measured on a ramp at 0.35 and 0.5: grain sd 1.2 in the
 # darkest ninth, 3.2 at the midtones, 1.8 in the brightest, against a flat 3.2 unweighted.
 #
-# Both weights at 1 leave the mask out of the graph and return the plain blend, which is what keeps a
-# default render byte-identical to the precursor's. `maskedmerge` has no `shortest` option, and does
-# not need one: its mask comes from the image, which ends, and the blend after it keeps its own
-# `shortest=1` for the plate.
+# Both weights at 1 leave the mask out of the graph and return the plain blend, so flat grain costs
+# no filter it does not use. `maskedmerge` has no `shortest` option, and does not need one: its
+# mask comes from the image, which ends, and the blend after it keeps its own `shortest=1` for the
+# plate.
 delivery_grain_merge() {  # delivery_grain_merge <image-label> <grain-label> <out-label> <shadows> <highlights>
 	if [ "$(awk -v s="$4" -v h="$5" 'BEGIN { print (s == 1 && h == 1) ? "flat" : "weighted" }')" = "flat" ]; then
 		printf '[%s][%s]%s[%s]' "$1" "$2" "$DELIVERY_BLEND" "$3"

@@ -38,8 +38,8 @@ same render agrees to 0.01, and the error grows with saturation.
 ## The decision
 
 A GPU preview is a second implementation of the image. This repo permits exactly one of those, and
-only when a test can hold it to the first — that is what ADR 0008 says and what the conformance
-test enforces for the render. The gate for a preview is the parity golden, and the golden currently
+only when a test can hold it to the first — that is what ADR 0008 says and what `EndToEndTests`
+enforces for the render. The gate for a preview is the parity golden, and the golden currently
 measures a divergence nobody can explain. Building against it would mean shipping an interface
 whose numbers are wrong in a way that is known, unquantified in cause, and largest exactly where
 this footage lives: saturated signage, which is what the whole calibration is built around.

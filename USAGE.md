@@ -266,8 +266,8 @@ pass and the alternative is a file that looks finished and quietly lacks the sta
 ## Checking your work
 
 ```sh
-./scripts/check.sh                 # shellcheck, grade golden, Swift suite, bats
-./scripts/check.sh --conformance   # ...and: still byte-identical to the precursor?
+./scripts/check.sh                 # shellcheck, grade golden, Swift suite, render golden, bats
+./scripts/check.sh --conformance   # ...and report whether the default still matches the precursor
 ./scripts/check.sh --allow-skips   # accept a partial run on purpose
 ```
 
@@ -275,9 +275,17 @@ A missing tool is a **failure, not a pass**. The run records what did not execut
 non-zero naming it, because this command used to exit 0 having run only part of itself — so "green"
 could mean "linted nothing".
 
-`--conformance` renders one clip through this fork *and* through the frozen precursor and asserts
-the bytes match. It costs minutes rather than seconds, which is why it is opt-in. Run it before
-trusting any change to the chain itself. See [`PROVENANCE.md`](PROVENANCE.md).
+The **render golden** renders one clip through the real chain and compares its stream hash with the
+default image recorded in `tests/fixtures/render-golden.json`. If you changed the image on purpose,
+look at the two renders in `dist/golden/` and record the new one with the reason:
+
+```sh
+./tests/render-golden.sh --regenerate "grain strength re-tuned on the Sep shoot"
+```
+
+`--conformance` renders through the frozen precursor too and *reports* whether the default still
+matches it. It costs minutes, and a difference does not fail the run: the precursor is where this
+came from, not what the image must be. See [ADR 0014](docs/adr/0014_THE_PRECURSOR_IS_PROVENANCE_NOT_THE_ORACLE.md).
 
 ---
 

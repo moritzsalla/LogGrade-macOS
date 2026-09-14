@@ -137,6 +137,18 @@ _Avoid_: crop, region, area, sample
 What a sampler measures at the current settings, in that reference's own unit.
 _Avoid_: value, result, measurement
 
+**Golden**:
+An output this repo recorded from its own engine, held so that a change which moves it fails by
+name. It moves when someone records a new one with a reason. It says what the engine did, never
+whether that was good. There are two: the grade golden (ffmpeg's output per probe patch, which
+the preview is held to) and the render golden (the default image, byte for byte).
+_Avoid_: oracle, expected, snapshot
+
+**Precursor**:
+`ffgrade`, frozen at the commit this repo forked from. Provenance: it records where the chain
+came from and what the old edit did. It is not a standard the image is held to (ADR 0014).
+_Avoid_: **reference** — that word is an object in frame; also oracle, original, upstream
+
 ## Failures, by name
 
 **Flat**:

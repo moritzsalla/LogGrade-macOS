@@ -13,9 +13,12 @@
 # the end, naming what did not run. Pass --allow-skips when you genuinely want a partial run, e.g.
 # iterating on one bats test without the Swift toolchain installed.
 #
-# --conformance additionally renders one clip through this fork AND through the frozen precursor
-# and asserts the bytes match (tests/conformance.sh). It is opt-in because it costs minutes, not
-# seconds; it is the check to run before trusting a change to the chain itself.
+# The render golden (tests/render-golden.sh) renders one clip through the real chain and compares it
+# with the default image this repo recorded. That is the check that says the image moved.
+#
+# --conformance additionally renders through the frozen precursor and REPORTS whether this fork
+# still matches it. It is information, not a gate: the precursor is provenance, and the default is
+# allowed to depart from it on purpose (docs/adr/0014). A render that fails is still a failure.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -62,9 +65,9 @@ if command -v shellcheck >/dev/null; then
 	# `*.sh` glob for its whole existence.
 	# `mapfile` is bash 4.0+; macOS ships 3.2, where it silently does nothing and the check
 	# stops testing anything. Use a plain loop.
-	# tests/ is included because a shell script there is production code too: conformance.sh is the
-	# guard that the fork still renders what the precursor rendered, and it was unlinted for exactly
-	# as long as this loop only looked in scripts/.
+	# tests/ is included because a shell script there is production code too: conformance.sh was
+	# unlinted for exactly as long as this loop only looked in scripts/, and render-golden.sh is now
+	# the guard on the default image.
 	(
 		targets=""
 		for f in scripts/* tests/*; do
@@ -124,16 +127,33 @@ else
 fi
 
 echo
-echo "== conformance (this fork vs the frozen precursor) =="
-# OPT-IN, and deliberately not counted as a skip. The missing-tool rule above exists because an
-# absent tool silently removed coverage; choosing not to pass --conformance is not silent, and this
-# check renders through two engines, which takes minutes rather than seconds. Run it before
-# trusting any change to the chain in scripts/lib.sh.
+echo "== render golden (the default image, against the one this repo recorded) =="
+# One real render, about 11 seconds, so --fast leaves it out with the other renders.
+# A skip is fatal like any other, EXCEPT when the footage or Apple's cube is missing: every render
+# test skips then, and the NOTE at the top already says so. The remaining skip is a golden recorded
+# on a different ffmpeg build or architecture, and that is coverage this machine does not have.
+if [ "$FAST" = "1" ]; then
+	echo "not run (--fast)"
+else
+	set +e; ./tests/render-golden.sh; rc=$?; set -e
+	case "$rc" in
+		0) ;;
+		3) [ -n "$MISSING_MEDIA" ] || SKIPPED="$SKIPPED render-golden";;
+		*) exit "$rc";;
+	esac
+fi
+
+echo
+echo "== conformance (this fork vs the frozen precursor, information only) =="
+# OPT-IN, and never counted as a skip or a failure when the images differ. It renders through two
+# engines, which takes minutes. A difference is expected once the default has been moved through
+# the render golden; what it tells you is whether it has.
 if [ "$CONFORMANCE" = "1" ]; then
 	set +e; ./tests/conformance.sh; rc=$?; set -e
 	case "$rc" in
 		0) ;;
-		3) SKIPPED="$SKIPPED conformance";;
+		3) echo "(conformance skipped)";;
+		4) echo "(the default render has departed from the precursor — see recorded_because in tests/fixtures/render-golden.json)";;
 		*) exit "$rc";;
 	esac
 else
@@ -190,6 +210,6 @@ fi
 
 if [ "$FAST" = "1" ]; then
 	echo
-	echo "FAST RUN (--fast): did not run the bats tests tagged slow, the Swift classes"
-	echo "  ${SLOW_SWIFT//|/, }, or swift build. Not a pass for a commit: run ./scripts/check.sh."
+	echo "FAST RUN (--fast): did not run the render golden, the bats tests tagged slow, the Swift"
+	echo "  classes ${SLOW_SWIFT//|/, }, or swift build. Not a pass for a commit: run ./scripts/check.sh."
 fi

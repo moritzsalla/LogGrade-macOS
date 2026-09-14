@@ -7,10 +7,16 @@ The engine in `scripts/`, its tests, the LUTs, `look.json`, `bench/` and the doc
 
 **The precursor is frozen and is not modified.** Not a branch, not a commit, not a file. That
 constraint has one cost worth stating plainly: fixes made here never reach it, and it keeps its
-known debt forever. What it buys is an oracle. At default settings this fork must render
-byte-identical output to the precursor, which `tests/conformance.sh` asserts — so the copy can be
+known debt forever. What it bought was an oracle. At default settings this fork rendered
+byte-identical output to the precursor, which `tests/conformance.sh` asserted, so the copy could be
 instrumented and then parameterised without anyone having to take it on faith that the image
 survived.
+
+It is provenance now, not the oracle (ADR 0014). The precursor was the best edit at the time, and
+holding the default to it forbade improving on it. The default image is held by
+`tests/render-golden.sh`, seeded from a render whose stream hash matched the precursor's, and it moves
+on purpose with a recorded reason. `tests/conformance.sh` still runs and reports whether the default
+has departed.
 
 That test rests on a measurement rather than an assumption. Two renders of one clip through the
 precursor, minutes apart, produced byte-identical files and identical packet-stream hashes. Nothing

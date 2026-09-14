@@ -38,7 +38,8 @@ glow.
 
 - **A strength of 0 removes the stage from the graph.** Even idle, the float round trip moves the
   picture by 0.23 code values on average against the 10-bit path, so "neutral" has to mean
-  "absent". That is what keeps the default render byte-identical to the precursor.
+  "absent". The measurement is the reason. That it also left the default render byte-identical to
+  the precursor was, after ADR 0014, a side effect.
 - **The preview is a second implementation, and half of it is held exactly.** `LiveHalation`'s
   arithmetic is compared with the generator's cubes entry for entry. Its blur cannot be — the
   render and the preview blur different frames with different kernels — so it is held to the render

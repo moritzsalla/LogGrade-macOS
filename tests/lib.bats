@@ -1809,8 +1809,8 @@ PY
 # resolve to exactly the numbers the branches hardcoded.
 
 @test "the presets still resolve to the sizes their case branches hardcoded" {
-	# The byte-identity guard, in the cheap form. tests/conformance.sh renders both engines and
-	# compares, which costs minutes; this fails in milliseconds and names which number moved.
+	# The byte-identity guard, in the cheap form. tests/render-golden.sh renders the default image
+	# and compares, which takes a real render; this fails in milliseconds and names which number moved.
 	run deliverable_spec reels
 	[ "$output" = "reels 9 16 - reels-stories_9x16" ] || fail "reels moved: $output"
 	run deliverable_spec feed
@@ -1846,7 +1846,7 @@ PY
 	# THE BYTE-IDENTITY RULE. Every deliverable resolves its crop through crop_prefix now, where
 	# the 9:16 one used to be handed a literal empty string by its own branch. A no-op
 	# `crop=2160:3840:0:0` would render the same picture and still change the graph, which is a
-	# difference tests/conformance.sh sees.
+	# difference tests/render-golden.sh sees.
 	run crop_prefix 2160 3840 9 16 750
 	[ "$status" -eq 0 ] || fail "refused the source's own shape: $output"
 	[ -z "$output" ] || fail "emitted a crop for a deliverable that does not crop: $output"
@@ -2069,7 +2069,7 @@ print("ok")
 # --- the input correction -----------------------------------------------------
 # Exposure, white balance and the CDL wheels, as one generated cube that runs BEFORE Apple's
 # conversion — in log, where highlights up to 12x diffuse white still exist. A neutral correction leaves the
-# filter out of the graph, which is what keeps the default render identical to the precursor's.
+# filter out of the graph, because an identity cube still pays interpolation error on every pixel.
 
 @test "the correction generator round-trips Apple's published transfer function" {
 	# The formula is published, so this is exact rather than fitted. If it ever stops round-tripping,
@@ -2103,8 +2103,8 @@ print("%.1e %.4f" % (worst, mc.decode(1.0)))
 }
 
 @test "the correction cube is skipped entirely when it would do nothing" {
-	# The engine must not render every pixel through a lookup that returns it. This is also what
-	# holds conformance: the default graph has to be the one the precursor renders.
+	# The engine must not render every pixel through a lookup that returns it: that costs time, and
+	# interpolation error on every pixel of a look nobody changed.
 	local work="$BATS_TEST_TMPDIR/neutral"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
@@ -2260,7 +2260,7 @@ _look_with() {  # _look_with <name> <jq-assignment>
 }
 
 @test "encode settings, analysis settings and stage paths are spelled in lib.sh and nowhere else" {
-	# Each of these was written into two stage scripts and conformance renders only one of them,
+	# Each of these was written into two stage scripts and the byte comparisons render only one of them,
 	# so an edit to the other reached files nobody compared: the delivery encode, the ProRes master
 	# encode, the stabilisation analysis both entry points cache under one path, the Apple cube's
 	# path, and the paths one stage reads that another wrote.
@@ -2369,8 +2369,8 @@ sys.exit("; ".join(problems) or None)
 
 @test "a neutral halation is left out of the graph" {
 	# Even an idle float round trip moves the picture by a fraction of a code value against the
-	# 10-bit path, so a strength of 0 must remove the stage entirely. That is what keeps the default
-	# render byte-identical to the precursor's.
+	# 10-bit path (0.23 code values on average, ADR 0012), so a strength of 0 must remove the stage
+	# entirely.
 	run "$SCRIPTS/make-halation-luts.py" --check-neutral --strength 0
 	[ "$output" = "neutral" ] || fail "strength 0 reported as $output"
 	run "$SCRIPTS/make-halation-luts.py" --check-neutral --strength 0.01
@@ -2427,7 +2427,8 @@ sys.exit("; ".join(problems) or None)
 # --- the print, and how strongly each film cube applies -----------------------
 
 @test "a look at full strength and no print leaves the grade chain as it was" {
-	# Absent rather than idle, so the default render stays the precursor's byte for byte.
+	# Absent rather than idle: full strength and no print add no filter, so the chain is the one a
+	# look without strengths built.
 	local look="$BATS_TEST_DIRNAME/../luts/looks/kodak_portra_400_nc.cube" chain
 	chain="$(LOOK_LUT="$look" PRINT_LUT="" LOOK_STRENGTH=1 PRINT_STRENGTH=1 grade_chain t.cube 1 0)"
 	[ "$(printf '%s' "$chain" | grep -o 'lut3d' | wc -l | tr -d ' ')" = "1" ] \
@@ -2552,7 +2553,7 @@ sys.exit("; ".join(problems) or None)
 }
 
 @test "flat grain weights leave the mask out of the graph" {
-	# Absent, not idle: the default render has to stay the precursor's byte for byte.
+	# Absent, not idle: flat grain is the plain blend, with no mask built for nothing.
 	[ "$(delivery_grain_merge b g o 1 1)" = "[b][g]${DELIVERY_BLEND}[o]" ] \
 		|| fail "weights of 1 still built a mask: $(delivery_grain_merge b g o 1 1)"
 	[ "$(delivery_grain_merge b g o 1.0 1.00)" = "[b][g]${DELIVERY_BLEND}[o]" ] \
@@ -2748,4 +2749,30 @@ sys.exit("; ".join(problems) or None)
 	YAVG_IN="600,metadata=print" GRADE_WORK_DIR="$b" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
 	[ "$status" -ne 0 ] || fail "accepted a non-numeric exposure"
 	[[ "$output" == *"YAVG_IN must be numeric"* ]] || fail "refused without saying why: $output"
+}
+
+# tests/render-golden.sh holds the default image to this repo's own recorded render (ADR 0014). Its
+# render cannot run here in seconds, and check.sh runs it for real; these cover the two ways it can
+# be relaxed without anyone seeing, and assert the work was not attempted, since a render that
+# fails for any other reason would also exit non-zero.
+
+@test "the render golden refuses to move without a reason" {
+	local golden="$BATS_TEST_TMPDIR/render-golden.json"
+	printf '{"stream_md5":"recorded"}\n' > "$golden"
+	GOLDEN="$golden" run "$BATS_TEST_DIRNAME/render-golden.sh" --regenerate
+	[ "$status" -eq 2 ] || fail "expected a usage refusal, got $status: $output"
+	[[ "$output" == *"--regenerate needs a reason"* ]] || fail "refused without saying why: $output"
+	[[ "$output" != *"clip:"* ]] || fail "rendered before refusing: $output"
+	[ "$(cat "$golden")" = '{"stream_md5":"recorded"}' ] || fail "the golden was rewritten"
+}
+
+@test "a render golden from another ffmpeg build is skipped by name, not compared" {
+	[ -f "$BATS_TEST_DIRNAME/../luts/apple/AppleLogToRec709-v1.0.cube" ] || skip "no Apple cube"
+	local golden="$BATS_TEST_TMPDIR/render-golden.json"
+	printf '{"clip":{"name":"IMG_0607.mov","bytes":1},"proof_secs":0.1,"ffmpeg":"ffmpeg version 0-other","arch":"%s","stream_md5":"x","inputs":{}}\n' \
+		"$(uname -m)" > "$golden"
+	GOLDEN="$golden" run "$BATS_TEST_DIRNAME/render-golden.sh"
+	[ "$status" -eq 3 ] || fail "expected a skip, got $status: $output"
+	[[ "$output" == *"recorded with 'ffmpeg version 0-other'"* ]] || fail "skipped without naming the build: $output"
+	[[ "$output" != *"clip:"* ]] || fail "rendered against a golden from another build: $output"
 }

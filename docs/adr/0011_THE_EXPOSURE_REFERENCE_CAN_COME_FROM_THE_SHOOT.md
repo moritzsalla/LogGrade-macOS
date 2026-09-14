@@ -27,6 +27,10 @@ every existing render, and `tests/conformance.sh` asserts this fork is still byt
 frozen precursor at default settings. That test is the oracle the whole fork rests on; a decision
 that costs it is not worth the tidiness.
 
+**Superseded in its reasoning by ADR 0014.** The precursor is no longer the standard the default is
+held to, so "it would break conformance" is no longer a reason. The default above is unchanged, and
+whether it should change is open, to be decided on its merits.
+
 ## Consequences
 
 - **The median, and the lower one on an even count.** Picking a real clip's measurement beats

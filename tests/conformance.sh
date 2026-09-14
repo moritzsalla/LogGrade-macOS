@@ -1,10 +1,17 @@
 #!/bin/bash
 # conformance.sh — does this fork still render what the precursor rendered?
 #
-# WHY THIS EXISTS. The engine here is a copy (see PROVENANCE.md), and a copy that is about to be
-# instrumented and then parameterised needs the one thing a copy cannot provide for itself: proof
-# that the image did not move. The precursor is frozen, so it can be the oracle. This renders the
-# same clip through both engines and compares the bytes.
+# WHY THIS EXISTS. The engine here is a copy (see PROVENANCE.md), and a copy that was about to be
+# instrumented and then parameterised needed the one thing a copy cannot provide for itself: proof
+# that the image did not move. The precursor is frozen, so it could be compared against. It did that
+# job, and PROVENANCE.md records it.
+#
+# IT IS NO LONGER THE GUARD. The precursor was as good as the edit could be made at the time, not as
+# good as it can be, and a render held to it can never improve. Nothing can be re-based against a
+# frozen repo either, so the only way past it was deleting it. The default image is now held by
+# tests/render-golden.sh, recorded from this repo, which moves on purpose with a reason. This
+# answers a different question — has the default departed from the precursor yet? — and a
+# departure exits 4, which check.sh reports rather than fails on. docs/adr/0014.
 #
 # BYTE-IDENTICAL, not similar. Both sides run the same ffmpeg binary with the same arguments, so
 # anything short of identical means the graph diverged — and a tolerance would let exactly that
@@ -12,9 +19,7 @@
 # of the precursor, minutes apart, produced identical files. Nothing passes `-bitexact`; this build
 # simply stamps no timestamp into the container.
 #
-# IT PINS THE DEFAULT CONFIGURATION ONLY. Parameterising the chain will legitimately break this
-# once. The commit that does it says so in its message and re-bases the expectation deliberately;
-# quietly relaxing this test would leave the repo with a guard that cannot fail.
+# IT COMPARES THE DEFAULT CONFIGURATION ONLY.
 #
 # STABILISATION IS EXCLUDED (STAB=0). Its detect pass costs ~65s per clip per side, and pinning it
 # would rest on vid.stab being deterministic as well. So the warp is not covered here — everything
@@ -28,7 +33,7 @@
 #   PRECURSOR=<path>    where the frozen original lives (default: ../ffgrade)
 #   PROOF_SECS=<n>      seconds to render through the real chain (default: 0.1)
 #
-# Exit: 0 identical, 1 diverged or a render failed, 3 skipped (no precursor, no cube, no footage).
+# Exit: 0 identical, 4 diverged, 1 a render failed, 3 skipped (no precursor, no cube, no footage).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PRECURSOR="${PRECURSOR:-$(cd "$ROOT/.." && pwd)/ffgrade}"
@@ -93,9 +98,10 @@ if cmp -s "$A" "$B"; then
 	exit 0
 fi
 
-# Diverged. Print enough to tell a chain change from a muxer change without a second run: if the
-# packet streams match and only the files differ, the graph is fine and the container is not.
-echo "CONFORMANCE FAILED: this fork no longer renders what the precursor renders." >&2
+# Diverged. Not an error in itself (see the top), but print enough to tell a chain change from a
+# muxer change without a second run: if the packet streams match and only the files differ, the
+# graph is fine and the container is not.
+echo "DIVERGED: this fork no longer renders what the precursor renders." >&2
 echo "  precursor: $(stat -f%z "$A") bytes" >&2
 echo "  fork:      $(stat -f%z "$B") bytes" >&2
 for side in "precursor:$A" "fork:$B"; do
@@ -103,5 +109,5 @@ for side in "precursor:$A" "fork:$B"; do
 	ffmpeg -v error -i "${side#*:}" -map 0 -c copy -f md5 - >&2
 done
 echo "  If the stream hashes MATCH, the chain is intact and the container changed." >&2
-echo "  If they differ, the filter graph changed — say so in the commit, or fix it." >&2
-exit 1
+echo "  If they differ, the image moved. tests/render-golden.sh says whether that was recorded." >&2
+exit 4
