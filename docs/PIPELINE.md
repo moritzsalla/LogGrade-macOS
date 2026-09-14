@@ -176,6 +176,26 @@ expense of another.
   truncated), CRF 18, AAC 192k, `+faststart`. Instagram recompresses everything it receives
   regardless — feeding it high quality just means less of what it does have to throw away.
   Same color-tag verification as every other stage.
+- **Audio high-pass, 60 Hz** (`highpass`, 2-pole). Measured over all of `IMG_0607.mov`: below
+  40 Hz is the quietest band, not the loudest, so the cutoff is the one that trims the low end and
+  the peak without reaching 80–120 Hz, which is as loud as anything in the file.
+
+  | dBFS | total | peak | true peak | <40 | 40–60 | 60–80 | 80–120 | 120–250 | 250+ |
+  |---|---|---|---|---|---|---|---|---|---|
+  | source | −29.8 | −9.1 | −9.1 | −50.1 | −39.4 | −37.9 | −39.0 | −37.3 | −35.1 |
+  | 60 Hz, change | −1.0 | −1.8 | −1.9 | −9.0 | −4.4 | −2.0 | −0.7 | −0.1 | 0.0 |
+  | 70 Hz, change | −1.3 | −1.5 | −1.5 | −11.4 | −6.2 | −3.2 | −1.1 | −0.2 | 0.0 |
+  | 80 Hz, change | −1.7 | −1.3 | −1.3 | −13.5 | −8.0 | −4.5 | −1.8 | −0.3 | 0.0 |
+
+  ```sh
+  HP=highpass=f=60   # or anull for the source row
+  BAND="firequalizer=gain='if(gte(f,40)*lt(f,60),0,-120)':delay=0.2:zero_phase=1:wfunc=nuttall"
+  ffmpeg -i src/IMG_0607.mov -map 0:a:0 -af "$HP,$BAND,astats=measure_perchannel=none" -f null -
+  ffmpeg -i src/IMG_0607.mov -map 0:a:0 -af "$HP,ebur128=peak=true" -f null -   # true peak
+  ```
+
+  The band filter reads a sine 0.35 dB low in its band and 30 dB down one band away, but leaks
+  within 3 Hz of an edge, so treat neighbouring bands as indicative.
 
 ## Sharpen and grain at other heights
 
