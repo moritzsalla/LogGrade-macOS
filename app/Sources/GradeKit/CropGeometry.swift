@@ -55,7 +55,4 @@ public struct CropGeometry: Equatable {
         clamp(Int((fraction * Double(sourceHeight)).rounded()))
     }
 
-    /// The engine's own default, which is one clip's composition and not a value for any other.
-    /// Named rather than spelled 750 in the interface, so nobody reads it as a sensible default.
-    public static let precursorDefaultOffset = 750
 }

@@ -9,11 +9,11 @@
 #          width (default 1080) and the height follows the aspect.
 #
 #   CROP_Y applies to whichever deliverables actually crop this master: the vertical offset, in
-#          pixels on the master, where the crop window starts. Default 750 is IMG_0609's biased-up
-#          crop, which removes the parking-ceiling strip at the top and keeps the ivy plus a little
-#          more road at the bottom. It is NOT assumed correct for every clip's composition —
-#          eyeball a crop preview per clip and pass the right offset. A deliverable that is already
-#          the master's own shape takes no crop and ignores it.
+#          pixels on the master, where the crop window starts. THERE IS NO DEFAULT — it used to be
+#          750, which is IMG_0609's biased-up crop and nobody else's, so a deliverable that crops is
+#          refused without one. Eyeball a crop preview per clip and pass the right offset, or pass
+#          `centre` to say explicitly that this clip does not need one. A deliverable that is
+#          already the master's own shape takes no crop and ignores it.
 #
 #   ACCEPT_STALE=1 delivers even though the transform is older than its source, i.e. unstabilised
 #          on purpose. Without it a stale transform is refused: this stage has no detect pass, so
@@ -48,10 +48,19 @@ GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain
 read -r NAME AW AH OFF SUFFIX <<< "$(deliverable_spec "$TARGET")"
 W="$(require_number WIDTH "${WIDTH:-1080}")"; W=$(( W - W % 2 ))
 H="$(deliverable_height "$W" "$AW" "$AH")"
-# The positional offset still wins over the spec's own, because it is the more specific thing the
-# caller just typed.
-[ -z "${3:-}" ] || OFF="$(require_number CROP_Y "$3")"
-[ "$OFF" != "-" ] || OFF="$(require_number CROP_Y "${CROP_Y:-750}")"
+# The positional offset wins over the spec's own, because it is the more specific thing the caller
+# just typed; CROP_Y from the environment is the fallback. `centre` passes through as a word and is
+# resolved per clip by crop_prefix, against the frame it actually measured. An offset that is never
+# supplied stays empty, and crop_prefix refuses it rather than inventing one.
+_arg_off="${3:-${CROP_Y:-}}"
+if [ -n "$_arg_off" ]; then
+	case "$_arg_off" in
+		centre|center) OFF="centre";;
+		*) OFF="$(require_number CROP_Y "$_arg_off")";;
+	esac
+elif [ "$OFF" = "-" ]; then
+	OFF=""
+fi
 
 IN="$WORK/dist/02-graded/${CLIP}_graded.mov"
 SRC="$WORK/src/${CLIP}.mov"

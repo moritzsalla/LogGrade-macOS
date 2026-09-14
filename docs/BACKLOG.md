@@ -18,6 +18,12 @@ two as presets. Byte-identical at defaults, confirmed against the precursor.
 **Done — the exposure reference can come from the shoot** (ADR 0011). `MATCH=batch`. The default is
 still `look.json`'s 609, which is one frame of one clip.
 
+**Done — the crop offset has no default** (ADR 0010). It was 750, IMG_0609's framing. A
+deliverable that crops is now refused without an offset, for one clip as readily as for twenty, and
+`CROP_Y=centre` is the explicit way to say a clip does not need one. Centre was rejected as a
+*default* for the reason the README gives: a batch centred by default gives files that all look
+finished and are all framed wrong.
+
 **Done — the Bench is deleted** (ADR 0007, superseded). Three implementations of the tone and trim
 arithmetic became two.
 
@@ -33,13 +39,6 @@ the preview draws a 4:5 window whatever the cropping deliverable actually is. Un
 interface today, since the only cropping preset IS 4:5 — but a project file carrying, say, a 1:1
 target will show a box that does not match what the engine renders. Same seam as the 2D crop work
 above; fix them together.
-
-**The default crop offset is still one clip's composition.** `CROP_Y` defaults to 750, which is
-IMG_0609's framing, and it now applies to any shape that crops rather than to one. That is the same
-class of baked-in constant as `reference_yavg` was, and the same argument applies to it. Centre is
-the neutral default; what stops it being a one-line change is that it moves the output of an
-existing single-clip `feed` render, which is the reason the batch refusal exists instead. Decide it
-the way ADR 0011 decided the exposure reference — opt in, default unchanged.
 
 **Sharpen and grain at other frame sizes.** The sharpener's radius follows the output height and its
 amount does not, and the grain was sized at 1080 — an assumption, stated as one in
@@ -72,7 +71,7 @@ that is judged, the rest of the shoot should not be rendered against it.
 
 **Run the remaining clips.** Per-clip procedure in `docs/BATCH_RUNBOOK.md`. One thing there is
 per-clip and must not be inherited from IMG_0609: the Feed crop offset, since 750 is this clip's
-composition only.
+composition only. The engine now refuses rather than inheriting it.
 
 ## Worth doing next
 

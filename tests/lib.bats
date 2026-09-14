@@ -1800,6 +1800,52 @@ PY
 	[ -z "$(ls -A "$work/dist/03-final" 2>/dev/null)" ] || fail "delivered anyway"
 }
 
+@test "a cropping deliverable with no offset is refused even for a single clip" {
+	# THE DEFAULT IS GONE. It was 750 — IMG_0609's composition — which meant a single-clip run
+	# silently framed every other clip in the world to one afternoon's parking ceiling. The batch
+	# case was already refused; this is the same rule applied to the case the default existed for.
+	local work="$BATS_TEST_TMPDIR/nodefault"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/ONE.mov"
+	DELIVERABLES=feed MATCH=0 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/ONE.mov"
+	[ "$status" -ne 0 ] || fail "invented an offset for a single clip: $output"
+	[[ "$output" == *"GRADE_CODE=REFUSE_CROP_NO_OFFSET"* ]] || fail "unnamed refusal: $output"
+	[[ "$output" == *"no sensible"* ]] || fail "did not say why there is no default: $output"
+	[ -z "$(ls -A "$work/dist/03-final" 2>/dev/null)" ] || fail "delivered anyway"
+	# An explicit offset still works, and so does an explicit "I do not need one".
+	DELIVERABLES=feed CROP_Y=centre MATCH=0 STAB=0 DRY=1 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/ONE.mov"
+	[ "$status" -eq 0 ] || fail "CROP_Y=centre was not accepted: $output"
+}
+
+@test "centre is resolved against each clip's own frame, not once for the run" {
+	# A fixed pixel offset cannot be right for two differently shaped sources; a centred one is
+	# right for both. That is the whole reason centre is available and 750 is not.
+	run crop_prefix 2160 3840 4 5 centre
+	[ "$output" = "crop=2160:2700:0:570," ] || fail "not centred on a 3840-tall source: $output"
+	run crop_prefix 2160 2880 4 5 centre
+	[ "$output" = "crop=2160:2700:0:90," ] || fail "centre did not follow the source height: $output"
+	# Even, because an odd vertical offset shifts the chroma siting on 4:2:0.
+	run crop_prefix 2160 3841 4 5 centre
+	[ "${output##*:}" = "570," ] || fail "centre landed on an odd row: $output"
+}
+
+@test "crop_prefix refuses an offset it was never given, rather than inventing one" {
+	# Reachable past the run's up-front check, which reads the first renderable clip: a later clip
+	# of another shape can need a crop where that one did not.
+	run crop_prefix 2160 3840 4 5 ""
+	[ "$status" -ne 0 ] || fail "accepted an empty offset: $output"
+	[[ "$output" == *"needs a vertical offset"* ]] || fail "gave no reason: $output"
+	[[ "$output" == *"CROP_Y=centre"* ]] || fail "did not say how to say 'no preference': $output"
+}
+
+@test "a deliverable's own offset may be centre, and it beats the run's" {
+	run deliverable_spec feed:4:5:centre
+	[ "$output" = "feed 4 5 centre feed_4x5" ] || fail "centre was not carried: $output"
+	run deliverable_spec feed:4:5:nonsense
+	[ "$status" -ne 0 ] || fail "accepted a word that is not an offset"
+}
+
 # --- the exposure reference ----------------------------------------------------
 # MATCH=1 lands every clip on look.json's match.reference_yavg, which is a measurement of one frame
 # of one clip of one shoot. MATCH=batch anchors on the run's own median instead. See docs/adr/0011.

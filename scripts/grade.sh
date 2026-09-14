@@ -9,8 +9,10 @@
 #                     preset — 'reels' (9:16) or 'feed' (4:5) — or 'name:aspect-w:aspect-h[:offset]',
 #                     e.g. 'reels,feed' or 'square:1:1,wide:16:9:400'. Height follows the aspect off
 #                     the shared delivery width; see WIDTH.
-#   CROP_Y=<px>       vertical offset for every deliverable that crops and does not carry its own
-#                     (default 750, which is IMG_0609's composition — it is a per-clip framing call)
+#   CROP_Y=<px>       vertical offset for every deliverable that crops and does not carry its own.
+#                     There is NO DEFAULT: a deliverable that crops is refused without one, because
+#                     where the window sits is a composition call per clip. CROP_Y=centre says
+#                     explicitly that this clip does not need one, resolved against each frame.
 #   WIDTH=<px>        the delivery width every deliverable shares. Defaults to HEIGHT's 9:16 width,
 #                     so the default run is 1080 wide exactly as before.
 #   STAB=0            skip stabilisation entirely (faster)
@@ -50,8 +52,8 @@
 #
 # WHAT IS AUTOMATIC vs WHAT THIS REFUSES TO GUESS:
 #   automatic  exposure match, stabilisation, the whole grade, tag verification
-#   refuses    a clip that does not decode as portrait, and a cropped deliverable across several
-#              clips without an explicit offset — that offset is a composition call per clip
+#   refuses    a clip that does not decode as portrait, and a cropped deliverable with no offset —
+#              that offset is a composition call per clip, so there is nothing sensible to default
 #
 # Orientation is NOT handled here or anywhere: it is an ingest concern and the source is trusted.
 # See docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md.
@@ -194,6 +196,16 @@ Y_REF="$(require_number reference_yavg "$(look .match.reference_yavg)")"  # ...a
 GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain.strength)}")"
 SMOOTHING="$(require_number SMOOTHING "${SMOOTHING:-$(look .stabilisation.smoothing)}")"
 STAB="${STAB:-1}"; MATCH="${MATCH:-1}"; DRY="${DRY:-0}"
+# Empty means NOT GIVEN, which is a different thing from 0 — 0 is the top of the frame and a real
+# answer. Validated here because it is spliced into `crop=2160:2700:0:` and a comma in it would
+# open a second filter.
+CROP_Y_OK=""
+if [ -n "${CROP_Y:-}" ]; then
+	case "$CROP_Y" in
+		centre|center) CROP_Y_OK="centre";;
+		*) CROP_Y_OK="$(require_number CROP_Y "$CROP_Y")";;
+	esac
+fi
 case "$MATCH" in
 	0|1|batch) ;;
 	*)
@@ -261,12 +273,21 @@ if [ "${#CLIPS[@]}" -eq 0 ]; then
 	exit 1
 fi
 
-# A crop offset is a per-clip judgement — 750 is IMG_0609's composition, chosen to drop the
-# parking-ceiling strip at the top. Applied to a batch it silently reframes 18 other clips, and
-# the files look done. That is CONTEXT.md's "squashed" failure class in another dimension, so it
-# is refused rather than warned about. Setting an offset explicitly — CROP_Y, or the spec's own
-# fourth field — is taken as "yes, this offset for all of them", which is a decision someone made
-# rather than a default nobody saw.
+# A crop offset is a per-clip judgement, so there is nothing sensible to default it to. It used to
+# default to 750 — IMG_0609's composition, chosen to drop the parking-ceiling strip at the top —
+# which is the correct framing for exactly one clip in the world and silently reframes every other,
+# producing files that look done. That is CONTEXT.md's "squashed" failure class in another
+# dimension, and the same class of baked-in constant that match.reference_yavg was (ADR 0011).
+#
+# So the default is GONE rather than replaced. Centre was the obvious substitute and is refused as
+# one: a batch centred by default gives files that all look finished and are all framed wrong. It
+# is available as `CROP_Y=centre`, which is the same picture arrived at by a decision somebody made
+# rather than by a default nobody saw. The app never relied on the default — it blocks a render
+# whose cropping deliverable has no per-clip offset, which is the rule this now matches.
+#
+# This fires for ONE clip as readily as for twenty. The old check only caught batches, on the
+# reasoning that a single clip was the case the default was chosen for — which was only ever true
+# of IMG_0609.
 #
 # WHICH deliverables crop is a fact about the SOURCE's shape, not about their names: a 4:5 frame is
 # a crop of a 9:16 master and the whole frame of a 4:5 one. So it needs one measurement, taken here
@@ -277,46 +298,42 @@ fi
 # If that measurement fails, every deliverable is ASSUMED to crop. The guard then fires when it did
 # not strictly need to, which costs a re-run; guessing the other way costs a batch of silently
 # reframed files, which is the failure this exists to prevent.
-if [ "${#CLIPS[@]}" -gt 1 ] && [ -z "${CROP_Y:-}" ]; then
-	# EVERY clip, not just the first. Whether a deliverable crops depends on the shape of the clip
-	# in front of it, so one clip's answer is not the batch's — and the first clip is exactly the
-	# one that might be about to be skipped, which would decide the run on a frame it never renders.
-	# A clip that is not portrait is left out for that reason: the loop below skips it, so it has no
-	# vote on a refusal about files that will exist.
-	PROBE_SIZE=""
-	for _src in "${CLIPS[@]}"; do
-		_size="$(source_frame_size "$_src" 2>/dev/null || true)"
-		case "$_size" in
-			*' '*) [ "${_size#* }" -gt "${_size% *}" ] || continue;;
-		esac
-		# The first shape that will actually be rendered decides, and an unmeasurable one is left
-		# empty so deliverable_crops answers conservatively.
-		PROBE_SIZE="$_size"
-		break
-	done
-	_i=0
-	while [ "$_i" -lt "${#D_NAME[@]}" ]; do
-		if [ "${D_OFF[$_i]}" = "-" ] && deliverable_crops "$PROBE_SIZE" "${D_AW[$_i]}" "${D_AH[$_i]}"; then
-			echo "REFUSING: '${D_NAME[$_i]}' crops, across ${#CLIPS[@]} clips, with no offset." >&2
-			echo "  A crop offset is a per-clip framing call; the default 750 is IMG_0609's." >&2
-			echo "  Either run one clip at a time, pass CROP_Y=<pixels> to accept one offset for" >&2
-			echo "  all of them, or give this deliverable its own: ${D_NAME[$_i]}:${D_AW[$_i]}:${D_AH[$_i]}:<px>." >&2
-			emit_code REFUSE_CROP_NO_OFFSET
-			emit refused code REFUSE_CROP_NO_OFFSET clips "${#CLIPS[@]}" deliverable "${D_NAME[$_i]}"
-			exit 1
-		fi
-		_i=$(( _i + 1 ))
-	done
-fi
+# EVERY clip, not just the first. Whether a deliverable crops depends on the shape of the clip in
+# front of it, so one clip's answer is not the batch's — and the first clip is exactly the one that
+# might be about to be skipped, which would decide the run on a frame it never renders. A clip that
+# is not portrait is left out for that reason: the loop below skips it, so it has no vote on a
+# refusal about files that will exist.
+PROBE_SIZE=""
+for _src in "${CLIPS[@]}"; do
+	_size="$(source_frame_size "$_src" 2>/dev/null || true)"
+	case "$_size" in
+		*' '*) [ "${_size#* }" -gt "${_size% *}" ] || continue;;
+	esac
+	# The first shape that will actually be rendered decides, and an unmeasurable one is left empty
+	# so deliverable_crops answers conservatively.
+	PROBE_SIZE="$_size"
+	break
+done
+_i=0
+while [ "$_i" -lt "${#D_NAME[@]}" ]; do
+	if [ "${D_OFF[$_i]}" = "-" ] && [ -z "$CROP_Y_OK" ] \
+		&& deliverable_crops "$PROBE_SIZE" "${D_AW[$_i]}" "${D_AH[$_i]}"; then
+		echo "REFUSING: '${D_NAME[$_i]}' crops, and no offset was given." >&2
+		echo "  Where the window sits is a composition call per clip — there is no sensible" >&2
+		echo "  default, so this is refused rather than guessed." >&2
+		echo "  Pass CROP_Y=<pixels>, or CROP_Y=centre to say that explicitly, or give this" >&2
+		echo "  deliverable its own: ${D_NAME[$_i]}:${D_AW[$_i]}:${D_AH[$_i]}:<px|centre>." >&2
+		emit_code REFUSE_CROP_NO_OFFSET
+		emit refused code REFUSE_CROP_NO_OFFSET clips "${#CLIPS[@]}" deliverable "${D_NAME[$_i]}"
+		exit 1
+	fi
+	_i=$(( _i + 1 ))
+done
 
 # Nothing is CREATED until the arguments are known to be good. This used to run first, so
 # `./grade.sh` with no arguments made the output directories and an empty run-*.txt, then printed
 # usage and exited 1 — a usage error leaving litter in the folder someone delivers from, and one
 # stray report per suite run.
-# Resolved once, here, rather than inside the render loop: it is spliced into
-# `crop=2160:2700:0:` and a comma in it would open a second filter.
-CROP_Y_OK="$(require_number CROP_Y "${CROP_Y:-750}")"
-
 check_disk_space "$WORK/dist" 10
 mkdir -p "$OUT_DIR" "$REPORT_DIR" "$CACHE"
 [ -z "$FRAME" ] || mkdir -p "$FRAME_DIR"
@@ -601,7 +618,11 @@ $(delivery_image_chain "$w" "$h" "$SFX" "$crop")${FPS_FILTER}[b];\
 			emit clip_failed clip "$CLIP" source "$SRC" deliverable "${D_NAME[$_i]}"
 			CLIP_OK=0; break
 		fi
-		say "      ${D_NAME[$_i]}: ${WIDTH}x${_h}${_crop:+ cropped at $_off}"
+		# The RESOLVED row, read back out of the filter, not the word that was asked for. `centre`
+		# is computed per clip against the measured frame, so printing "centre" would hide which
+		# row it actually landed on — the same silence the derived height is printed to avoid.
+		_at="${_crop%,}"; _at="${_at##*:}"
+		say "      ${D_NAME[$_i]}: ${WIDTH}x${_h}${_crop:+ cropped at $_at}"
 		render "$WIDTH" "$_h" "${D_SUFFIX[$_i]}" "$_crop" || { CLIP_OK=0; break; }
 		_i=$(( _i + 1 ))
 	done

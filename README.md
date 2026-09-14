@@ -74,7 +74,9 @@ pixels tagged BT.2020 get transformed a second time by anything that trusts the 
 someone bleached the footage.
 
 **The crop is dragged per clip.** Default it to centre and a batch of twelve gives you twelve files
-that all look finished and are all framed wrong.
+that all look finished and are all framed wrong. So there is no default at all: a deliverable that
+crops is refused without an offset, and `CROP_Y=centre` is how you say out loud that one clip does
+not need a considered one.
 
 ---
 
