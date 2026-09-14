@@ -420,8 +420,8 @@ def build_golden(cases, png, worst, measured=None, carried_from=None):
             "CARRIED FORWARD BY --regenerate, NOT MEASURED against the output in this file.",
             "ffmpeg was re-rendered; these numbers were copied, because what they measure is",
             "Swift's LiveGrade, which --regenerate does not run. grade_worst_carried_from stamps",
-            "the measurement they came from; without it they are the deleted Bench's",
-            "(docs/adr/0007). A CHAIN CHANGE MAKES THEM STALE. Re-measure with",
+            "the measurement they came from; without it they are the deleted Bench's.",
+            "A CHAIN CHANGE MAKES THEM STALE. Re-measure with",
             "  tests/grade-parity.py --remeasure \"<reason>\"",
         ]
 
