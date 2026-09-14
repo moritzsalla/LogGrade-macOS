@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import XCTest
 @testable import GradeKit
 
@@ -9,24 +10,35 @@ final class LiveGradeTests: XCTestCase {
     private struct Golden {
         let cases: [[String: Any]]
         let tolerances: [String: Any]
+        let sha256: String
     }
 
+    /// `GRADE_GOLDEN_PATH` exists for `tests/grade-parity.py --remeasure`, which renders a fresh
+    /// oracle into a staging directory and must have it measured BEFORE it replaces the committed
+    /// golden. Reading the fixture instead measured LiveGrade against the previous render's output
+    /// and stamped the result as a fresh measurement.
     private func golden() throws -> Golden {
-        let engine = try engineCheckout()
-        let url = engine.root.appendingPathComponent("tests/fixtures/grade-golden.json")
-        guard let root = try JSONSerialization.jsonObject(with: try Data(contentsOf: url))
-                as? [String: Any],
+        let url: URL
+        if let path = ProcessInfo.processInfo.environment["GRADE_GOLDEN_PATH"] {
+            url = URL(fileURLWithPath: path)
+        } else {
+            url = try engineCheckout().root
+                .appendingPathComponent("tests/fixtures/grade-golden.json")
+        }
+        let data = try Data(contentsOf: url)
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let cases = root["cases"] as? [[String: Any]],
               let tolerances = root["tolerances"] as? [String: Any] else {
             throw XCTSkip("no golden")
         }
-        return Golden(cases: cases, tolerances: tolerances)
+        let sha256 = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        return Golden(cases: cases, tolerances: tolerances, sha256: sha256)
     }
 
-    /// Measure the per-case worst divergence between LiveGrade and ffmpeg's oracle output.
-    /// ONE BODY, ONE CALL SITE. The measurement loop is factored here so both the assertion
-    /// test and the remeasure path share it, preventing the two-copies-one-edited pattern.
-    private func measurePerCase(golden g: Golden, engine: EngineLocation, inputs: [[Int]]) throws -> [String: Double] {
+    /// One body for the gate and for `--remeasure`, so the number a ceiling is measured with is
+    /// the number it is later held to.
+    private func measurePerCase(golden g: Golden, engine: EngineLocation,
+                                inputs: [[Int]]) throws -> [String: Double] {
         var result: [String: Double] = [:]
         for c in g.cases {
             guard let name = c["name"] as? String,
@@ -74,18 +86,15 @@ final class LiveGradeTests: XCTestCase {
 
         var checked = 0
         for (name, worst) in measured {
-            if let tolerance = perCase[name] {
-                // A CEILING CARRIED FORWARD, not a measurement of this code. The per-case tolerances
-                // were measured against the browser Bench's JavaScript, which modelled the same
-                // renderer; the Bench is gone and `--regenerate` now copies the numbers rather than
-                // recomputing them, saying so loudly. That is what makes this a regression gate: the
-                // ceiling is fixed, so a chain change that widens the real divergence turns this red.
-                // What it cannot do is LOWER the ceiling when a change is meant to move it — use
-                // tests/grade-parity.py --remeasure "<reason>" to update the ceiling deliberately.
-                XCTAssertLessThanOrEqual(worst, tolerance + margin,
-                                         "\(name): \(worst) code values against \(tolerance)")
-                checked += 1
-            }
+            guard let tolerance = perCase[name] else { continue }
+            // A FIXED CEILING, which is what makes this a regression gate: a chain change that
+            // widens the real divergence turns this red. The golden says where the ceiling came
+            // from: `grade_worst_measured` is present only when it was measured against the
+            // golden's own cases, and otherwise `--regenerate` carried it forward. Moving it is
+            // deliberate either way: tests/grade-parity.py --remeasure "<reason>".
+            XCTAssertLessThanOrEqual(worst, tolerance + margin,
+                                     "\(name): \(worst) code values against \(tolerance)")
+            checked += 1
         }
         XCTAssertGreaterThan(checked, 4, "only \(checked) cases were checked")
     }
@@ -102,25 +111,28 @@ final class LiveGradeTests: XCTestCase {
                           + "would be showing something the render does not produce")
     }
 
+    /// The measuring half of `tests/grade-parity.py --remeasure`; nothing else runs it. Skipped
+    /// without `GRADE_REMEASURE_OUT`, so the ordinary suite neither writes nor claims to measure.
+    /// Once asked, a golden it cannot grade FAILS rather than skips: `swift test` exits 0 on a
+    /// skip, and the harness would have nothing but a missing file to go on.
+    ///
+    /// The golden's hash goes out with the numbers so the harness can refuse a measurement of any
+    /// golden but the one it staged, which is the defect this path first shipped with.
     func testRemeasureGradeWorstByCase() throws {
-        // ENVIRONMENT-GATED: this test only runs when invoked by tests/grade-parity.py --remeasure.
-        // When GRADE_REMEASURE_OUT is set, measure and write; otherwise skip silently so the normal
-        // test suite is unaffected. This is the path that Python uses to refresh the golden.
-        guard let outputPath = ProcessInfo.processInfo.environment["GRADE_REMEASURE_OUT"] else {
-            throw XCTSkip("GRADE_REMEASURE_OUT not set; this is only for --remeasure")
+        guard let out = ProcessInfo.processInfo.environment["GRADE_REMEASURE_OUT"] else {
+            throw XCTSkip("GRADE_REMEASURE_OUT is not set; only --remeasure runs this")
         }
-
         let g = try golden()
         let engine = try engineCheckout()
-        guard let base = g.cases.first(where: { $0["name"] as? String == "post-look" }),
-              let inputs = base["output"] as? [[Int]] else {
-            throw XCTSkip("the golden has no post-look case to grade from")
-        }
+        let base = try XCTUnwrap(g.cases.first(where: { $0["name"] as? String == "post-look" }),
+                                 "the golden has no post-look case to grade from")
+        let inputs = try XCTUnwrap(base["output"] as? [[Int]], "post-look has no output")
 
         let measured = try measurePerCase(golden: g, engine: engine, inputs: inputs)
-
-        let json = try JSONSerialization.data(withJSONObject: measured, options: [.prettyPrinted, .sortedKeys])
-        try json.write(to: URL(fileURLWithPath: outputPath))
+        let result: [String: Any] = ["golden_sha256": g.sha256, "worst_by_case": measured]
+        let json = try JSONSerialization.data(withJSONObject: result,
+                                              options: [.prettyPrinted, .sortedKeys])
+        try json.write(to: URL(fileURLWithPath: out), options: .atomic)
     }
 
     // NO TIMING TEST HERE, deliberately. One used to assert a frame took under 0.1s, and it

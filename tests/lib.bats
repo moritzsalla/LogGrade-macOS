@@ -2045,18 +2045,22 @@ print(m.chain_fingerprint())
 
 @test "the golden records what its tolerances mean, not just what they are" {
 	# A number with no rationale beside it is the thing that gets "tidied" to make a run green.
-	# Every tolerance in the golden carries its own _why, and the measured grade divergence is far
-	# above the curve's one-code-value bar deliberately — that gap is a finding, not a defect.
+	# Every tolerance in the golden carries its own _why.
+	#
+	# No curve tolerance: its reader was the Bench's curve comparison, and the harness stopped
+	# writing `curve_code_values` when the Bench went. Demanding it here meant any golden the
+	# harness wrote, by --regenerate or --remeasure, failed this test; only the committed golden,
+	# written before then, passed. The curve is held exactly by the ToneCurve equivalence tests.
 	local root
 	root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
 	run python3 -c '
 import json, sys
 t = json.load(open(sys.argv[1]))["tolerances"]
-need = ["curve_code_values", "conversion_floor_code_values", "grade_code_values",
+need = ["conversion_floor_code_values", "grade_code_values",
         "grade_worst_by_case", "grade_margin_code_values"]
 for k in need:
     if k not in t: sys.exit("golden is missing tolerance %s" % k)
-for k in ("_curve_why", "_floor_why", "_grade_why", "_margin_why"):
+for k in ("_floor_why", "_grade_why", "_margin_why"):
     if not t.get(k): sys.exit("tolerance %s has no rationale" % k)
 if t["conversion_floor_code_values"] > 2:
     sys.exit("the conversion floor is %.2f code values — the ruler is measuring itself"
@@ -2066,35 +2070,89 @@ print("ok")
 	[ "$status" -eq 0 ] || fail "$output"
 }
 
-@test "--remeasure refuses without a reason" {
-	local root probe_sha
+@test "--remeasure refuses to run without a reason, and renders nothing" {
+	# A remeasured ceiling with no reason is a number moved with nothing to say why. The fixtures
+	# are copies under GRADE_GOLDEN_PATH, so a broken guard rewrites those rather than the tracked
+	# pair; the tracked pair's path is the same code.
+	local root work before
 	root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-	probe_sha="$(shasum -a 256 "$root/tests/fixtures/grade-probe.png" | cut -d' ' -f1)"
+	work="$BATS_TEST_TMPDIR/fixtures"
+	mkdir -p "$work"
+	cp "$root/tests/fixtures/grade-golden.json" "$root/tests/fixtures/grade-probe.png" "$work/"
+	before="$(cd "$work" && shasum -a 256 grade-golden.json grade-probe.png)"
 
-	# Test with no argument
-	run python3 "$root/tests/grade-parity.py" --remeasure
-	[ "$status" -ne 0 ] || fail "should have refused"
-	echo "$output" | grep -q "remeasure requires a non-empty reason" || fail "did not print the refusal message: $output"
+	run env GRADE_GOLDEN_PATH="$work/grade-golden.json" \
+		python3 "$root/tests/grade-parity.py" --remeasure
+	[ "$status" -ne 0 ] || fail "--remeasure with no reason did not refuse: $output"
+	[[ "$output" == *"--remeasure requires a non-empty reason"* ]] ||
+		fail "no-argument refusal is not the reason guard's: $output"
+	[[ "$output" != *"render "* ]] || fail "the no-argument refusal came after rendering: $output"
 
-	# Verify golden was not changed
-	local new_probe_sha
-	new_probe_sha="$(shasum -a 256 "$root/tests/fixtures/grade-probe.png" | cut -d' ' -f1)"
-	[ "$probe_sha" = "$new_probe_sha" ] || fail "probe was modified by refusal"
+	run env GRADE_GOLDEN_PATH="$work/grade-golden.json" \
+		python3 "$root/tests/grade-parity.py" --remeasure ""
+	[ "$status" -ne 0 ] || fail "--remeasure with an empty reason did not refuse: $output"
+	[[ "$output" == *"--remeasure requires a non-empty reason"* ]] ||
+		fail "empty-reason refusal is not the reason guard's: $output"
+	[[ "$output" != *"render "* ]] || fail "the empty-reason refusal came after rendering: $output"
+
+	[ "$(cd "$work" && shasum -a 256 grade-golden.json grade-probe.png)" = "$before" ] ||
+		fail "a refused --remeasure changed the golden or the probe"
 }
 
-@test "--remeasure refuses with empty string" {
-	local root golden_sha
+# bats test_tags=slow,serial
+@test "--remeasure measures the render it just made, and installs numbers LiveGradeTests holds" {
+	# Serial because swift test builds into app/.build, which the make-app.sh tests also build.
+	#
+	# The defect this pins: the measurement read the COMMITTED golden while the fresh render sat in
+	# memory, so a chain change was measured against the output of the chain it replaced and
+	# stamped as fresh. With the chain unchanged both renders agree, so the numbers alone cannot
+	# show which golden was read. Two things can: the harness refuses a measurement whose golden
+	# hash is not the staged one, and a ceiling set below the measurement must turn the gate red —
+	# a gate reading any other golden stays green.
+	local root work tracked reason
 	root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-	golden_sha="$(shasum -a 256 "$root/tests/fixtures/grade-golden.json" | cut -d' ' -f1)"
+	work="$BATS_TEST_TMPDIR/fixtures"
+	mkdir -p "$work"
+	cp "$root/tests/fixtures/grade-golden.json" "$root/tests/fixtures/grade-probe.png" "$work/"
+	tracked="$(cd "$root/tests/fixtures" && shasum -a 256 grade-golden.json grade-probe.png)"
+	reason="bats: remeasured into a scratch golden"
 
-	run python3 "$root/tests/grade-parity.py" --remeasure ""
-	[ "$status" -ne 0 ] || fail "should have refused empty reason"
-	echo "$output" | grep -q "remeasure requires a non-empty reason" || fail "did not print the refusal message: $output"
+	run env GRADE_GOLDEN_PATH="$work/grade-golden.json" \
+		python3 "$root/tests/grade-parity.py" --remeasure "$reason"
+	[ "$status" -eq 0 ] || fail "--remeasure failed: $output"
+	[[ "$output" == *"MEASURED grade_worst_by_case"* ]] || fail "no measurement reported: $output"
 
-	# Verify golden was not changed
-	local new_golden_sha
-	new_golden_sha="$(shasum -a 256 "$root/tests/fixtures/grade-golden.json" | cut -d' ' -f1)"
-	[ "$golden_sha" = "$new_golden_sha" ] || fail "golden was modified by refusal"
+	run python3 -c '
+import json, sys
+t = json.load(open(sys.argv[1]))["tolerances"]
+stamp = t.get("grade_worst_measured") or sys.exit("no grade_worst_measured stamp")
+if stamp.get("reason") != sys.argv[2]: sys.exit("stamp reason is %r" % stamp.get("reason"))
+if "grade_worst_carried_from" in t: sys.exit("a measured golden also claims to be carried")
+' "$work/grade-golden.json" "$reason"
+	[ "$status" -eq 0 ] || fail "the remeasured golden is not stamped as measured: $output"
+
+	run env GRADE_GOLDEN_PATH="$work/grade-golden.json" \
+		python3 "$root/tests/grade-parity.py"
+	[ "$status" -eq 0 ] || fail "the default check rejects a remeasured golden: $output"
+
+	run env GRADE_GOLDEN_PATH="$work/grade-golden.json" \
+		swift test --package-path "$root/app" --filter LiveGradeTests
+	[ "$status" -eq 0 ] || fail "LiveGradeTests fails against the numbers it just measured: $output"
+
+	python3 -c '
+import json, sys
+g = json.load(open(sys.argv[1]))
+g["tolerances"]["grade_worst_by_case"]["shipped"] = 0.0
+json.dump(g, open(sys.argv[2], "w"))
+' "$work/grade-golden.json" "$work/tight.json"
+	run env GRADE_GOLDEN_PATH="$work/tight.json" swift test --package-path "$root/app" \
+		--filter LiveGradeTests/testItMatchesFfmpegWithinTheMeasuredTolerance
+	[ "$status" -ne 0 ] || fail "a zero ceiling on shipped passed, so the gate read another golden"
+	[[ "$output" == *"shipped: "*"code values against 0.0"* ]] ||
+		fail "the gate failed, but not on the shipped ceiling: $output"
+
+	[ "$(cd "$root/tests/fixtures" && shasum -a 256 grade-golden.json grade-probe.png)" = \
+		"$tracked" ] || fail "--remeasure under GRADE_GOLDEN_PATH changed the tracked fixtures"
 }
 
 # --- the input correction -----------------------------------------------------
