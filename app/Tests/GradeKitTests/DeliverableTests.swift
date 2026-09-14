@@ -17,6 +17,29 @@ final class DeliverableTests: XCTestCase {
         XCTAssertEqual(Deliverable.feed.spec, "feed")
     }
 
+    /// A preset's shape is written twice, here and in `deliverable_spec`, and the engine's copy is
+    /// the one that renders. Emitting the bare name (above) is what makes a drift silent: the app
+    /// would draw and validate a crop for one aspect while the engine rendered another. So every
+    /// spec this type produces goes through the engine and has to come back as the same shape.
+    func testTheEngineReadsEverySpecAsTheShapeTheAppMeans() throws {
+        let engine = try engineCheckout()
+        let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
+        for deliverable in Deliverable.presets + [square] {
+            let resolved = try libSh(engine, "deliverable_spec", [deliverable.spec])
+            XCTAssertEqual(resolved.status, 0,
+                           "the engine refused \(deliverable.spec): \(resolved.stderr)")
+            let fields = resolved.stdout.split(separator: " ").map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            XCTAssertEqual(fields.count, 5, "unexpected spec output: \(resolved.stdout)")
+            guard fields.count == 5 else { continue }
+            XCTAssertEqual(fields[0], deliverable.name)
+            XCTAssertEqual(fields[1...2], [String(deliverable.aspectWidth),
+                                           String(deliverable.aspectHeight)],
+                           "\(deliverable.name): the engine renders a different aspect")
+        }
+    }
+
     func testAShapeThatIsNotAPresetCarriesItsAspect() throws {
         let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
         XCTAssertEqual(square.spec, "square:1:1")

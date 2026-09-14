@@ -36,16 +36,21 @@ public struct Scopes: Equatable {
         }
     }
 
+    /// Named on its own because it is also the interface's accent, and an accent that drifted from
+    /// the target it claims to be would be a colour the tool does not know the value of.
+    public static let plateYellow = Reference(name: "plate yellow", ral: "RAL 1021",
+                                              rgb: (0.953, 0.765, 0.000))
+
     public static let references: [Reference] = [
-        Reference(name: "plate yellow", ral: "RAL 1021", rgb: (0.953, 0.765, 0.000)),
+        plateYellow,
         Reference(name: "traffic red", ral: "RAL 3020", rgb: (0.800, 0.024, 0.020)),
         Reference(name: "traffic blue", ral: "RAL 5017", rgb: (0.024, 0.224, 0.443)),
     ]
 
     /// Rec.709 full range, matching the space the engine's tone stage works in.
     public static func chroma(_ r: Double, _ g: Double, _ b: Double) -> (cb: Double, cr: Double) {
-        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
-        return (cb: (b - y) / 1.8556, cr: (r - y) / 1.5748)
+        let y = Rec709.luma(r, g, b)
+        return (cb: (b - y) / Rec709.cbScale, cr: (r - y) / Rec709.crScale)
     }
 
     /// Where a colour lands on the vectorscope, as a fraction of the grid in each axis.
@@ -84,7 +89,7 @@ public struct Scopes: Equatable {
             red[Int(r * 255)] += 1
             green[Int(g * 255)] += 1
             blue[Int(b * 255)] += 1
-            let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            let y = Rec709.luma(r, g, b)
             luma[min(255, Int(y * 255))] += 1
             let p = vectorPosition(r, g, b)
             let vx = min(vectorSize - 1, max(0, Int(p.x * Double(vectorSize - 1))))

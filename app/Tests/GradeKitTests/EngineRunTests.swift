@@ -4,30 +4,6 @@ import XCTest
 /// Driven by a stand-in engine rather than the real one: these tests are about the adapter, and a
 /// real render would make them slow, footage-dependent and about something else.
 final class EngineRunTests: XCTestCase {
-    private func stubEngine(script: String) throws -> EngineLocation {
-        let root = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent(UUID().uuidString)
-        let scripts = root.appendingPathComponent("scripts")
-        try FileManager.default.createDirectory(at: scripts, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("luts/looks"),
-                                                withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("luts/apple"),
-                                                withIntermediateDirectories: true)
-        try "{}".write(to: root.appendingPathComponent("look.json"), atomically: true,
-                       encoding: .utf8)
-        try "".write(to: root.appendingPathComponent("luts/apple/AppleLogToRec709-v1.0.cube"),
-                     atomically: true, encoding: .utf8)
-        for name in ["grade.sh", "make-tone-lut.py", "make-correct-lut.py", "make-halation-luts.py",
-                     "solve-gamma.py"] {
-            let url = scripts.appendingPathComponent(name)
-            try (name == "grade.sh" ? script : "#!/bin/bash\n").write(to: url, atomically: true,
-                                                                      encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755],
-                                                  ofItemAtPath: url.path)
-        }
-        return EngineLocation(root: root)
-    }
-
     func testReadsEventsAndCodesFromBothStreams() throws {
         let engine = try stubEngine(script: """
         #!/bin/bash

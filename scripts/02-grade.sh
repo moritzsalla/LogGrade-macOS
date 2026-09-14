@@ -28,7 +28,7 @@ CLIP="${1:-}"
 CLIP="$(require_clip_name "$CLIP")"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(resolve_work_dir "$ROOT")"
-BASELINE="$WORK/dist/01-baseline/${CLIP}_baseline.mov"
+BASELINE="$(baseline_path "$WORK" "$CLIP")"
 TONE="$ROOT/luts/tone/shipped.cube"
 # Graded by eye against the RAL references in frame, then sent back as data. Deliberately off-spec:
 # saturation 1.27 puts the traffic blue at B/G 2.39 against a 1.98 spec. That is a grade, not an
@@ -42,16 +42,13 @@ TONE="$ROOT/luts/tone/shipped.cube"
 # Worth keeping from that copy: `toe` was measured to do NOTHING at pivot 0.39 — identical
 # percentiles at 0.07 and 0.00 — so it is zeroed rather than left as a decorative knob. The black
 # point is the live shadow control here.
-# Both are spliced into the filter graph; see require_number in lib.sh.
-# The look LUT is a look value like any other, so it comes from look.json. LOOK=<name|none|path>
-# overrides it for one run; the app sets it per render.
-LOOK_LUT="$(resolve_look_lut "${LOOK:-$(look .look.lut)}" "$ROOT")"
-PRINT_LUT="$(resolve_look_lut "${PRINT:-$(look .print.lut)}" "$ROOT" print)"
-LOOK_STRENGTH="$(require_unit look.strength "$(look .look.strength)")"
-PRINT_STRENGTH="$(require_unit print.strength "$(look .print.strength)")"
-SAT="$(require_number SAT "$(look .colour.saturation)")"
-WARM="$(require_number WARM "$(look .colour.warmth)")"
-OUT="$WORK/dist/02-graded/${CLIP}_graded.mov"
+#
+# LOOK=<name|none|path> and PRINT= override the film cubes for one run, as they do for grade.sh.
+# The names are cleared first: the loader keeps a value already set, and a stray SAT in someone's
+# environment must not become the grade.
+unset LOOK_LUT PRINT_LUT LOOK_STRENGTH PRINT_STRENGTH SAT WARM
+load_grade_look || exit 1
+OUT="$(graded_master_path "$WORK" "$CLIP")"
 
 [ -f "$BASELINE" ] || { echo "baseline not found: $BASELINE — run 01-baseline.sh first" >&2; exit 1; }
 
@@ -61,12 +58,12 @@ OUT="$WORK/dist/02-graded/${CLIP}_graded.mov"
 # without the correction for as long as the correction existed, and the master looked finished.
 # Refused rather than approximated on the converted picture, which would be a different grade
 # under the same look.json.
-if [ "$("$SCRIPT_DIR/make-correct-lut.py" --check-neutral \
-		--exposure "$(look .correct.exposure)" --temp "$(look .correct.temp)" \
-		--tint "$(look .correct.tint)" --slope "$(look .correct.slope)" \
-		--offset "$(look .correct.offset)" --power "$(look .correct.power)")" = "active" ] \
-	|| [ "$("$SCRIPT_DIR/make-halation-luts.py" --check-neutral \
-		--strength "$(look .halation.strength)")" = "active" ]; then
+#
+# Both answers are taken BEFORE the test, never inside it: a generator that fails inside `[ ... ]`
+# answers with an empty string, which compares as "not active" and waves the master through.
+CORRECT_STATE="$(correction_state)" || exit 1
+HAL_STATE="$(halation_state)" || exit 1
+if [ "$CORRECT_STATE" = "active" ] || [ "$HAL_STATE" = "active" ]; then
 	echo "REFUSING: this look has a stage that runs before Apple's conversion (the input" >&2
 	echo "  correction or halation), and a baseline has already been converted, so the staged" >&2
 	echo "  path cannot apply it. Render with grade.sh, which starts from the source." >&2
@@ -81,9 +78,7 @@ ensure_tone_lut "$ROOT"
 
 ffmpeg -y -i "$BASELINE" \
 	-filter_complex "[0:v]$(grade_chain "$TONE" "$SAT" "$WARM")[o]" \
-	-map "[o]" -map "0:a:0?" \
-	-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le \
-	-c:a copy \
+	-map "[o]" -map "0:a:0?" "${PRORES_MASTER[@]}" \
 	"$OUT" -v error
 
 require_nonempty "$OUT" "grade encode"

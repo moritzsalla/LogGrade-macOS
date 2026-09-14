@@ -5,9 +5,16 @@
 // value, not only in hue.
 //
 // The colours are not chosen. Both strips are produced by ffmpeg from one synthetic ramp — the
-// right one through the real chain, Apple's conversion and the film look and the shipped tone
-// curve, the same cubes the render uses. So the icon is an output of the pipeline rather than an
-// illustration of it, and re-running this after a re-grade changes it.
+// right one through the grade as lib.sh's `grade_chain` builds it for a render: Apple's
+// conversion, the film look and print at their strengths, the shipped tone curve, saturation and
+// warmth. So the icon is an output of the pipeline rather than an illustration of it, and
+// re-running this after a re-grade changes it.
+//
+// WHAT IT LEAVES OUT, and why that is not a shortcut. The input correction and halation run before
+// the conversion and are not part of `grade_chain`: the correction needs a cube generated from
+// look.json, and halation is a spatial glow around bright areas, which has no meaning on an
+// eight-pixel strip. The delivery stage — grain, sharpening, dither — is left out for the same
+// reason. A look that turns either pre-conversion stage on is therefore drawn without it.
 
 import AppKit
 import Foundation
@@ -55,8 +62,52 @@ func sweep(height: Int) -> URL {
     return url
 }
 
-/// The ramp, optionally through the real chain: Apple's conversion, the film look and the shipped
-/// tone curve, from the same cube files the render passes to ffmpeg.
+func fail(_ message: String) -> Never {
+    FileHandle.standardError.write(Data("make-icon: \(message)\n".utf8))
+    exit(1)
+}
+
+/// The grade's filter graph, as the engine builds it.
+///
+/// ASKED OF lib.sh, NOT WRITTEN HERE. This file used to assemble its own graph — one named look,
+/// the tone cube, nothing else — so the icon silently stopped being the grade the moment the look
+/// gained a print stage, a strength, saturation or warmth, while this header went on saying it was
+/// the real chain. `grade_chain` is the builder every render uses, so the icon follows a re-grade
+/// without anyone remembering it exists.
+///
+/// The look, print and strengths are deliberately NOT put in the environment: `grade_chain`
+/// treats an unset variable as "ask look.json" and a set one as a choice, and look.json is the
+/// answer wanted here.
+func gradedChain(cst: String) -> String {
+    // The look values are ASSIGNED before the call, not substituted into its arguments: errexit
+    // does not see a substitution that fails inside an argument list, so a look.json missing
+    // `colour` built a graph with an empty saturation and exited 0.
+    let script = #"""
+    source "$1/scripts/lib.sh"
+    ensure_tone_lut "$1" >/dev/null
+    sat="$(look .colour.saturation)"
+    warm="$(look .colour.warmth)"
+    grade_chain "$1/luts/tone/shipped.cube" "$sat" "$warm" \
+        "format=gbrp16le,lut3d=file='$2':interp=tetrahedral,"
+    """#
+    let bash = Process()
+    bash.executableURL = URL(fileURLWithPath: "/bin/bash")
+    bash.arguments = ["-c", script, "make-icon", root.path, cst]
+    let out = Pipe(), err = Pipe()
+    bash.standardOutput = out
+    bash.standardError = err
+    do { try bash.run() } catch { fail("could not run bash: \(error)") }
+    let chain = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    let complaint = String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    bash.waitUntilExit()
+    let trimmed = chain.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard bash.terminationStatus == 0, !trimmed.isEmpty else {
+        fail("lib.sh could not build the grade: \(complaint)")
+    }
+    return trimmed
+}
+
+/// The ramp, optionally through the grade.
 func strip(graded: Bool, height: Int) -> [(CGFloat, CGFloat, CGFloat)] {
     let source = sweep(height: height)
     defer { try? FileManager.default.removeItem(at: source) }
@@ -64,29 +115,31 @@ func strip(graded: Bool, height: Int) -> [(CGFloat, CGFloat, CGFloat)] {
         .appendingPathComponent("\(UUID().uuidString).png")
     defer { try? FileManager.default.removeItem(at: out) }
 
-    var filter = "format=gbrp16le"
+    // Labels, because grade_chain splits and merges planes; -vf cannot carry a labelled graph.
+    var graph = "[0:v]format=gbrp16le[o]"
     if graded {
-        let apple = root.appendingPathComponent("luts/apple/AppleLogToRec709-v1.0.cube").path
-        let look = root.appendingPathComponent("luts/looks/kodak_portra_400_nc.cube").path
-        let tone = root.appendingPathComponent("luts/tone/shipped.cube").path
-        for cube in [apple, look] where FileManager.default.fileExists(atPath: cube) {
-            filter += ",lut3d=file='\(cube)':interp=tetrahedral"
+        // REFUSED RATHER THAN SKIPPED. Leaving the conversion out used to be silent, which drew
+        // the log ramp beside a tone-curved log ramp and called that the grade. The cube is not
+        // in git (Apple's licence), so a fresh clone reaches this.
+        let cst = root.appendingPathComponent("luts/apple/AppleLogToRec709-v1.0.cube").path
+        guard FileManager.default.fileExists(atPath: cst) else {
+            fail("Apple's conversion LUT is missing (\(cst)); see luts/apple/SOURCE.txt")
         }
-        if FileManager.default.fileExists(atPath: tone) {
-            filter += ",lut1d=file='\(tone)':interp=linear"
-        }
+        graph = "[0:v]\(gradedChain(cst: cst))[o]"
     }
 
     // ~/.local/bin FIRST, which is the order GradeKit's own tool lookup uses and for the same
     // reason: this machine has a broken Homebrew ffmpeg at /usr/local/bin that starts and then
     // dies on a missing dylib. Searching in the obvious order finds it and nothing else.
+    // A copy of `EngineLocation.toolSearchPaths`, because this is run as a standalone script and
+    // cannot import GradeKit; change the two together.
     let ffmpeg = ["\(NSHomeDirectory())/.local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg",
                   "/usr/local/bin/ffmpeg"].first { FileManager.default.isExecutableFile(atPath: $0) }
     guard let ffmpeg else { return [] }
     let run = Process()
     run.executableURL = URL(fileURLWithPath: ffmpeg)
-    run.arguments = ["-v", "error", "-y", "-i", source.path, "-vf", filter,
-                     "-frames:v", "1", "-pix_fmt", "rgb48be", out.path]
+    run.arguments = ["-v", "error", "-y", "-i", source.path, "-filter_complex", graph,
+                     "-map", "[o]", "-frames:v", "1", "-pix_fmt", "rgb48be", out.path]
     let err = Pipe()
     run.standardError = err
     guard (try? run.run()) != nil else { return [] }

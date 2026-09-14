@@ -34,8 +34,13 @@ public struct Project: Equatable {
         /// A departure from the project's preset, for this clip alone. Nil means it follows.
         public var lookOverride: Look?
 
+        /// A clip nobody has decided about is stabilised, which is what the engine did for every
+        /// clip before the choice existed. One constant, because the interface, the environment
+        /// and the project reader each fell back to their own `true`.
+        public static let stabilisesByDefault = true
+
         public init(cropOffset: Int? = nil, previewSeconds: Double = 1,
-                    stabilise: Bool = true, lookOverride: Look? = nil) {
+                    stabilise: Bool = stabilisesByDefault, lookOverride: Look? = nil) {
             self.cropOffset = cropOffset
             self.previewSeconds = previewSeconds
             self.stabilise = stabilise
@@ -50,7 +55,13 @@ public struct Project: Equatable {
         public var height: Int
         /// Nil keeps the source's rate, which is the only lossless answer.
         public var fps: Int?
-        public init(targets: [Deliverable] = [.reels], height: Int = 1920, fps: Int? = nil) {
+        /// 1080 wide at 9:16: what Instagram re-encodes to, and the size the grain and the
+        /// sharpener were tuned at. A project that names no height gets it, and the interface
+        /// warns about anything larger.
+        public static let defaultHeight = 1920
+
+        public init(targets: [Deliverable] = [.reels], height: Int = defaultHeight,
+                    fps: Int? = nil) {
             self.targets = targets; self.height = height; self.fps = fps
         }
 
@@ -125,6 +136,11 @@ public struct Project: Equatable {
         activePreset = trimmed
     }
 
+    /// A clip's decisions, or the undecided defaults for a clip with none recorded.
+    public func settings(for clip: String) -> ClipSettings {
+        clips[clip] ?? ClipSettings()
+    }
+
     /// The look a clip renders with: its own departure, or the project's preset.
     public func look(for clip: String) -> Look? {
         clips[clip]?.lookOverride ?? active?.look
@@ -177,7 +193,7 @@ public struct Project: Equatable {
         // one thing about one shape.
         env["DELIVERABLES"] = delivery.targets.map(\.spec).joined(separator: ",")
         if let offset = clips[clip]?.cropOffset { env["CROP_Y"] = String(offset) }
-        env["STAB"] = (clips[clip]?.stabilise ?? true) ? "1" : "0"
+        env["STAB"] = settings(for: clip).stabilise ? "1" : "0"
         return env
     }
 }
@@ -307,13 +323,15 @@ extension Project {
             clipMap[name] = ClipSettings(
                 cropOffset: (raw["crop_offset"] as? NSNumber)?.intValue,
                 previewSeconds: (raw["preview_seconds"] as? NSNumber)?.doubleValue ?? 1,
-                stabilise: (raw["stabilise"] as? NSNumber)?.boolValue ?? true,
+                stabilise: (raw["stabilise"] as? NSNumber)?.boolValue
+                    ?? ClipSettings.stabilisesByDefault,
                 lookOverride: override)
         }
         self.init(presets: loaded,
                   activePreset: root["active_preset"] as? String ?? loaded.first?.name ?? "",
                   delivery: Delivery(targets: targets,
-                                     height: (d["height"] as? NSNumber)?.intValue ?? 1920,
+                                     height: (d["height"] as? NSNumber)?.intValue
+                                         ?? Delivery.defaultHeight,
                                      fps: (d["fps"] as? NSNumber)?.intValue),
                   clips: clipMap,
                   outputDirectory: (root["output_directory"] as? String).map {

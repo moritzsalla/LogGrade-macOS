@@ -173,7 +173,13 @@ single-line ffprobe answer without checking what it actually printed.
   drifted: the delivery filters were three (two stage-3 scripts, now one `03-final.sh`
   parameterised by target, plus `grade.sh`), and the grade head was two, with nothing in the suite
   rendering the staged one. A test now fails if a stage script starts building either again. The
-  measurements that justify each filter live next to its builder.
+  measurements that justify each filter live next to its builder. The same holds one layer out:
+  encode flags, the stabilisation analysis, stage paths and every generator's flags are spelled in
+  `lib.sh` only, and a test fails on a copy. Those copies had drifted by a flag before they were
+  caught.
+- **A generator's verdict is taken before it is compared.** `state="$(correction_state)" || exit 1`,
+  never `[ "$(...)" = active ]`: a generator that fails inside the test answers with nothing, which
+  reads as neutral and drops the stage in silence.
 - **Never point `ffmpeg -y` at a delivery path.** It truncates the existing file before it knows
   whether the graph initialises, so a failed re-render destroys the approved deliverable — measured
   at 0 bytes with ffmpeg exiting 234. Use `render_delivery`, which stages, checks and tags before

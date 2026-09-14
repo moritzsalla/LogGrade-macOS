@@ -34,31 +34,13 @@ CLIP="${1:-}"
 CLIP="$(require_clip_name "$CLIP")"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(resolve_work_dir "$ROOT")"
-IN="$WORK/dist/02-graded/${CLIP}_graded.mov"
-OUT_DIR="$WORK/dist/stab"
-OUT="$OUT_DIR/${CLIP}.trf"
+IN="$(graded_master_path "$WORK" "$CLIP")"
+OUT="$(transform_path "$WORK" "$CLIP")"
 
 [ -f "$IN" ] || { echo "graded master not found: $IN — run 02-grade.sh first" >&2; exit 1; }
-mkdir -p "$OUT_DIR"
-
-# shakiness=5 suits "static handheld" — the iPhone's own stabilisation has already removed the
-# large motion, so what is left is low-amplitude sway. stepsize=6 trades a little accuracy for
-# speed and is plenty at this amplitude.
-# Write to a temp file, install on success only. An interrupted detect (Ctrl-C, a killed background
-# job) otherwise leaves a TRUNCATED .trf in place of a good one, and the failure surfaces much
-# later and somewhere else: the finals die deep in the filter graph with "Cannot parse localmotion:
-# unexpected end of file", which does not point back here at all. Learned by doing exactly that —
-# a two-second smoke test destroyed a three-minute analysis.
-TMP="${OUT}.partial"
-trap 'rm -f "$TMP"' EXIT
-
-ffmpeg -y -i "$IN" \
-	-vf "vidstabdetect=shakiness=5:accuracy=15:stepsize=6:result=${TMP}" \
-	-f null - -v error
-
-require_nonempty "$TMP" "stabilisation analysis"
-mv "$TMP" "$OUT"
-trap - EXIT
+# No CST head: the master has already been converted. The settings and the staging are
+# detect_transform's, shared with grade.sh, which writes the same cache.
+detect_transform "$IN" "$OUT"
 echo "done: $OUT"
 echo "the final stages will now pick this up automatically; override smoothing with e.g.:"
 echo "  SMOOTHING=45 ./03-final.sh ${CLIP} reels"

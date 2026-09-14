@@ -246,18 +246,16 @@ def sample_offsets(n):
 def chain_string(tone, sat, warm, look="real"):
     """The production chain, out of lib.sh.
 
-    `look` is "real" for look.json's own choice, or anything resolve_look_lut accepts — "none"
-    being the one the floor run uses. Any look other than "real" also means no print: the floor
-    run measures the round trip with no cube in it, and a print named in look.json would otherwise
-    arrive through grade_chain's own unset-means-ask rule. It has to be resolved the way the entry scripts resolve it,
-    because lib.sh stopped setting LOOK_LUT when the look stopped being a constant: sourcing it and
-    calling grade_chain therefore emits a chain with NO look filter at all. The fingerprint guard
-    is what caught that, which is the whole reason it hashes the chain rather than trusting it."""
+    `look` is "real" for look.json's own choice, which grade_chain loads itself when nothing is
+    set, or anything resolve_look_lut accepts — "none" being the one the floor run uses. Any look
+    other than "real" also means no print: the floor run measures the round trip with no cube in
+    it, and a print named in look.json would otherwise arrive through the same unset-means-ask
+    rule. That rule exists because a chain read out of lib.sh once came back with NO look filter
+    at all; the fingerprint guard is what caught it, which is why it hashes the chain."""
     r = subprocess.run(["bash", "-c",
                         'set -euo pipefail; source "$1"; '
-                        'if [ "$5" = "real" ]; then '
-                        '  LOOK_LUT="$(resolve_look_lut "$(look .look.lut)" "$6")"; '
-                        'else LOOK_LUT="$(resolve_look_lut "$5" "$6")"; PRINT_LUT=""; fi; '
+                        'if [ "$5" != "real" ]; then '
+                        '  LOOK_LUT="$(resolve_look_lut "$5" "$6")"; PRINT_LUT=""; fi; '
                         'grade_chain "$2" "$3" "$4"',
                         "_", LIB, tone, sat, warm, look, ROOT],
                        capture_output=True, text=True)
@@ -453,6 +451,22 @@ def regenerate():
 
 
 # --- check --------------------------------------------------------------------
+def shipped_case_drift():
+    """Differences between the cases that claim to be the shipped look and look.json."""
+    look = json.load(open(os.path.join(ROOT, "look.json")))
+    tone = {k: float(v) for k, v in look["tone"].items()}
+    sat, warm = float(look["colour"]["saturation"]), float(look["colour"]["warmth"])
+    fails = []
+    for name, params, case_sat, case_warm, _look in CASES:
+        if name not in ("shipped", "tone-only"):
+            continue
+        if {k: float(v) for k, v in params.items()} != tone:
+            fails.append("case %s's tone is not look.json's tone" % name)
+        if name == "shipped" and (case_sat, case_warm) != (sat, warm):
+            fails.append("case shipped's saturation and warmth are not look.json's")
+    return fails
+
+
 def check():
     if not os.path.exists(GOLDEN):
         sys.exit("no golden at %s — run tests/grade-parity.py --regenerate" % GOLDEN)
@@ -494,6 +508,12 @@ def check():
                          % name)
         elif not c.get("output"):
             fails.append("case %s has no recorded ffmpeg output" % name)
+
+    # 3b. The cases NAMED for the shipped look are at the shipped look. They are literals so that a
+    #    re-tune cannot quietly move what the golden recorded, and nothing tied them to look.json:
+    #    after a re-tune `shipped` would stay green while measuring a look nothing ships. Loud
+    #    instead — update the case, regenerate, and say so in the commit.
+    fails += shipped_case_drift()
 
     # 4. Every non-calibration case carries a tolerance. This is the guard on the field
     #    --regenerate carries forward rather than measures: LiveGradeTests reads it, and a case

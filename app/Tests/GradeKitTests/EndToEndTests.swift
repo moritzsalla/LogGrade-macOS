@@ -16,10 +16,7 @@ import XCTest
 /// not touch the bitstream — "should" being the word this test exists to replace.
 final class EndToEndTests: XCTestCase {
     func testTheAppRendersTheSameBytesAsTheShell() throws {
-        let here = URL(fileURLWithPath: #filePath)
-        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
-            throw XCTSkip("no engine checkout")
-        }
+        let engine = try engineCheckout()
         try XCTSkipIf(!engine.preflight().isEmpty, "engine preflight not clean")
         let clips = (try? FileManager.default.contentsOfDirectory(
             at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil)) ?? []
@@ -100,10 +97,7 @@ final class EndToEndTests: XCTestCase {
 /// encoders here.
 final class DeliveryTests: XCTestCase {
     func testTheQueueDeliversATaggedFile() throws {
-        let here = URL(fileURLWithPath: #filePath)
-        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
-            throw XCTSkip("no engine checkout")
-        }
+        let engine = try engineCheckout()
         try XCTSkipIf(!engine.preflight().isEmpty, "engine preflight not clean")
         let clips = (try? FileManager.default.contentsOfDirectory(
             at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil)) ?? []

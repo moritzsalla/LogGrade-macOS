@@ -9,18 +9,10 @@ final class ClipProbeTests: XCTestCase {
         return ClipProbe(ffprobe: ffprobe)
     }
 
-    private func engineRoot() throws -> URL {
-        let here = URL(fileURLWithPath: #filePath)
-        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
-            throw XCTSkip("no engine checkout")
-        }
-        return engine.root
-    }
-
     /// Real footage only. A synthetic file prints one clean ffprobe line; this camera's originals
     /// print the video stream twice, which is exactly what the reader has to survive.
     func testRecognisesRealAppleLogFootage() throws {
-        let src = try engineRoot().appendingPathComponent("src")
+        let src = try engineCheckout().root.appendingPathComponent("src")
         let clips = (try? FileManager.default.contentsOfDirectory(at: src,
                                                                   includingPropertiesForKeys: nil))
             ?? []
@@ -135,10 +127,7 @@ final class ClipFieldsSummaryTests: XCTestCase {
 
 final class ClipDurationTests: XCTestCase {
     func testRealFootageReportsItsLengthAndRate() throws {
-        let here = URL(fileURLWithPath: #filePath)
-        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
-            throw XCTSkip("no engine checkout")
-        }
+        let engine = try engineCheckout()
         let clips = (try? FileManager.default.contentsOfDirectory(
             at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil)) ?? []
         guard let clip = clips.first(where: { $0.pathExtension.lowercased() == "mov" }),

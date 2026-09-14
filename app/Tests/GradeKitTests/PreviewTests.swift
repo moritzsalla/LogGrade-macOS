@@ -2,20 +2,12 @@ import XCTest
 @testable import GradeKit
 
 final class ToneCurveTests: XCTestCase {
-    private func engine() throws -> EngineLocation {
-        let here = URL(fileURLWithPath: #filePath)
-        guard let e = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
-            throw XCTSkip("no engine checkout")
-        }
-        return e
-    }
-
     private var shipped: Look.Tone {
         .init(gamma: 2.02, pivot: 0.39, contrast: 1.09, toe: 0, shoulder: 0.1, black: 0.025)
     }
 
     func testTheCurveComesFromTheEnginesOwnGenerator() throws {
-        let e = try engine()
+        let e = try engineCheckout()
         let curve = try ToneCurve.generate(using: e.toneGenerator, tone: shipped)
         XCTAssertEqual(curve.samples.count, 4096, "the generator writes a 4096-entry table")
         // The shipped curve lifts the black point and darkens the midtones.
@@ -30,7 +22,7 @@ final class ToneCurveTests: XCTestCase {
     }
 
     func testItIsTheCurveAndNotAPortOfIt() throws {
-        let e = try engine()
+        let e = try engineCheckout()
         // Byte-for-byte against a cube the generator writes to a FILE: same generator, same
         // parameters, so the interface draws what the render applies rather than a lookalike.
         let file = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -54,7 +46,7 @@ final class ToneCurveTests: XCTestCase {
     }
 
     func testADifferentGammaIsADifferentCurve() throws {
-        let e = try engine()
+        let e = try engineCheckout()
         var other = shipped
         other.gamma = 1.2
         let a = try ToneCurve.generate(using: e.toneGenerator, tone: shipped)
@@ -66,10 +58,7 @@ final class ToneCurveTests: XCTestCase {
 
 final class PreviewRendererTests: XCTestCase {
     func testRendersAStillThroughTheRealChainAndTheLookChangesIt() throws {
-        let here = URL(fileURLWithPath: #filePath)
-        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
-            throw XCTSkip("no engine checkout")
-        }
+        let engine = try engineCheckout()
         try XCTSkipIf(!engine.preflight().isEmpty, "engine preflight not clean")
         let clips = (try? FileManager.default.contentsOfDirectory(
             at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil)) ?? []
@@ -97,10 +86,7 @@ final class PreviewRendererTests: XCTestCase {
     }
 
     func testARefusalComesBackAsItsReason() throws {
-        let here = URL(fileURLWithPath: #filePath)
-        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
-            throw XCTSkip("no engine checkout")
-        }
+        let engine = try engineCheckout()
         try XCTSkipIf(!engine.preflight().isEmpty, "engine preflight not clean")
         let work = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)

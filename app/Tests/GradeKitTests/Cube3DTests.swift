@@ -12,12 +12,6 @@ import XCTest
 /// corners, where the six tetrahedra disagree sharply — and the probe lands inside cells rather
 /// than on grid points, which is the only place interpolation is observable at all.
 final class Cube3DTests: XCTestCase {
-    private func engine() throws -> EngineLocation {
-        let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        guard let e = EngineLocation.discover(from: here) else { throw XCTSkip("no engine") }
-        return e
-    }
-
     /// A fixed sequence, so a failure is reproducible and a rerun asks the same question.
     private struct Random {
         var state: UInt64 = 0x2545F4914F6CDD1D
@@ -28,7 +22,7 @@ final class Cube3DTests: XCTestCase {
     }
 
     func testItInterpolatesTheWayFfmpegDoes() throws {
-        let engine = try engine()
+        let engine = try engineCheckout()
         guard let ffmpeg = EngineLocation.resolveTool("ffmpeg") else { throw XCTSkip("no ffmpeg") }
         _ = engine
 
@@ -112,7 +106,7 @@ final class Cube3DTests: XCTestCase {
     }
 
     func testItReadsTheCubesTheRenderApplies() throws {
-        let engine = try engine()
+        let engine = try engineCheckout()
         let conversion = try Cube3D(contentsOf: engine.appleCube)
         XCTAssertEqual(conversion.size, 65)
         XCTAssertEqual(conversion.samples.count, 65 * 65 * 65)

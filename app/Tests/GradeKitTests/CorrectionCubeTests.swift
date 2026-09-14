@@ -9,12 +9,6 @@ import XCTest
 /// tolerance test on a few patches: it builds the whole cube both ways and compares all 107,811
 /// numbers, to the eight decimal places the generator prints. Either side drifting fails by name.
 final class CorrectionCubeTests: XCTestCase {
-    private func engine() throws -> EngineLocation {
-        let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        guard let e = EngineLocation.discover(from: here) else { throw XCTSkip("no engine") }
-        return e
-    }
-
     /// Corrections chosen to reach every branch: exposure alone, white balance alone, a CDL with
     /// all three of slope, offset and power, and the luminance mix, which is the one case the
     /// generator's own header calls hard.
@@ -32,7 +26,7 @@ final class CorrectionCubeTests: XCTestCase {
     }
 
     func testItIsTheSameCubeTheEngineGenerates() throws {
-        let engine = try engine()
+        let engine = try engineCheckout()
         for (name, correct) in cases {
             let mine = try XCTUnwrap(CorrectionCube.cube(for: correct, size: 33),
                                      "\(name): the port refused a correction the engine accepts")
@@ -86,12 +80,6 @@ final class CorrectionCubeTests: XCTestCase {
 /// image instead of reading it, and they exist because a subprocess per slider tick is a control
 /// you cannot drag. Neither is a tolerance test on a sample of points.
 final class ToneCurvePortTests: XCTestCase {
-    private func engine() throws -> EngineLocation {
-        let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        guard let e = EngineLocation.discover(from: here) else { throw XCTSkip("no engine") }
-        return e
-    }
-
     /// The shipped curve, a neutral one, and one at each end of every slider's range, because the
     /// toe and shoulder branches only separate away from the defaults.
     private var cases: [(String, Look.Tone)] {
@@ -109,7 +97,7 @@ final class ToneCurvePortTests: XCTestCase {
     }
 
     func testItIsTheSameCurveTheEngineGenerates() throws {
-        let engine = try engine()
+        let engine = try engineCheckout()
         for (name, tone) in cases {
             let theirs = try ToneCurve.generate(using: engine.toneGenerator, tone: tone)
             let mine = ToneCurve.generated(tone: tone)
@@ -125,7 +113,7 @@ final class ToneCurvePortTests: XCTestCase {
     }
 
     func testItSolvesTheSameGammaTheEngineSolves() throws {
-        let engine = try engine()
+        let engine = try engineCheckout()
         // Both clamps, both domain guards, and ordinary values in between.
         let probes: [(Double, Double, Double)] = [
             (479, 609, 2.02), (609, 609, 2.02), (100, 609, 2.02), (1000, 609, 2.02),

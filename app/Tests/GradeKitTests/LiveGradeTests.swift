@@ -12,10 +12,7 @@ final class LiveGradeTests: XCTestCase {
     }
 
     private func golden() throws -> Golden {
-        let here = URL(fileURLWithPath: #filePath)
-        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
-            throw XCTSkip("no engine checkout")
-        }
+        let engine = try engineCheckout()
         let url = engine.root.appendingPathComponent("tests/fixtures/grade-golden.json")
         guard let root = try JSONSerialization.jsonObject(with: try Data(contentsOf: url))
                 as? [String: Any],
@@ -26,17 +23,9 @@ final class LiveGradeTests: XCTestCase {
         return Golden(cases: cases, tolerances: tolerances)
     }
 
-    private func engineRoot() throws -> EngineLocation {
-        let here = URL(fileURLWithPath: #filePath)
-        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
-            throw XCTSkip("no engine checkout")
-        }
-        return engine
-    }
-
     func testItMatchesFfmpegWithinTheMeasuredTolerance() throws {
         let g = try golden()
-        let engine = try engineRoot()
+        let engine = try engineCheckout()
         guard let base = g.cases.first(where: { $0["name"] as? String == "post-look" }),
               let inputs = base["output"] as? [[Int]] else {
             throw XCTSkip("the golden has no post-look case to grade from")

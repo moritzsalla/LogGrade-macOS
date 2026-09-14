@@ -21,6 +21,40 @@ set -euo pipefail
 LIB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOOK_FILE="${LOOK_FILE:-$LIB_ROOT/look.json}"
 
+# Apple's Log -> Rec.709 conversion. It is NOT in this repo — Apple's licence does not permit
+# redistributing it (luts/apple/SOURCE.txt) — so a fresh clone has no such file.
+#
+# Every stage that needs it checks for it up front, because the ways a missing cube surfaces
+# otherwise are not all loud. The exposure probe runs it inside a pipeline ending in `|| true`, so
+# a missing cube there comes back as an empty measurement and every clip silently gets the
+# reference gamma: a plan that looks complete and matched nothing.
+APPLE_CST="$LIB_ROOT/luts/apple/AppleLogToRec709-v1.0.cube"
+require_apple_cst() {
+	[ -f "$APPLE_CST" ] && return 0
+	echo "Apple's Log->Rec709 LUT is missing:" >&2
+	echo "  $APPLE_CST" >&2
+	echo "It is deliberately not committed — Apple's licence does not permit redistributing it." >&2
+	echo "Download it (free Apple ID, ~2 min) per luts/apple/SOURCE.txt, then re-run." >&2
+	return 1
+}
+
+# Where each stage writes, by clip. Spelled once because two stages read what a third wrote, and a
+# path that differs by one component is a cache nobody hits: grade.sh once built the transform path
+# from the wrong root and paid ~65s a clip to redo analysis stage 00 had already done.
+source_path()        { printf '%s/src/%s.mov\n' "$1" "$2"; }                      # <work> <clip>
+baseline_path()      { printf '%s/dist/01-baseline/%s_baseline.mov\n' "$1" "$2"; }  # <work> <clip>
+graded_master_path() { printf '%s/dist/02-graded/%s_graded.mov\n' "$1" "$2"; }    # <work> <clip>
+transform_path()     { printf '%s/dist/stab/%s.trf\n' "$1" "$2"; }                 # <work> <clip>
+
+# A proof is named so it can never be mistaken for a deliverable in a folder listing.
+deliverable_path() {  # deliverable_path <dir> <clip> <suffix> [proof-seconds]
+	if [ -n "${4:-}" ]; then
+		printf '%s/%s_%s_proof-%ss.mp4\n' "$1" "$2" "$3" "$4"
+	else
+		printf '%s/%s_%s.mp4\n' "$1" "$2" "$3"
+	fi
+}
+
 # The look LUT is part of the grade, so it is chosen in look.json like every other look value and
 # resolved HERE, once, rather than in each render path. Both scripts used to carry their own copy
 # of a hardcoded path: two places to change a look, which is the drift look.json exists to end.
@@ -83,11 +117,21 @@ resolve_look_lut() {  # resolve_look_lut <name|none|path> <repo-root> [looks|pri
 probe_tags() {
 	local file="$1" field value out=""
 	for field in color_space color_transfer color_primaries; do
-		value=$(ffprobe -v error -select_streams v:0 -show_entries "stream=$field" \
-			-of default=nw=1:nk=1 "$file" 2>/dev/null | grep -v '^[[:space:]]*$' | head -1)
+		value="$(probe_field "$file" "stream=$field")"
 		out="${out:+$out,}${value:-unknown}"
 	done
 	printf '%s\n' "$out"
+}
+
+# ONE field, the only way CLAUDE.md allows for this camera: bare value, first non-empty line,
+# because the video stream prints twice with a blank line between. Callers validate the shape they
+# expect; this only guarantees they are looking at one line.
+#
+# `sed` rather than `grep | head -1`: under pipefail, head closing the pipe early can kill the
+# writer with SIGPIPE and fail the whole assignment.
+probe_field() {  # probe_field <file> <stream=key|format=key>  -> the raw value, or nothing
+	ffprobe -v error -select_streams v:0 -show_entries "$2" -of default=nw=1:nk=1 "$1" \
+		2>/dev/null | sed -n '/[^[:space:]]/{p;q;}' || true
 }
 
 verify_bt709() {
@@ -209,6 +253,20 @@ require_unit() {  # require_unit <label> <value>  -> echoes the value, or fails
 		echo "$1 must be between 0 and 1: got '$2'" >&2
 		return 1
 	fi
+	printf '%s\n' "$2"
+}
+
+# A comma-separated list of numbers, such as a CDL wheel's "1,1,1" or a tint. These are handed to
+# a generator's argv UNQUOTED, one flag list per call, so whitespace in one would split into extra
+# arguments — and a generator that then dies of an argparse error answers --check-neutral with
+# nothing, which reads as "not active" and drops the stage in silence. How MANY numbers is the
+# consumer's rule, not this one's: the correction generator takes one value as three.
+require_numbers() {  # require_numbers <label> <value>  -> echoes the value, or fails
+	case "$2" in
+		''|,*|*,|*,,*|*[!0-9.eE+,-]*)
+			echo "$1 must be numbers separated by commas: got '$2'" >&2
+			return 1;;
+	esac
 	printf '%s\n' "$2"
 }
 
@@ -354,12 +412,10 @@ report_line() {
 	printf '%s\n' "$*" >> "$REPORT"
 }
 
-# One field of a file, the way CLAUDE.md requires for this camera: bare value, first non-empty line
-# (the video stream prints twice), validated so a stray line cannot pass for a number.
+# One field of a file, validated so a stray line cannot pass for a number.
 probe_number() {  # probe_number <file> <stream=key|format=key>  -> the number, or "?"
 	local v
-	v=$(ffprobe -v error -select_streams v:0 -show_entries "$2" -of default=nw=1:nk=1 "$1" \
-		2>/dev/null | sed -n '/[^[:space:]]/{p;q;}') || v=""
+	v="$(probe_field "$1" "$2")"
 	case "$v" in
 		''|*[!0-9./]*) v="?";;
 	esac
@@ -454,12 +510,68 @@ look() {  # look <jq-path>
 ensure_tone_lut() {
 	# Two lines, not one: bash expands the whole command line BEFORE `local` performs its
 	# assignments, so `local a="$1" b="$a"` sees an unset $a — and under `set -u` that aborts.
-	local root="$1"
+	local root="$1" gamma shape
 	local cube="$root/luts/tone/shipped.cube"
-	"$root/scripts/make-tone-lut.py" "$cube" \
-		--gamma    "$(look .tone.gamma)"    --pivot  "$(look .tone.pivot)" \
-		--contrast "$(look .tone.contrast)" --toe    "$(look .tone.toe)" \
-		--shoulder "$(look .tone.shoulder)" --black  "$(look .tone.black)" >/dev/null
+	gamma="$(require_number tone.gamma "$(look .tone.gamma)")" || return 1
+	shape="$(tone_shape_args)" || return 1
+	# shellcheck disable=SC2086  # a flag list of validated numbers, split on purpose
+	"$root/scripts/make-tone-lut.py" "$cube" --gamma "$gamma" $shape >/dev/null
+}
+
+# --- look.json -> generator arguments -------------------------------------------------------
+# Each generator's flags are spelled ONCE, here. They were spelled at every call site, and the
+# copies had drifted: the staged path's neutrality check left out --lum-mix, and the tone block was
+# mapped to flags twice, so a key added on one path would have reached the generator's argparse
+# DEFAULT on the other — a different look, rendered in silence.
+#
+# EVERY VALUE IS VALIDATED INSIDE, AND EVERY CALLER MUST ASSIGN FIRST: `args="$(tone_shape_args)"
+# || exit 1`. Spliced straight into a command, a failed read inside `$(...)` is swallowed, the
+# generator receives a partial flag list, and a --check-neutral that dies of it answers with
+# nothing — which a string comparison reads as "neutral". That is the stage dropped in silence.
+
+# The tone curve's shape. Gamma is not here because it is the one term solved per clip.
+#
+# Keys are written out literally rather than looped over: the suite's key-contract test finds what
+# the scripts read by grepping for each literal read, and a computed key is invisible to it.
+tone_shape_args() {  # tone_shape_args  -> "--pivot P --contrast C --toe T --shoulder S --black B"
+	local pivot contrast toe shoulder black
+	pivot="$(require_number tone.pivot "$(look .tone.pivot)")" || return 1
+	contrast="$(require_number tone.contrast "$(look .tone.contrast)")" || return 1
+	toe="$(require_number tone.toe "$(look .tone.toe)")" || return 1
+	shoulder="$(require_number tone.shoulder "$(look .tone.shoulder)")" || return 1
+	black="$(require_number tone.black "$(look .tone.black)")" || return 1
+	printf -- '--pivot %s --contrast %s --toe %s --shoulder %s --black %s\n' \
+		"$pivot" "$contrast" "$toe" "$shoulder" "$black"
+}
+
+# The input correction. The size is a render setting rather than a look value, so it is not here.
+correction_args() {  # correction_args  -> "--exposure E ... --lum-mix L"
+	local exposure temp tint slope offset power lum_mix
+	exposure="$(require_number correct.exposure "$(look .correct.exposure)")" || return 1
+	temp="$(require_number correct.temp "$(look .correct.temp)")" || return 1
+	tint="$(require_number correct.tint "$(look .correct.tint)")" || return 1
+	slope="$(require_numbers correct.slope "$(look .correct.slope)")" || return 1
+	offset="$(require_numbers correct.offset "$(look .correct.offset)")" || return 1
+	power="$(require_numbers correct.power "$(look .correct.power)")" || return 1
+	lum_mix="$(require_number correct.lum_mix "$(look .correct.lum_mix)")" || return 1
+	printf -- '--exposure %s --temp %s --tint %s --slope %s --offset %s --power %s --lum-mix %s\n' \
+		"$exposure" "$temp" "$tint" "$slope" "$offset" "$power" "$lum_mix"
+}
+
+# Whether each pre-conversion stage does anything, as the word its generator prints. The rule lives
+# in the generator; these exist so that no caller spells the arguments it is decided on. A failure
+# is a failure, never an answer — see the note above.
+correction_state() {  # correction_state  -> neutral|active
+	local args
+	args="$(correction_args)" || return 1
+	# shellcheck disable=SC2086
+	"$LIB_ROOT/scripts/make-correct-lut.py" --check-neutral $args
+}
+
+halation_state() {  # halation_state  -> neutral|active
+	local strength
+	strength="$(require_number halation.strength "$(look .halation.strength)")" || return 1
+	"$LIB_ROOT/scripts/make-halation-luts.py" --check-neutral --strength "$strength"
 }
 
 resolve_work_dir() {
@@ -567,9 +679,7 @@ fps_filter() {  # fps_filter <source-rate> <target-rate>  -> ",fps=N" or "" or r
 # width against height.
 crop_prefix() {  # crop_prefix <src-w> <src-h> <aspect-w> <aspect-h> <offset|centre>  -> "crop=...,"
 	local sw="$1" sh="$2" aw="$3" ah="$4" y="$5" ch max
-	ch=$(( sw * ah / aw ))
-	# Even dimensions: libx264 cannot encode an odd one, and the failure arrives at encode time.
-	ch=$(( ch - ch % 2 ))
+	ch="$(deliverable_height "$sw" "$aw" "$ah")"
 	if [ "$ch" -gt "$sh" ]; then
 		echo "crop window ${sw}x${ch} is taller than the source ${sw}x${sh}" >&2
 		return 1
@@ -672,14 +782,7 @@ deliverable_spec() {  # deliverable_spec <spec>  -> "<name> <aw> <ah> <offset|->
 		echo "REFUSING: deliverable '$name' has a zero aspect term." >&2
 		return 1
 	fi
-	if [ -n "$off" ]; then
-		case "$off" in
-			centre|center) off="centre";;
-			*) off="$(require_number "deliverable $name offset" "$off")" || return 1;;
-		esac
-	else
-		off="-"
-	fi
+	off="$(crop_offset "deliverable $name offset" "$off")" || return 1
 	printf '%s %s %s %s %s_%sx%s\n' "$name" "$aw" "$ah" "$off" "$name" "$aw" "$ah"
 }
 
@@ -698,17 +801,44 @@ deliverable_crops() {  # deliverable_crops "<src-w> <src-h>" <aw> <ah>  -> 0 if 
 		*) return 0;;
 	esac
 	sw="${size% *}"; sh="${size#* }"
-	ch=$(( sw * ah / aw ))
-	ch=$(( ch - ch % 2 ))
+	ch="$(deliverable_height "$sw" "$aw" "$ah")"
 	[ "$ch" -ne "$sh" ]
 }
 
-# Height follows the aspect off the shared width. Even, because libx264 rejects an odd dimension
-# and does it at encode time, after the graph is built and the first frames are decoded.
+# Height follows the aspect off a width. Even, because libx264 rejects an odd dimension and does it
+# at encode time, after the graph is built and the first frames are decoded.
+#
+# The SAME arithmetic answers three questions — a deliverable's output height, the crop window's
+# height on the source, and whether that window is the whole frame — and it is written once
+# because the up-front refusal and the per-clip crop must agree about which deliverables crop. The
+# app draws its crop box from a Swift copy that CropGeometryTests holds to this function.
 deliverable_height() {  # deliverable_height <width> <aw> <ah>  -> <h>
 	local h
 	h=$(( $1 * $3 / $2 ))
 	printf '%s\n' "$(( h - h % 2 ))"
+}
+
+# The shared delivery width. HEIGHT is the knob it always was — the 9:16 reference frame — and the
+# width falls out of it, so a run that says neither renders 1080 wide. Both delivery paths read it
+# here: stage 3 used to default to a literal 1080 and ignore HEIGHT, so HEIGHT=1440 gave the two
+# paths different files under the same name.
+delivery_width() {  # delivery_width  -> <w>, from WIDTH, else HEIGHT (default 1920) at 9:16
+	local h w
+	h="$(require_number HEIGHT "${HEIGHT:-1920}")" || return 1
+	w="$(require_number WIDTH "${WIDTH:-$(( h * 9 / 16 ))}")" || return 1
+	printf '%s\n' "$(( w - w % 2 ))"
+}
+
+# A crop offset as typed: pixels, `centre` (either spelling), or nothing. Empty comes back as "-",
+# which means NOT GIVEN and is a different thing from 0 — 0 is the top of the frame and a real
+# answer. Validated because it is spliced into `crop=W:H:0:<offset>`, where a comma would open a
+# second filter.
+crop_offset() {  # crop_offset <label> <value>  -> <px>|centre|-
+	case "$2" in
+		'') printf -- '-\n';;
+		centre|center) printf 'centre\n';;
+		*) require_number "$1" "$2";;
+	esac
 }
 
 # The middle value, for deriving an exposure reference from a shoot rather than from one frame of
@@ -723,6 +853,16 @@ median() {  # median  (values on stdin, one per line)  -> the middle one
 	printf '%s\n' "$sorted" | sed -n "$(( (n + 1) / 2 ))p"
 }
 
+# Portrait means strictly taller than wide; a square frame is refused with the landscape ones. The
+# rule is here once because the up-front crop probe has to skip exactly the clips this refuses, or
+# a clip that will never render decides whether the run's deliverables crop.
+size_is_portrait() {  # size_is_portrait "<w> <h>"  -> 0 if portrait
+	case "$1" in
+		*' '*) [ "${1#* }" -gt "${1% *}" ];;
+		*) return 1;;
+	esac
+}
+
 require_portrait() {
 	local file="$1" size w h
 	if ! size="$(source_frame_size "$file")"; then
@@ -732,7 +872,7 @@ require_portrait() {
 	fi
 	w="${size% *}"; h="${size#* }"
 
-	if [ "$h" -le "$w" ]; then
+	if ! size_is_portrait "$size"; then
 		echo "REFUSING: $file decodes as ${w}x${h}, not portrait." >&2
 		echo "  Vertical delivery would squash it. Fix the source orientation, then retry." >&2
 		return 1
@@ -790,8 +930,8 @@ transform_is_fresh() {  # transform_is_fresh <trf> <source-clip>
 # shoots; a wrong-but-plausible rate makes temporal grain step instead of updating per frame.
 source_fps() {  # source_fps <file>
 	local fps
-	fps=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate \
-		-of default=nw=1:nk=1 "$1" 2>/dev/null | grep -E '^[0-9]+(/[0-9]+)?$' | head -1)
+	fps="$(probe_field "$1" stream=r_frame_rate)"
+	printf '%s\n' "$fps" | grep -qE '^[0-9]+(/[0-9]+)?$' || fps=""
 	printf '%s\n' "${fps:-24}"
 }
 
@@ -817,6 +957,77 @@ DELIVERY_CHROMA="hqdn3d=0:5:0:6,"
 # shellcheck disable=SC2034  # spliced into filter graphs by the stage scripts, not used here
 DELIVERY_BLEND="blend=all_mode=grainmerge:shortest=1"
 
+# Every output flag a deliverable is encoded with. Both delivery paths passed their own copy, and
+# conformance renders only grade.sh's, so a change to one reached a file nobody compared.
+# `0:a:0?` MUST stay quoted: `?` is a glob character, and a file named `0:a:00` in the launch
+# directory would otherwise expand it. An array, and never empty, so bash 3.2's empty-array trap
+# under `set -u` does not apply.
+DELIVERY_ENCODE=(-map "[o]" -map "0:a:0?" -shortest
+	-c:v libx264 -profile:v high -preset slow -crf 18
+	-color_primaries bt709 -color_trc bt709 -colorspace bt709
+	-c:a aac -b:a 192k -movflags +faststart)
+
+# The graded master's encode, shared by the two staged stages that write one. Audio mapping is the
+# caller's: stage 1 maps nothing and takes ffmpeg's default selection.
+# shellcheck disable=SC2034  # used by the stage scripts
+PRORES_MASTER=(-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le -c:a copy)
+
+# The look values that are not part of a delivery: which film cubes, at what strength, and the
+# colour trims. Read into globals because every render path needs the same set and grade_chain
+# reads them too; each script used to read them itself, and only two of the three honoured the
+# LOOK and PRINT overrides.
+#
+# UNSET IS NOT EMPTY, and the difference is load-bearing. An empty LOOK_LUT is a deliberate choice
+# of no look; an unset one means nobody chose, which is look.json's question to answer. So a value
+# already set is kept, and only an unset one is read.
+#
+# Call it at the top level, `load_film_look || exit 1`: it sets globals, which a `$(...)` would
+# set in a subshell and throw away.
+load_film_look() {
+	# The NAME is read on its own line. Nested inside resolve_look_lut's argument, a missing key
+	# came back as an empty name — which resolve_look_lut rightly reads as "none" — and the run
+	# rendered with no film look at all, having been asked for the one look.json lost.
+	local name
+	if [ -z "${LOOK_LUT+set}" ]; then
+		name="${LOOK:-}"
+		[ -n "$name" ] || name="$(look .look.lut)" || return 1
+		LOOK_LUT="$(resolve_look_lut "$name" "$LIB_ROOT")" || return 1
+	fi
+	if [ -z "${PRINT_LUT+set}" ]; then
+		name="${PRINT:-}"
+		[ -n "$name" ] || name="$(look .print.lut)" || return 1
+		PRINT_LUT="$(resolve_look_lut "$name" "$LIB_ROOT" print)" || return 1
+	fi
+	if [ -z "${LOOK_STRENGTH+set}" ]; then
+		LOOK_STRENGTH="$(require_unit look.strength "$(look .look.strength)")" || return 1
+	fi
+	if [ -z "${PRINT_STRENGTH+set}" ]; then
+		PRINT_STRENGTH="$(require_unit print.strength "$(look .print.strength)")" || return 1
+	fi
+}
+
+# The film look plus the colour trims: everything a render path hands grade_chain. The trims are
+# separate because grade_chain takes them as arguments, and a caller measuring the chain at other
+# values must not have look.json's read in underneath it.
+load_grade_look() {
+	load_film_look || return 1
+	if [ -z "${SAT+set}" ]; then
+		SAT="$(require_number colour.saturation "$(look .colour.saturation)")" || return 1
+	fi
+	if [ -z "${WARM+set}" ]; then
+		WARM="$(require_number colour.warmth "$(look .colour.warmth)")" || return 1
+	fi
+}
+
+# The look values the delivery tail reads, into globals, for the same reasons. SMOOTHING and
+# GRAIN_STRENGTH take an environment override; the grain weights do not, because they are part of
+# how the grain was tuned rather than how much of it a run wants.
+load_delivery_look() {
+	SMOOTHING="$(require_number SMOOTHING "${SMOOTHING:-$(look .stabilisation.smoothing)}")" || return 1
+	GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain.strength)}")" || return 1
+	GRAIN_SHADOWS="$(require_unit grain.shadows "$(look .grain.shadows)")" || return 1
+	GRAIN_HIGHLIGHTS="$(require_unit grain.highlights "$(look .grain.highlights)")" || return 1
+}
 
 # THE GRADE ITSELF, as a spliceable filter chain: look LUT, tone curve, saturation, warmth. Both
 # render paths use it — the one-pass grade.sh and the staged 02-grade.sh — and they used to build
@@ -845,28 +1056,10 @@ DELIVERY_BLEND="blend=all_mode=grainmerge:shortest=1"
 # applied it back in stage 01), and tag is DELIVERY_SETPARAMS wherever the result feeds filters
 # that negotiate a colourspace.
 grade_chain() {  # grade_chain <tone-lut> <sat> <warm> [head-prefix] [tag-prefix]
-	# UNSET is not the same as EMPTY, and the difference is load-bearing. Empty means a deliberate
-	# choice of no look. Unset means nobody has chosen, which is look.json's question to answer —
-	# so it is answered here rather than silently treated as "no look".
-	#
-	# Two callers got this wrong the moment the look stopped being a constant this file assigned at
-	# source time: the parity harness and the test that pins the golden to the chain both sourced
-	# lib.sh, called this function, and received a chain with no look filter in it. Both looked
-	# correct. The golden's freshness guard is what caught it.
-	#
-	# The print and both strengths follow the same rule, for the same reason.
-	if [ -z "${LOOK_LUT+set}" ]; then
-		LOOK_LUT="$(resolve_look_lut "$(look .look.lut)" "$LIB_ROOT")"
-	fi
-	if [ -z "${PRINT_LUT+set}" ]; then
-		PRINT_LUT="$(resolve_look_lut "$(look .print.lut)" "$LIB_ROOT" print)"
-	fi
-	if [ -z "${LOOK_STRENGTH+set}" ]; then
-		LOOK_STRENGTH="$(require_unit look.strength "$(look .look.strength)")"
-	fi
-	if [ -z "${PRINT_STRENGTH+set}" ]; then
-		PRINT_STRENGTH="$(require_unit print.strength "$(look .print.strength)")"
-	fi
+	# Two callers sourced lib.sh, called this function without loading the look, and received a
+	# chain with no look filter in it. Both looked correct; the golden's freshness guard is what
+	# caught it. So a look nobody loaded is loaded here, by the same function the scripts call.
+	load_film_look || return 1
 	printf "%s%s%sformat=yuv444p10le,split=2[gc_y][gc_c];[gc_y]lut1d=file='%s':interp=linear,format=yuv444p10le[gc_t];[gc_t][gc_c]mergeplanes=0x001112:yuv444p10le,%shue=s=%s,colorbalance=rm=%s:bm=-%s" \
 		"${4:-}" "$(film_lut_stage "${LOOK_LUT:-}" "$LOOK_STRENGTH" gc_look)" \
 		"$(film_lut_stage "${PRINT_LUT:-}" "$PRINT_STRENGTH" gc_print)" \
@@ -972,6 +1165,41 @@ halation_sigma() {  # halation_sigma <frame-height> <radius>  -> sigma in pixels
 # The warp resamples BEFORE the downscale, so it happens at master resolution rather than at
 # delivery size. The trailing comma belongs to the prefix: callers splice the result directly into
 # a filter chain, and an absent transform must leave no trace.
+# Camera-motion analysis into a transform, staged. Both entry points write the same cache path, so
+# they must measure the same way: a settings change made in one would leave the transform depending
+# on which script happened to write it.
+#
+# shakiness=5 suits "static handheld" — the iPhone's own stabilisation has already removed the large
+# motion, so what is left is low-amplitude sway. stepsize=6 trades a little accuracy for speed and
+# is plenty at this amplitude.
+#
+# Written to a staging file and installed on success only. An interrupted detect (Ctrl-C, a killed
+# background job) otherwise leaves a TRUNCATED .trf in place of a good one, and the failure surfaces
+# much later and somewhere else: delivery dies deep in the filter graph with "Cannot parse
+# localmotion: unexpected end of file", which does not point back here at all. Learned by doing
+# exactly that — a two-second smoke test destroyed a three-minute analysis.
+#
+# <head> is a prefix with its own trailing comma: the camera CST when detecting on the source, which
+# the one-pass path does, and nothing on a master that is already converted. The staging path is a
+# global because an EXIT trap runs after this function's locals are gone.
+detect_transform() {  # detect_transform <input> <trf> [head-prefix]
+	DETECT_PARTIAL="$2.partial"
+	mkdir -p "$(dirname "$2")"
+	trap 'rm -f "$DETECT_PARTIAL"' EXIT
+	if ! ffmpeg -v error -y -i "$1" \
+		-vf "${3:-}vidstabdetect=shakiness=5:accuracy=15:stepsize=6:result=${DETECT_PARTIAL}" -f null -; then
+		rm -f "$DETECT_PARTIAL"
+		echo "stabilisation analysis FAILED (ffmpeg error) for $1" >&2
+		return 1
+	fi
+	if ! require_nonempty "$DETECT_PARTIAL" "stabilisation analysis"; then
+		rm -f "$DETECT_PARTIAL"
+		return 1
+	fi
+	mv "$DETECT_PARTIAL" "$2"
+	trap - EXIT
+}
+
 stab_prefix() {  # stab_prefix <trf> <smoothing>
 	printf "vidstabtransform=input='%s':smoothing=%s:optzoom=1:interpol=bicubic,unsharp=5:5:0.2:3:3:0.0," \
 		"$1" "$2"
@@ -1063,6 +1291,20 @@ delivery_grain_merge() {  # delivery_grain_merge <image-label> <grain-label> <ou
 	printf '[%s]split=2[gw_noise][gw_level];[gw_level]lutyuv=y=128[gw_flat];' "$2"
 	printf '[gw_flat][gw_noise][gw_mask]maskedmerge=planes=1[gw_grain];'
 	printf '[gw_image][gw_grain]%s[%s]' "$DELIVERY_BLEND" "$3"
+}
+
+# One deliverable, source to installed file: the grain plate, the graph around a caller's image
+# chain, and the encode. The two delivery paths each assembled this and differ only in what comes
+# before the delivery tail — the whole grade on the one-pass path, nothing on stage 3 — so that is
+# the one argument they supply. Reads the grain globals load_delivery_look sets; under `set -u` an
+# unloaded one stops the run rather than rendering without grain.
+render_deliverable() {  # render_deliverable <final-out> <label> <input> <w> <h> <fps> <image-chain> [ffmpeg-arg]...
+	local out="$1" label="$2" in="$3" w="$4" h="$5" fps="$6" chain="$7"
+	shift 7
+	render_delivery "$out" "$label" \
+		-y -i "$in" -f lavfi -i "$(grain_plate "$w" "$h" "$fps")" \
+		-filter_complex "[0:v]${chain}[b];[1:v]$(delivery_grain_branch "$w" "$h" "$GRAIN_STRENGTH")[g];$(delivery_grain_merge b g o "$GRAIN_SHADOWS" "$GRAIN_HIGHLIGHTS")" \
+		"${DELIVERY_ENCODE[@]}" "$@"
 }
 
 # Renders to a staging file and installs it only once the render has succeeded, been checked for

@@ -192,15 +192,6 @@ struct RootView: View {
     }
 
 
-
-    /// Drop a clip and it is the one being graded. Making someone click "select" first is a step
-    /// with no decision in it, and the whole app is shaped around the drop.
-    private func selectIfNothingSelected(_ entry: ClipList.Entry) {
-        guard let grade, grade.selectedClip == nil, entry.isUsable else { return }
-        grade.selectedClip = entry
-        grade.renderPreview()
-    }
-
     private func thumbnail(_ entry: ClipList.Entry) -> some View {
         Group {
             if let image = entry.thumbnail {
@@ -218,18 +209,10 @@ struct RootView: View {
 /// promises: drop clips on the dock icon, or Open With. Declaring the type without handling the
 /// message is a promise the app does not keep — the Finder accepted the drop and nothing happened.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let clips: ClipList
-    let grade: GradeModel?
-    init(clips: ClipList, grade: GradeModel?) { self.clips = clips; self.grade = grade }
+    let actions: AppActions
+    init(actions: AppActions) { self.actions = actions }
 
-    func application(_ sender: NSApplication, open urls: [URL]) {
-        for added in clips.add(urls) {
-            if let grade, grade.selectedClip == nil, added.isUsable {
-                grade.selectedClip = added
-                grade.renderPreview()
-            }
-        }
-    }
+    func application(_ sender: NSApplication, open urls: [URL]) { actions.take(urls) }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { true }
 }
@@ -307,7 +290,9 @@ if let grade = gradeModel,
 let storedConcurrency = UserDefaults.standard.integer(forKey: "concurrency")
 renderQueue.concurrency = storedConcurrency > 0 ? storedConcurrency : 2
 
-let delegate = AppDelegate(clips: clipList, grade: gradeModel)
+gradeModel?.clips = clipList
+let actions = AppActions(clips: clipList, grade: gradeModel, queue: renderQueue)
+let delegate = AppDelegate(actions: actions)
 app.delegate = delegate
 // THE MENU BAR, which this app did not have. Without it ⌘Q does not quit and the standard
 // editing commands never reach a text field, because they travel up the responder chain from a
@@ -315,8 +300,6 @@ app.delegate = delegate
 let commands = MainMenu.Commands()
 MainMenu.install(commands: commands)
 
-gradeModel?.clips = clipList
-let actions = AppActions(clips: clipList, grade: gradeModel, queue: renderQueue)
 let toaster = Toaster()
 gradeModel?.toaster = toaster
 renderQueue.onFinished = { delivered, failed in

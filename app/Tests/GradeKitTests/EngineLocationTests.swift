@@ -2,25 +2,15 @@ import XCTest
 @testable import GradeKit
 
 final class EngineLocationTests: XCTestCase {
-    /// The checkout these tests live in, found by walking up from this source file. No resource
-    /// copying: the engine has one home and the tests read it where it is.
-    private func repoEngine() throws -> EngineLocation {
-        let here = URL(fileURLWithPath: #filePath)
-        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
-            throw XCTSkip("no engine checkout above \(here.path)")
-        }
-        return engine
-    }
-
     func testFindsTheEngineItLivesIn() throws {
-        let engine = try repoEngine()
+        let engine = try engineCheckout()
         XCTAssertTrue(FileManager.default.isExecutableFile(atPath: engine.gradeScript.path),
                       "grade.sh should be executable at \(engine.gradeScript.path)")
         XCTAssertTrue(FileManager.default.fileExists(atPath: engine.lookFile.path))
     }
 
     func testPreflightPassesOnThisCheckout() throws {
-        let engine = try repoEngine()
+        let engine = try engineCheckout()
         let problems = engine.preflight()
         // Apple's cube is gitignored, so a fresh clone legitimately fails this one. Anything else
         // is a real problem and the message has to name it.
@@ -117,10 +107,7 @@ final class EngineLocateTests: XCTestCase {
 
 final class AvailableLooksTests: XCTestCase {
     func testTheLookListComesFromTheFolder() throws {
-        let here = URL(fileURLWithPath: #filePath)
-        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
-            throw XCTSkip("no engine checkout")
-        }
+        let engine = try engineCheckout()
         let looks = engine.availableLooks()
         XCTAssertTrue(looks.contains("kodak_portra_400_nc"),
                       "the shipped look should be offered, got \(looks)")

@@ -59,6 +59,7 @@ import sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from applelog import R0, decode, encode  # noqa: E402
+from cubefile import is_current, number, title, write_staged  # noqa: E402
 
 TRANSFER_SIZE = 65536
 SMALL_SIZE = 4096
@@ -74,10 +75,9 @@ def row(v):
     return "%.8f %.8f %.8f" % (v, v, v)
 
 
-def cube(title, size, domain_max, fn):
-    """The whole file as a string. The TITLE line is the freshness fingerprint, as it is for every
-    generated cube here: git does not preserve mtime, so content is the only reliable test."""
-    lines = ['TITLE "%s"' % title, "", "LUT_1D_SIZE %d" % size]
+def cube(heading, size, domain_max, fn):
+    """The whole file as a string, TITLE first — see cubefile.py."""
+    lines = [title(heading), "", "LUT_1D_SIZE %d" % size]
     if domain_max != 1.0:
         lines += ["DOMAIN_MIN 0 0 0", "DOMAIN_MAX %g %g %g" % (domain_max, domain_max, domain_max)]
     lines.append("")
@@ -94,33 +94,11 @@ def files(threshold):
          TRANSFER_SIZE, 1.0, lambda p: decode(p) - R0),
         ("linear-to-applelog.cube", "%s: linear offset by -R0 to Apple Log" % VERSION,
          TRANSFER_SIZE, LINEAR_MAX, lambda x: min(1.0, encode(x + R0))),
-        ("halation-threshold.cube", "%s: threshold=%g" % (VERSION, threshold),
+        ("halation-threshold.cube", "%s: threshold=%s" % (VERSION, number(threshold)),
          SMALL_SIZE, 1.0, lambda p: max(0.0, decode(p) - threshold)),
         ("nonnegative.cube", "%s: clamp below zero" % VERSION,
          SMALL_SIZE, LINEAR_MAX, lambda x: x),
     ]
-
-
-def is_current(path, title):
-    try:
-        with open(path) as fh:
-            return fh.readline().rstrip("\n") == 'TITLE "%s"' % title
-    except OSError:
-        return False
-
-
-def write(path, text):
-    """Staged, then renamed. A truncated cube keeps a valid-looking TITLE and would be trusted as
-    current forever — the same reason make-tone-lut.py stages its write."""
-    partial = path + ".partial"
-    try:
-        with open(partial, "w") as fh:
-            fh.write(text)
-        os.replace(partial, path)
-    except BaseException:
-        if os.path.exists(partial):
-            os.unlink(partial)
-        raise
 
 
 def main():
@@ -143,11 +121,11 @@ def main():
 
     os.makedirs(a.out, exist_ok=True)
     wrote = []
-    for name, title, size, domain_max, fn in files(a.threshold):
+    for name, text, size, domain_max, fn in files(a.threshold):
         path = os.path.join(a.out, name)
-        if is_current(path, title):
+        if is_current(path, title(text)):
             continue
-        write(path, cube(title, size, domain_max, fn))
+        write_staged(path, cube(text, size, domain_max, fn))
         wrote.append(name)
     print("wrote %s" % ", ".join(wrote) if wrote else "%s is already current" % a.out)
 

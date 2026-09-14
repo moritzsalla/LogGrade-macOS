@@ -5,7 +5,7 @@
     "settings app and the scripts stay dumb. Edit by hand if you prefer — it is just numbers.",
     "",
     "tone.* are the arguments to scripts/make-tone-lut.py. luts/tone/shipped.cube is GENERATED",
-    "from them: 02-grade.sh regenerates it whenever this file is newer, so the .cube can never",
+    "from them: 02-grade.sh regenerates it whenever its TITLE disagrees with them, so the .cube can never",
     "silently disagree with the numbers recorded here.",
     "",
     "correct.* is the input-correction stage, which runs BEFORE Apple's conversion and therefore",

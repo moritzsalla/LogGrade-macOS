@@ -40,6 +40,29 @@ bats_require_minimum_version 1.5.0
 # conflict with each other, not with the rest, and waiting for the builds would give back most of
 # what the parallel pass saves.
 
+# Fails unless every non-blank line on stdin parses as JSON on its own. python3 rather than a grep
+# for braces: a shape test would pass on `{"event":"x",}`.
+_json_lines() {  # printf '%s\n' "$output" | _json_lines
+	python3 -c '
+import json, sys
+for i, line in enumerate(sys.stdin.read().splitlines(), 1):
+    if not line.strip(): continue
+    try: json.loads(line)
+    except Exception as e: sys.exit("line %d is not JSON (%s): %s" % (i, e, line))
+'
+}
+
+# A work dir holding CLIP.mov and a transform measured BEFORE it changed. Stamped rather than
+# touched: bash 3.2's -nt compares whole seconds, so same-second files would make a freshness test
+# pass for the wrong reason.
+_stale_transform() {  # _stale_transform <work>
+	mkdir -p "$1/src" "$1/dist/stab"
+	cp "$FIXTURES/portrait_tagged.mov" "$1/src/CLIP.mov"
+	printf 'measured before the source changed\n' > "$1/dist/stab/CLIP.trf"
+	touch -t 202609010000 "$1/dist/stab/CLIP.trf"
+	touch -t 202609020000 "$1/src/CLIP.mov"
+}
+
 setup_file() {
 	command -v ffmpeg >/dev/null || skip "ffmpeg not installed"
 	export FIXTURES="$BATS_FILE_TMPDIR/fixtures"
@@ -53,22 +76,9 @@ setup_file() {
 	# not 9:16 gets cropped to reach it — correct, and it would make every fixture here exercise a
 	# crop path the real 2160x3840 camera source never takes.
 	#
-	# NOTE ON HOW THESE ARE BUILT. Passing -color_primaries/-color_trc/-colorspace to prores_ks
-	# does NOT produce a correctly tagged file: it writes "bt709,unknown,unknown". That is the
-	# very bug the pipeline's retag pass exists for, and the first version of this suite tripped
-	# over it — a fixture named "correctly tagged" that wasn't, failing a test of a function that
-	# was working fine. So the tagged fixtures are built the way the pipeline builds real output:
-	# encode first, then apply tags in a separate `-c copy` remux.
-	_mk() {  # _mk <w> <h> <primaries> <trc> <matrix> <out>
-		local w=$1 h=$2 prim=$3 trc=$4 mtx=$5 out=$6
-		ffmpeg -y -f lavfi -i "color=c=gray:s=${w}x${h}:d=0.1:r=24" \
-			-frames:v 1 -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le \
-			"$out.raw.mov" -v error
-		ffmpeg -y -i "$out.raw.mov" -map 0:v:0 -c copy \
-			-color_primaries "$prim" -color_trc "$trc" -colorspace "$mtx" \
-			"$out" -v error
-		rm -f "$out.raw.mov"
-	}
+	# How they are tagged is not obvious, and is explained in the builder shared with
+	# tests/make-event-fixture.sh.
+	source "$BATS_TEST_DIRNAME/fixture-clip.sh"
 	# TWO SECONDS, and three distinct luma levels. The exposure probe seeks to 1s, so a 0.1s clip
 	# measures nothing at all — which is why the fixtures above cannot exercise the exposure match
 	# and every test that uses them passes MATCH=0. These can, and the three levels are what make a
@@ -90,10 +100,10 @@ setup_file() {
 	# exactly that reason.
 	_mk_probeable 0x303030 128 72 "$FIXTURES/probe_dark_landscape.mov"
 
-	_mk 72 128 bt709 bt709 bt709 "$FIXTURES/portrait_tagged.mov"
-	_mk 128 72 bt709 bt709 bt709 "$FIXTURES/landscape_tagged.mov"
+	make_tagged_clip 72 128 bt709 bt709 bt709 "$FIXTURES/portrait_tagged.mov"
+	make_tagged_clip 128 72 bt709 bt709 bt709 "$FIXTURES/landscape_tagged.mov"
 	# Deliberately MIStagged as bt2020 — the "bleached out" state this pipeline exists to prevent.
-	_mk 72 128 bt2020 bt709 bt2020nc "$FIXTURES/portrait_bt2020.mov"
+	make_tagged_clip 72 128 bt2020 bt709 bt2020nc "$FIXTURES/portrait_bt2020.mov"
 }
 
 # NOTE ON THE FOOTAGE LOOKUPS BELOW. Each real-footage test finds a clip and skips without one,
@@ -217,10 +227,8 @@ fail() {
 	# lines. Synthetic: 1.
 	# Footage lives under the work dir, which is NOT the repo when media is kept outside it
 	# (see scripts/lib.sh resolve_work_dir). Resolve it the same way the pipeline does.
-	local work real
-	work=$(resolve_work_dir "$BATS_TEST_DIRNAME/.." 2>/dev/null) || work="$BATS_TEST_DIRNAME/.."
-	real=$(ls "$work"/src/*.mov 2>/dev/null | head -1) || true
-	[ -n "$real" ] && [ -f "$real" ] || skip "no source footage in $work/src"
+	local real
+	real="$(_real_clip)"; [ -n "$real" ] || skip "no source footage"
 	# Guard the guard: confirm the raw output really is multi-line, or this test proves nothing.
 	local raw
 	raw=$(ffprobe -v error -select_streams v:0 \
@@ -234,10 +242,8 @@ fail() {
 @test "verify_bt709 gives a verdict (not a parse artefact) on a REAL camera file" {
 	# Footage lives under the work dir, which is NOT the repo when media is kept outside it
 	# (see scripts/lib.sh resolve_work_dir). Resolve it the same way the pipeline does.
-	local work real
-	work=$(resolve_work_dir "$BATS_TEST_DIRNAME/.." 2>/dev/null) || work="$BATS_TEST_DIRNAME/.."
-	real=$(ls "$work"/src/*.mov 2>/dev/null | head -1) || true
-	[ -n "$real" ] && [ -f "$real" ] || skip "no source footage in $work/src"
+	local real
+	real="$(_real_clip)"; [ -n "$real" ] || skip "no source footage"
 	# Source footage is bt2020-tagged, so this must FAIL — and fail with the tag message, not
 	# because the comparison tripped over multi-line output.
 	run verify_bt709 "$real"
@@ -447,9 +453,21 @@ fail() {
 	[ -z "$missing" ] || fail "lib.sh declares but does not define:$missing"
 
 	# And every helper a stage script calls must actually exist in lib.sh — the direction that
-	# catches a rename on one side only.
-	for fn in $(grep -hoE '\b(probe_tags|verify_bt709|safe_retag|check_disk_space|require_nonempty|require_portrait|resolve_work_dir|look|ensure_tone_lut|transform_is_fresh|source_fps|stab_prefix|grain_plate|delivery_image_chain|delivery_grain_branch|delivery_grain_merge|halation_prefix|halation_sigma|require_unit|render_delivery)\b' \
-	         "$BATS_TEST_DIRNAME"/../scripts/0*.sh "$BATS_TEST_DIRNAME"/../scripts/grade.sh | sort -u); do
+	# catches a rename on one side only. This half was a hand-written list of twenty names, and by
+	# the time it was replaced the scripts called over forty. So the calls are found in the
+	# scripts: every snake_case word in command position — at the start of a line, after a pipe,
+	# `;`, `(`, `$(`, `!`, `then`, `do` or `else` — outside a comment. lib.sh's functions are
+	# snake_case by convention; the few that are single words are named explicitly.
+	#
+	# The exceptions are words that sit in command position without being commands: an argument
+	# name at the start of a continued line. Adding one here should be rare and deliberate.
+	local called
+	called=$(grep -hvE '^[[:space:]]*#' "$BATS_TEST_DIRNAME"/../scripts/0*.sh "$BATS_TEST_DIRNAME"/../scripts/grade.sh \
+		| grep -oE '(^|[;&|(!{]|\$\(|then|do|else)[[:space:]]*[a-z][a-z0-9]*(_[a-z0-9]+)+([[:space:]]|\)|;|$)' \
+		| grep -oE '[a-z][a-z0-9]*(_[a-z0-9]+)+' | grep -vxE 'exposure_reference' | sort -u || true)
+	[ "$(printf '%s\n' "$called" | grep -c .)" -gt 30 ] \
+		|| fail "found only $(printf '%s\n' "$called" | grep -c .) calls; the extraction has stopped working"
+	for fn in $called look emit median; do
 		[ "$(type -t "$fn")" = "function" ] || missing="$missing $fn"
 	done
 	[ -z "$missing" ] || fail "stage scripts call functions lib.sh does not define:$missing"
@@ -479,10 +497,8 @@ fail() {
 
 # bats test_tags=slow
 @test "grade.sh plans a real clip end to end (dry run)" {
-	local work src
-	work=$(resolve_work_dir "$BATS_TEST_DIRNAME/.." 2>/dev/null) || work="$BATS_TEST_DIRNAME/.."
-	src=$(ls "$work"/src/*.mov 2>/dev/null | head -1) || true
-	[ -n "$src" ] || skip "no source footage"
+	local src
+	src="$(_real_clip)"; [ -n "$src" ] || skip "no source footage"
 	# Real footage in, but the OUTPUT goes to a temp dir. Without GRADE_WORK_DIR this ran against
 	# the repo root, so every check.sh run left a dist/reports/run-*.txt and a per-clip tone cube
 	# in the tree someone actually delivers from — 38 report files had accumulated.
@@ -518,13 +534,7 @@ fail() {
 	# footage it was never measured on. Same freshness rule ensure_tone_lut already applies to
 	# shipped.cube against look.json.
 	local work="$BATS_TEST_TMPDIR/stale"
-	mkdir -p "$work/src" "$work/dist/stab"
-	printf 'transform computed BEFORE the source was re-oriented\n' > "$work/dist/stab/CLIP.trf"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	# Stamped, not just touched: bash 3.2's -nt compares whole seconds, so same-second files would
-	# make this pass for the wrong reason.
-	touch -t 202609010000 "$work/dist/stab/CLIP.trf"
-	touch -t 202609020000 "$work/src/CLIP.mov"
+	_stale_transform "$work"
 	GRADE_WORK_DIR="$work" DRY=1 MATCH=0 run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"stale"* ]] \
@@ -727,7 +737,7 @@ PY
 _tone_root() {  # build a throwaway repo root with its own look.json and generator
 	local root="$1" gamma="$2"
 	mkdir -p "$root/luts/tone" "$root/scripts"
-	cp "$BATS_TEST_DIRNAME/../scripts/make-tone-lut.py" "$root/scripts/"
+	cp "$BATS_TEST_DIRNAME/../scripts/make-tone-lut.py" "$BATS_TEST_DIRNAME/../scripts/cubefile.py" "$root/scripts/"
 	cat > "$root/look.json" <<JSON
 { "tone": { "gamma": $gamma, "pivot": 0.39, "contrast": 1.09,
             "toe": 0.0, "shoulder": 0.1, "black": 0.025 } }
@@ -1226,15 +1236,8 @@ PY
 		run --separate-stderr "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ]
 	[ -n "$output" ] || fail "JSON=1 produced no events at all"
-	# Every line, or the stream is not a stream. python3 rather than a grep for braces: a shape
-	# test would pass on `{"event":"x",}`.
-	printf '%s\n' "$output" | python3 -c '
-import json, sys
-for i, line in enumerate(sys.stdin.read().splitlines(), 1):
-    if not line.strip(): continue
-    try: json.loads(line)
-    except Exception as e: sys.exit("line %d is not JSON (%s): %s" % (i, e, line))
-' || fail "stdout was not one JSON object per line:$output"
+	# Every line, or the stream is not a stream.
+	printf '%s\n' "$output" | _json_lines || fail "stdout was not one JSON object per line:$output"
 	# This test was merged RED, because a truncated read of the suite output was mistaken for a
 	# pass. What it caught on the first honest run was check_disk_space writing its verdict to
 	# stdout, so the first line a consumer saw was not JSON at all.
@@ -1387,11 +1390,7 @@ for i, line in enumerate(sys.stdin.read().splitlines(), 1):
 	[ -s "$out" ]
 	[[ "$output" == *'"event":"progress"'* ]] || fail "no progress events: $output"
 	[[ "$output" == *'"state":"end"'* ]] || fail "the stream never reported completion: $output"
-	printf '%s\n' "$output" | python3 -c '
-import json, sys
-for line in sys.stdin.read().splitlines():
-    if line.strip(): json.loads(line)
-' || fail "progress broke the one-object-per-line contract:$output"
+	printf '%s\n' "$output" | _json_lines || fail "progress broke the one-object-per-line contract:$output"
 }
 
 @test "a failed render reports and cleans up identically on both paths" {
@@ -1491,11 +1490,7 @@ for line in sys.stdin.read().splitlines():
 	[ "$status" -eq 0 ]
 	[[ "$output" == *'"event":"frame"'* ]] || fail "no frame event: $output"
 	[[ "$output" == *'"path":"'*"CLIP_t0s_graded.png"* ]] || fail "the event did not name the file: $output"
-	printf '%s\n' "$output" | python3 -c '
-import json, sys
-for line in sys.stdin.read().splitlines():
-    if line.strip(): json.loads(line)
-' || fail "the frame event broke the stream contract:$output"
+	printf '%s\n' "$output" | _json_lines || fail "the frame event broke the stream contract:$output"
 }
 
 @test "FRAME does not pay for a stabilisation pass it cannot show" {
@@ -1555,13 +1550,9 @@ for line in sys.stdin.read().splitlines():
 	# quietly lacks the stabilisation someone asked for. The warning it used to print sat among a
 	# dozen other lines and the render went ahead regardless.
 	local work="$BATS_TEST_TMPDIR/stale-final"
-	mkdir -p "$work/src" "$work/dist/02-graded" "$work/dist/stab"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	_stale_transform "$work"
+	mkdir -p "$work/dist/02-graded"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
-	printf 'measured before the source changed\n' > "$work/dist/stab/CLIP.trf"
-	# Stamped, not touched: bash 3.2's -nt compares whole seconds.
-	touch -t 202609010000 "$work/dist/stab/CLIP.trf"
-	touch -t 202609020000 "$work/src/CLIP.mov"
 	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
 	[ "$status" -ne 0 ] || fail "delivered against a stale transform"
 	# Assert the REFUSAL's own words and that the render was never attempted. A synthetic fixture
@@ -1578,12 +1569,9 @@ for line in sys.stdin.read().splitlines():
 	# successful delivery here would be asserting something about the fixture. What this pins is
 	# that the refusal is skipped, said out loud, and the render is attempted.
 	local work="$BATS_TEST_TMPDIR/stale-ok"
-	mkdir -p "$work/src" "$work/dist/02-graded" "$work/dist/stab"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	_stale_transform "$work"
+	mkdir -p "$work/dist/02-graded"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
-	printf 'measured before the source changed\n' > "$work/dist/stab/CLIP.trf"
-	touch -t 202609010000 "$work/dist/stab/CLIP.trf"
-	touch -t 202609020000 "$work/src/CLIP.mov"
 	ACCEPT_STALE=1 GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
 	[[ "$output" == *"accepted via ACCEPT_STALE=1"* ]] || fail "said nothing about it: $output"
 	[[ "$output" != *"REFUSING"* ]] || fail "refused despite ACCEPT_STALE=1: $output"
@@ -1595,11 +1583,7 @@ for line in sys.stdin.read().splitlines():
 	# few lines earlier. The message said "rendering unstabilised", which is what neither case
 	# does — and this is the one decision in a plan that costs ~65s per clip to get wrong.
 	local work="$BATS_TEST_TMPDIR/stale-dry"
-	mkdir -p "$work/src" "$work/dist/stab"
-	printf 'measured before the source changed\n' > "$work/dist/stab/CLIP.trf"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	touch -t 202609010000 "$work/dist/stab/CLIP.trf"
-	touch -t 202609020000 "$work/src/CLIP.mov"
+	_stale_transform "$work"
 	DRY=1 MATCH=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"will recompute"* ]] || fail "did not say what a real run would do: $output"
@@ -1978,11 +1962,19 @@ PY
 	# By CONTENT, never mtime: git does not preserve mtime, so on a fresh clone the committed
 	# golden always lands newer than lib.sh and would be trusted forever. Same reasoning as
 	# ensure_tone_lut's TITLE fingerprint.
-	local root chain norm have want
+	#
+	# The fingerprint is COMPUTED BY THE HARNESS that writes it, not re-derived here. This test used
+	# to carry its own copy of the normalisation and the hash, which agreed with the harness only
+	# for as long as nobody edited either.
+	local root have want
 	root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-	chain="$(grade_chain "<TONE>" "<SAT>" "<WARM>")"
-	norm="${chain//$root/<ROOT>}"
-	have="$(printf '%s' "$norm" | shasum -a 256 | cut -d' ' -f1)"
+	have="$(python3 -c '
+import importlib.util, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("parity", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(m.chain_fingerprint())
+' "$root/tests/grade-parity.py")" || fail "could not compute the chain fingerprint: $have"
 	want="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["chain_fingerprint"])' \
 		"$root/tests/fixtures/grade-golden.json")"
 	[ "$have" = "$want" ] || fail "the grade chain changed and the golden was not regenerated.
@@ -2085,7 +2077,7 @@ PY
 	LOOK_FILE="$look" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || { echo "$output"; false; }
-	[[ "$output" == *"correction: exposure=0.75"* ]] || fail "said nothing about it: $output"
+	[[ "$output" == *"correction: --exposure 0.75 "* ]] || fail "said nothing about it: $output"
 	[ -s "$work/dist/.grade-work/correct.cube" ] || fail "no cube was generated"
 	# And it changed the picture. A string test cannot tell whether the filter did anything.
 	mv "$work/dist/frames/CLIP_t0s_graded.png" "$work/corrected.png"
@@ -2129,6 +2121,28 @@ PY
 	grep -q 'exposure=0.6' "$cube" || fail "the cube does not record what it was built at"
 }
 
+@test "a cube built at a value that differs past six digits is not trusted as current" {
+	# The TITLE is the freshness check, so its number format IS the check. Two generators wrote it
+	# with %g, six significant digits: 0.1234567 and 0.1234568 stamped the same TITLE, and the
+	# second run kept the cube built at the first. Every generator now goes through cubefile.py.
+	local dir="$BATS_TEST_TMPDIR/precise"
+	mkdir -p "$dir"
+	run "$SCRIPTS/make-correct-lut.py" "$dir/c.cube" --exposure 0.1234567 --size 3
+	[ "$status" -eq 0 ] || fail "$output"
+	run "$SCRIPTS/make-correct-lut.py" "$dir/c.cube" --exposure 0.1234568 --size 3
+	[[ "$output" != *"already current"* ]] || fail "the correction kept a cube built at another exposure"
+
+	run "$SCRIPTS/make-halation-luts.py" "$dir/h" --threshold 1.0000001
+	[ "$status" -eq 0 ] || fail "$output"
+	run "$SCRIPTS/make-halation-luts.py" "$dir/h" --threshold 1.0000002
+	[ "$output" = "wrote halation-threshold.cube" ] || fail "halation kept a cube built at another threshold: $output"
+
+	run "$SCRIPTS/make-tone-lut.py" "$dir/t.cube" --gamma 2.0200001
+	[ "$status" -eq 0 ] || fail "$output"
+	run "$SCRIPTS/make-tone-lut.py" "$dir/t.cube" --gamma 2.0200002
+	[[ "$output" != *"already current"* ]] || fail "the tone curve kept a cube built at another gamma"
+}
+
 @test "the correction generator refuses a malformed wheel" {
 	# Each refusal asserts its own words. A zero power exits non-zero without the guard too, from the
 	# ZeroDivisionError it raises, so a status check alone passed against a removed guard.
@@ -2141,6 +2155,77 @@ PY
 	run "$SCRIPTS/make-correct-lut.py" --stdout --size 200
 	[ "$status" -ne 0 ] || fail "accepted an absurd cube size"
 	[[ "$output" == *"outside 2..64"* ]] || fail "refused the size without saying why: $output"
+}
+
+# Writes a copy of look.json with one jq assignment applied, and prints its path.
+_look_with() {  # _look_with <name> <jq-assignment>
+	local out="$BATS_TEST_TMPDIR/$1.json"
+	jq "$2" "$BATS_TEST_DIRNAME/../look.json" > "$out"
+	printf '%s\n' "$out"
+}
+
+@test "a correction wheel that cannot be read stops the run rather than dropping the stage" {
+	# The generator decides neutrality, and a generator handed a split argument dies of argparse
+	# and answers with nothing. Compared as a string, nothing is "not active": the correction was
+	# left out of both render paths in silence. Both must refuse instead.
+	local work="$BATS_TEST_TMPDIR/badwheel" look
+	mkdir -p "$work/src" "$work/dist/01-baseline"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/01-baseline/CLIP_baseline.mov"
+	look="$(_look_with badwheel '.correct.slope = "1.2, 1, 1"')"
+
+	LOOK_FILE="$look" DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -ne 0 ] || fail "grade.sh planned a run without the correction: $output"
+	[[ "$output" == *"correct.slope must be numbers separated by commas"* ]] \
+		|| fail "grade.sh did not say which value: $output"
+
+	LOOK_FILE="$look" GRADE_WORK_DIR="$work" run "$SCRIPTS/02-grade.sh" CLIP
+	[ "$status" -ne 0 ] || fail "02-grade.sh rendered a master without the correction"
+	[[ "$output" == *"correct.slope must be numbers separated by commas"* ]] \
+		|| fail "02-grade.sh did not say which value: $output"
+	[ ! -e "$work/dist/02-graded" ] || fail "02-grade.sh created output before refusing"
+}
+
+@test "a look.json that has lost its film look stops the run rather than rendering without one" {
+	# resolve_look_lut reads an empty name as "none", which is right for a deliberate empty. The
+	# name used to be read inside its argument list, where a missing key BECAME that empty name, so
+	# both render paths planned a grade with no film cube and said nothing.
+	local work="$BATS_TEST_TMPDIR/nolook" look
+	mkdir -p "$work/src" "$work/dist/01-baseline"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/01-baseline/CLIP_baseline.mov"
+	look="$(_look_with nolook 'del(.look.lut)')"
+
+	LOOK_FILE="$look" DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -ne 0 ] || fail "grade.sh planned a run with no film look: $output"
+	[[ "$output" == *"look.json: missing .look.lut"* ]] || fail "grade.sh did not name the key: $output"
+
+	LOOK_FILE="$look" GRADE_WORK_DIR="$work" run "$SCRIPTS/02-grade.sh" CLIP
+	[ "$status" -ne 0 ] || fail "02-grade.sh rendered a master with no film look"
+	[[ "$output" == *"look.json: missing .look.lut"* ]] || fail "02-grade.sh did not name the key: $output"
+	[ ! -e "$work/dist/02-graded" ] || fail "02-grade.sh created output before refusing"
+}
+
+@test "encode settings, analysis settings and stage paths are spelled in lib.sh and nowhere else" {
+	# Each of these was written into two stage scripts and conformance renders only one of them,
+	# so an edit to the other reached files nobody compared: the delivery encode, the ProRes master
+	# encode, the stabilisation analysis both entry points cache under one path, the Apple cube's
+	# path, and the paths one stage reads that another wrote.
+	local offenders
+	# The render entry points only. check.sh names Apple's cube and src/ too, to warn that a green run
+	# skipped the render tests; it renders nothing and does not source lib.sh.
+	offenders=$(grep -nE 'libx264|prores_ks|vidstabdetect|AppleLogToRec709|dist/(stab|01-baseline|02-graded)/|/src/' \
+		"$SCRIPTS"/0*.sh "$SCRIPTS"/grade.sh | grep -v ':[0-9]*:[[:space:]]*#' || true)
+	[ -z "$offenders" ] || fail "spelled outside lib.sh:$offenders"
+}
+
+@test "every generator's flags are spelled in lib.sh and nowhere else" {
+	# The tone block was mapped to flags in two places and the correction's in two, and the copies
+	# had drifted by a flag. A flag written at a call site is the start of the next copy.
+	local offenders
+	offenders=$(grep -nE -- '--(pivot|contrast|shoulder|black|exposure|temp|tint|slope|offset|power|lum-mix) ' \
+		"$SCRIPTS"/*.sh | grep -v '/lib\.sh:' | grep -v ':[0-9]*:[[:space:]]*#' || true)
+	[ -z "$offenders" ] || fail "spells a generator flag outside lib.sh:$offenders"
 }
 
 # --- halation -----------------------------------------------------------------
@@ -2467,6 +2552,7 @@ sys.exit("; ".join(problems) or None)
 		LOOK_FILE="$look" GRADE_WORK_DIR="$work" run "$SCRIPTS/02-grade.sh" CCC
 		[ "$status" -ne 0 ] || fail "rendered a master with '$key' left out"
 		[[ "$output" == *"runs before Apple's conversion"* ]] || fail "'$key' refused without saying why: $output"
+		[[ "$output" == *"GRADE_CODE=REFUSE_STAGED_PRE_CONVERSION"* ]] || fail "'$key' refused without its code"
 		[ ! -e "$work/dist/02-graded/CCC_graded.mov" ] || fail "'$key' got as far as encoding"
 	done
 }
@@ -2506,15 +2592,9 @@ sys.exit("; ".join(problems) or None)
 		fail "the event stream changed. If that was intended, re-run tests/make-event-fixture.sh and say in the commit what moved."
 	fi
 	# And it is a stream, not a blob: one object per line, each parseable on its own.
-	printf '%s\n' "$now" | python3 -c '
-import json, sys
-lines = [l for l in sys.stdin.read().splitlines() if l.strip()]
-for i, l in enumerate(lines, 1):
-    try: json.loads(l)
-    except Exception as e: sys.exit("line %d is not JSON (%s)" % (i, e))
-if not any(json.loads(l)["event"] == "run_done" for l in lines):
-    sys.exit("the stream has no run_done, so a consumer cannot tell it ended")
-' || fail "the recorded stream is not one object per line"
+	printf '%s\n' "$now" | _json_lines || fail "the recorded stream is not one object per line"
+	[[ "$now" == *'"event":"run_done"'* ]] \
+		|| fail "the stream has no run_done, so a consumer cannot tell it ended"
 }
 
 # --- the app's toolchain ------------------------------------------------------

@@ -86,8 +86,8 @@ final class GradeModel: ObservableObject {
     /// Apple's conversion, read once. It is 65 points and parsing it takes long enough to be worth
     /// not doing on a drag.
     private let conversionCube: Cube3D?
-    /// Film looks, read on first use and kept. There are two on disk and they are small.
-    private var lookCubeCache: [String: Cube3D] = [:]
+    /// Film looks and prints, read on first use and kept. There are a handful and they are small.
+    private var filmCubeCache: [URL: Cube3D] = [:]
     /// The correction cube and what it was built from, so an unchanged correction is not rebuilt
     /// 60 times a second.
     private var correctionCube: Cube3D?
@@ -115,24 +115,21 @@ final class GradeModel: ObservableObject {
     }
 
     private func lookCube(for stem: String) -> Cube3D? {
-        if let cached = lookCubeCache[stem] { return cached }
-        guard let url = engine.lookCube(named: stem), let cube = try? Cube3D(contentsOf: url) else {
-            return nil
-        }
-        lookCubeCache[stem] = cube
-        return cube
+        filmCube(at: engine.lookCube(named: stem))
     }
 
-    /// Prints are cached apart from looks: a stem names a file within its own folder, and nothing
-    /// stops a look and a print sharing one.
-    private var printCubeCache: [String: Cube3D] = [:]
-
     private func printCube(for stem: String) -> Cube3D? {
-        if let cached = printCubeCache[stem] { return cached }
-        guard let url = engine.printCube(named: stem), let cube = try? Cube3D(contentsOf: url) else {
-            return nil
-        }
-        printCubeCache[stem] = cube
+        filmCube(at: engine.printCube(named: stem))
+    }
+
+    /// KEYED BY FILE, NOT BY STEM. A stem names a cube within its own folder, and nothing stops a
+    /// look and a print sharing one — which is why this was two caches. The resolved path is
+    /// unique across both folders, so one cache cannot hand a look's cube to the print.
+    private func filmCube(at url: URL?) -> Cube3D? {
+        guard let url else { return nil }
+        if let cached = filmCubeCache[url] { return cached }
+        guard let cube = try? Cube3D(contentsOf: url) else { return nil }
+        filmCubeCache[url] = cube
         return cube
     }
 
@@ -507,7 +504,7 @@ final class GradeModel: ObservableObject {
         get { selectedClip.flatMap { project.clips[$0.stem]?.cropOffset } }
         set {
             guard let stem = selectedClip?.stem else { return }
-            var settings = project.clips[stem] ?? Project.ClipSettings()
+            var settings = project.settings(for: stem)
             settings.cropOffset = newValue
             project.clips[stem] = settings
         }
@@ -516,10 +513,13 @@ final class GradeModel: ObservableObject {
     /// Whether this clip gets stabilised. Per clip, not per project: a locked-off shot does not
     /// want a warp, and a handheld one does.
     var stabilise: Bool {
-        get { selectedClip.flatMap { project.clips[$0.stem]?.stabilise } ?? true }
+        get {
+            selectedClip.map { project.settings(for: $0.stem).stabilise }
+                ?? Project.ClipSettings.stabilisesByDefault
+        }
         set {
             guard let stem = selectedClip?.stem else { return }
-            var settings = project.clips[stem] ?? Project.ClipSettings()
+            var settings = project.settings(for: stem)
             settings.stabilise = newValue
             project.clips[stem] = settings
         }
@@ -600,7 +600,7 @@ final class GradeModel: ObservableObject {
                     self.renderedLook = look
                     self.preview.isRendering = false
                     self.preview.isLive = false
-                    self.preview.say("This is the grade. Grain, sharpening, denoise, the stabiliser and dither are added when you convert.")
+                    self.preview.say(LivePreview.exactFrameNote)
                     // The FIRST render of a clip is the one that measures its mean, so until it
                     // lands there is no solved gamma and the graph beside the sliders is drawing
                     // the reference curve. Record it and regenerate.

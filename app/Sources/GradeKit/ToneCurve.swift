@@ -1,13 +1,13 @@
 import Foundation
 
-/// The tone curve, read from the engine's own generator.
+/// The tone curve, from the engine's own generator or from an exact transcription of it.
 ///
-/// THIS IS THE DECISION THAT KEEPS THE CURVE IN ONE PLACE. The obvious way to draw a curve beside
-/// a set of sliders is to port the maths into the app, and that port would be the third
-/// implementation — the one the parity harness cannot see, because it knows how to slice the
-/// formula out of exactly two files. Subprocessing `make-tone-lut.py --stdout` instead costs about
-/// a tenth of a second and cannot drift: the curve the interface draws is the curve the render
-/// applies, because it is the same bytes.
+/// The curve was first only subprocessed from `make-tone-lut.py --stdout`, so the interface drew
+/// the same bytes the render applied and a port had nothing to drift from. That cost about a tenth
+/// of a second per control change, which put the tone sliders a frame or two behind the pointer,
+/// so `generated(tone:size:)` and `solvedGamma(clipYAVG:...)` now compute it in process. They are
+/// licensed the way `CorrectionCube` is — `ToneCurvePortTests` holds every entry to the
+/// generator's output — and the subprocess path stays, because that test needs it.
 public struct ToneCurve: Equatable {
     /// Output value for each input, evenly spaced over 0...1. The generator writes 4096 of them.
     public let samples: [Double]
@@ -42,8 +42,8 @@ public struct ToneCurve: Equatable {
     /// what every render in this app uses — `tone.gamma` is the REFERENCE gamma, and the engine
     /// solves a per-clip gamma from it so that every clip lands where the look was tuned. Drawing
     /// or previewing the slider value directly shows a curve nothing renders: on this footage the
-    /// solve moves 2.02 by enough to be obvious in the shadows. Subprocessed rather than ported,
-    /// for the reason the curve itself is subprocessed — one home, no drift.
+    /// solve moves 2.02 by enough to be obvious in the shadows. This runs the engine's own solver;
+    /// the in-process port below is what the interface calls, and this is what it is held to.
     public static func solvedGamma(using solver: URL, clipYAVG: Double, referenceYAVG: Double,
                                    referenceGamma: Double) -> Double {
         let process = Process()
@@ -69,7 +69,7 @@ public struct ToneCurve: Equatable {
     ///
     /// A SECOND IMPLEMENTATION, LICENSED THE SAME WAY AS `CorrectionCube`. Generating this through
     /// Python costs about a tenth of a second, which put the tone controls a frame or two behind
-    /// the pointer; the maths itself is twelve lines. `ToneCurveTests` builds all 4096 entries
+    /// the pointer; the maths itself is twelve lines. `ToneCurvePortTests` builds all 4096 entries
     /// both ways and requires them to agree to the precision the generator prints, so the two
     /// cannot drift without a test naming which one moved. The reasoning for every term lives in
     /// `scripts/make-tone-lut.py`'s header and is not repeated here.
@@ -104,8 +104,8 @@ public struct ToneCurve: Equatable {
     /// The gamma the engine will apply to this clip, solved here for the same reason.
     ///
     /// Ten lines of arithmetic that used to be a process launch on the drag path. The clamp and
-    /// the two domain guards are the generator's, and `ToneCurveTests` holds the two against each
-    /// other across the range including both guards.
+    /// the two domain guards are the generator's, and `ToneCurvePortTests` holds the two against
+    /// each other across the range including both guards.
     public static func solvedGamma(clipYAVG: Double, referenceYAVG: Double,
                                    referenceGamma: Double, peak: Double = 1023) -> Double {
         let y = clipYAVG / peak

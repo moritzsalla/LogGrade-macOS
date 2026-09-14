@@ -1,3 +1,4 @@
+import GradeKit
 import SwiftUI
 
 /// The room the picture hangs in.
@@ -17,7 +18,8 @@ enum Palette {
     static let ink = Color(red: 0.910, green: 0.910, blue: 0.910)        // #E8E8E8
     static let inkSecondary = Color(red: 0.604, green: 0.604, blue: 0.604)
     static let inkTertiary = Color(red: 0.431, green: 0.431, blue: 0.431)
-    static let plate = Color(red: 0.953, green: 0.765, blue: 0.000)      // #F3C300, RAL 1021
+    static let plate = Color(red: Scopes.plateYellow.rgb.0, green: Scopes.plateYellow.rgb.1,
+                             blue: Scopes.plateYellow.rgb.2)             // #F3C300, RAL 1021
     static let lamp = Color(red: 0.878, green: 0.416, blue: 0.294)       // #E06A4B
 }
 

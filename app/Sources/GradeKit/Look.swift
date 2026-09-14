@@ -1,5 +1,20 @@
 import Foundation
 
+/// A comma-separated list of numbers as look.json spells a CDL wheel or a tint, or nil when any
+/// part is not a number. Whitespace around a part is tolerated because Python's `float` tolerates
+/// it, and the generators are what decide what a file means.
+///
+/// EMPTY PARTS ARE KEPT, and so refused. Swift's default split drops them, which read "1," as the
+/// single value 1 — a CDL the generator and lib.sh's `require_numbers` both reject.
+func numbers(in text: String) -> [Double]? {
+    var values: [Double] = []
+    for part in text.split(separator: ",", omittingEmptySubsequences: false) {
+        guard let v = Double(part.trimmingCharacters(in: .whitespaces)) else { return nil }
+        values.append(v)
+    }
+    return values.isEmpty ? nil : values
+}
+
 /// `look.json`, which is the engine's wire format and stays that way.
 ///
 /// NO FALLBACKS, INHERITED. The engine's `look()` stops the run on a missing key rather than
@@ -48,15 +63,14 @@ public struct Look: Equatable {
         ///
         /// So the formatter is %g, which is the generator's own, and neutrality is decided by
         /// parsing rather than by comparing text.
+        ///
+        /// ONE VALUE MEANS THREE, because the correction generator accepts that and a hand-edited
+        /// look.json may use it. `CorrectionCube` reads the wheels through this too, so the
+        /// preview and the neutrality check cannot disagree about what a wheel says.
         static func parse(_ text: String) -> (Double, Double, Double)? {
-            let parts = text.split(separator: ",").map {
-                Double($0.trimmingCharacters(in: .whitespaces))
-            }
-            if parts.count == 1, let only = parts[0] { return (only, only, only) }
-            guard parts.count == 3, let r = parts[0], let g = parts[1], let b = parts[2] else {
-                return nil
-            }
-            return (r, g, b)
+            guard let v = numbers(in: text) else { return nil }
+            if v.count == 1 { return (v[0], v[0], v[0]) }
+            return v.count == 3 ? (v[0], v[1], v[2]) : nil
         }
 
         static func format(_ v: (Double, Double, Double)) -> String {
@@ -133,14 +147,13 @@ public struct Look: Equatable {
 
         /// The tint as numbers, or nil when the text is not three of them — which the engine
         /// refuses, so the live picture refuses it too.
+        ///
+        /// EXACTLY THREE, unlike a CDL wheel. grade.sh splits the tint into three fields and
+        /// refuses anything else, so accepting "1" here would preview a glow the render declines to
+        /// produce. How many numbers is each consumer's rule; only the splitting is shared.
         public var tintValues: (Double, Double, Double)? {
-            let parts = tint.split(separator: ",").map {
-                Double($0.trimmingCharacters(in: .whitespaces))
-            }
-            guard parts.count == 3, let r = parts[0], let g = parts[1], let b = parts[2] else {
-                return nil
-            }
-            return (r, g, b)
+            guard let v = numbers(in: tint), v.count == 3 else { return nil }
+            return (v[0], v[1], v[2])
         }
 
         public func tint(_ channel: Int) -> Double {

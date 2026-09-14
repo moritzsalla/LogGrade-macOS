@@ -125,32 +125,38 @@ public enum EngineCode: Equatable {
     case noTransform
     case renderFailed
     case frameFailed
+    case stagedPathCannotApplyPreConversion
     case unknown(String)
 
-    public init(rawValue: String) {
-        switch rawValue {
-        case "REFUSE_NOT_PORTRAIT": self = .notPortrait
+    /// Every name the app knows, as data rather than as a `switch`, so a test can compare the set
+    /// against what the scripts actually emit in both directions: a code the engine gained, and a
+    /// code the engine dropped that this would go on waiting for.
+    static let byRawValue: [String: EngineCode] = [
+        "REFUSE_NOT_PORTRAIT": .notPortrait,
         // Was REFUSE_FEED_NO_CROP_Y. The refusal is not about the Feed deliverable — it is about
         // ANY deliverable that crops, which is a fact about the source's shape rather than about
         // a name. Renamed rather than aliased: two spellings of one code is how a consumer ends up
         // handling only the one it was written against.
-        case "REFUSE_CROP_NO_OFFSET": self = .cropWithoutOffset
-        case "REFUSE_CROP_WINDOW": self = .cropWindowDoesNotFit
-        case "REFUSE_DELIVERABLE": self = .unknownDeliverable
-        case "REFUSE_NO_DELIVERABLES": self = .noDeliverables
-        case "REFUSE_MATCH_MODE": self = .unknownMatchMode
-        case "REFUSE_BATCH_NO_PROBE": self = .batchWithoutMeasurement
-        case "REFUSE_NOT_FOUND": self = .notFound
-        case "REFUSE_NO_ARGS": self = .noArguments
-        case "REFUSE_PROOF_AND_FRAME": self = .proofAndFrameTogether
-        case "REFUSE_FRAME_STAGE": self = .unknownFrameStage
-        case "REFUSE_FPS_RETIME": self = .fpsWouldNeedRetiming
-        case "STALE_TRANSFORM": self = .staleTransform
-        case "NO_TRANSFORM": self = .noTransform
-        case "RENDER_FAILED": self = .renderFailed
-        case "FRAME_FAILED": self = .frameFailed
-        default: self = .unknown(rawValue)
-        }
+        "REFUSE_CROP_NO_OFFSET": .cropWithoutOffset,
+        "REFUSE_CROP_WINDOW": .cropWindowDoesNotFit,
+        "REFUSE_DELIVERABLE": .unknownDeliverable,
+        "REFUSE_NO_DELIVERABLES": .noDeliverables,
+        "REFUSE_MATCH_MODE": .unknownMatchMode,
+        "REFUSE_BATCH_NO_PROBE": .batchWithoutMeasurement,
+        "REFUSE_NOT_FOUND": .notFound,
+        "REFUSE_NO_ARGS": .noArguments,
+        "REFUSE_PROOF_AND_FRAME": .proofAndFrameTogether,
+        "REFUSE_FRAME_STAGE": .unknownFrameStage,
+        "REFUSE_FPS_RETIME": .fpsWouldNeedRetiming,
+        "REFUSE_STAGED_PRE_CONVERSION": .stagedPathCannotApplyPreConversion,
+        "STALE_TRANSFORM": .staleTransform,
+        "NO_TRANSFORM": .noTransform,
+        "RENDER_FAILED": .renderFailed,
+        "FRAME_FAILED": .frameFailed,
+    ]
+
+    public init(rawValue: String) {
+        self = Self.byRawValue[rawValue] ?? .unknown(rawValue)
     }
 
     /// A sentence for the interface, which cites the file carrying the reason rather than
@@ -184,6 +190,8 @@ public enum EngineCode: Equatable {
         case .noTransform: return "no stabilisation transform, rendering unstabilised"
         case .renderFailed: return "the render failed; the previous output was left alone"
         case .frameFailed: return "the preview frame failed"
+        case .stagedPathCannotApplyPreConversion:
+            return "the staged path cannot apply a correction or halation — see scripts/02-grade.sh"
         case .unknown(let raw): return raw
         }
     }

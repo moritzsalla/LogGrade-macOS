@@ -4,30 +4,6 @@ import XCTest
 /// Driven by a stand-in engine: these tests are about the queue, and real renders would make them
 /// slow, footage-dependent and about something else.
 final class RenderQueueTests: XCTestCase {
-    private func stubEngine(script: String) throws -> EngineLocation {
-        let root = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent(UUID().uuidString)
-        let scripts = root.appendingPathComponent("scripts")
-        try FileManager.default.createDirectory(at: scripts, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("luts/looks"),
-                                                withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("luts/apple"),
-                                                withIntermediateDirectories: true)
-        try "{}".write(to: root.appendingPathComponent("look.json"), atomically: true,
-                       encoding: .utf8)
-        try "".write(to: root.appendingPathComponent("luts/apple/AppleLogToRec709-v1.0.cube"),
-                     atomically: true, encoding: .utf8)
-        for name in ["grade.sh", "make-tone-lut.py", "make-correct-lut.py", "make-halation-luts.py",
-                     "solve-gamma.py"] {
-            let url = scripts.appendingPathComponent(name)
-            try (name == "grade.sh" ? script : "#!/bin/bash\n")
-                .write(to: url, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755],
-                                                  ofItemAtPath: url.path)
-        }
-        return EngineLocation(root: root)
-    }
-
     private func waitForQueue(_ queue: RenderQueue, timeout: TimeInterval = 30) {
         let done = expectation(description: "queue")
         DispatchQueue.global().async {

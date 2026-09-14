@@ -5,9 +5,10 @@ import GradeKit
 ///
 /// WHY A CLASS AND NOT VIEW CODE. Each of these now has two callers — a control in the window and
 /// an item in the menu bar — and a SwiftUI view is a struct that is rebuilt constantly, so a menu
-/// item cannot hold one. Keeping them here also means there is exactly ONE door for clips: a drop,
-/// the startup screen's button and File ▸ Add Clips all arrive at `take`, which is what stopped
-/// the last two import bugs from being three.
+/// item cannot hold one. Keeping them here also means there is exactly ONE door for clips: a drop
+/// on the window, the startup screen's button, File ▸ Add Clips and files handed over by the Finder
+/// or the dock all arrive at `take`, which is what stopped the last two import bugs from being
+/// three. The Finder's door was a copy in `AppDelegate` until it was routed here.
 final class AppActions {
     private let clips: ClipList
     private let grade: GradeModel?

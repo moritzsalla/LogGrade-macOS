@@ -2,20 +2,21 @@ import XCTest
 @testable import GradeKit
 
 final class LookTests: XCTestCase {
-    private func repoRoot() throws -> URL {
-        let here = URL(fileURLWithPath: #filePath)
-        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
-            throw XCTSkip("no engine checkout above \(here.path)")
-        }
-        return engine.root
-    }
-
     func testReadsTheRepoLookAndKeepsWhatItDoesNotModel() throws {
-        let url = try repoRoot().appendingPathComponent("look.json")
+        let url = try engineCheckout().root.appendingPathComponent("look.json")
         let look = try Look(data: try Data(contentsOf: url))
-        XCTAssertEqual(look.lookLUT, "kodak_portra_400_nc")
-        XCTAssertEqual(look.tone.gamma, 2.02)
-        XCTAssertEqual(look.colour.saturation, 1.27)
+        // Against the file's own values rather than the numbers it held when this was written, so
+        // a re-tune of the look does not read as a broken reader.
+        let raw = try JSONSerialization.jsonObject(with: try Data(contentsOf: url))
+            as? [String: Any] ?? [:]
+        func field(_ block: String, _ key: String) -> Any? {
+            (raw[block] as? [String: Any])?[key]
+        }
+        XCTAssertEqual(look.lookLUT, field("look", "lut") as? String)
+        XCTAssertEqual(look.tone.gamma, (field("tone", "gamma") as? NSNumber)?.doubleValue)
+        XCTAssertEqual(look.colour.saturation,
+                       (field("colour", "saturation") as? NSNumber)?.doubleValue)
+        XCTAssertEqual(look.halation.tint, field("halation", "tint") as? String)
         XCTAssertTrue(look.correct.isNeutral, "the shipped correction does nothing, by design")
         // The file's own commentary is not modelled and must survive a round trip, or a look sent
         // from the app strips the reasoning out of the file every time.
@@ -25,7 +26,7 @@ final class LookTests: XCTestCase {
     /// The contract, from the engine's side: every key the scripts ask for has to be in a file
     /// this writes, because `look()` stops the run on a missing one rather than substituting.
     func testAWrittenLookAnswersEveryKeyTheScriptsAskFor() throws {
-        let root = try repoRoot()
+        let root = try engineCheckout().root
         let look = try Look(data: try Data(contentsOf: root.appendingPathComponent("look.json")))
         // Change something, so this is not accidentally testing the file it read.
         var edited = look
@@ -76,7 +77,7 @@ final class LookTests: XCTestCase {
         // And a block that is PRESENT but incomplete. Testing only the absent-block case let a
         // mutation through: defaulting a missing number to zero stayed green, because the first
         // thing the decoder reached was an absent block rather than an absent number.
-        let root = try repoRoot().appendingPathComponent("look.json")
+        let root = try engineCheckout().root.appendingPathComponent("look.json")
         var object = try JSONSerialization.jsonObject(with: try Data(contentsOf: root))
             as? [String: Any] ?? [:]
         var tone = object["tone"] as? [String: Any] ?? [:]
@@ -95,7 +96,7 @@ final class LookTests: XCTestCase {
         // same reason: a look sent from a tool should not strip the reasoning out of the file. A
         // mutation that dropped `preserved` on write went unnoticed, because equality here
         // deliberately compares the GRADE and not the commentary — so this asserts on the bytes.
-        let url = try repoRoot().appendingPathComponent("look.json")
+        let url = try engineCheckout().root.appendingPathComponent("look.json")
         var look = try Look(data: try Data(contentsOf: url))
         look.tone.gamma = 1.33
         let out = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -115,17 +116,7 @@ final class LookTests: XCTestCase {
 }
 
 final class ProjectTests: XCTestCase {
-    private func aLook() throws -> Look {
-        let json = #"""
-        {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
-         "power":"1,1,1","lum_mix":1},
-         "halation":{"strength":0,"threshold":1,"radius":0.006,"tint":"1,0.3,0.05"},"look":{"lut":"kodak_portra_400_nc","strength":1},"print":{"lut":"none","strength":1},
-         "tone":{"gamma":2.02,"pivot":0.39,"contrast":1.09,"toe":0,"shoulder":0.1,"black":0.025},
-         "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8,"shadows":1,"highlights":1},
-         "stabilisation":{"smoothing":30},"match":{"reference_yavg":609}}
-        """#
-        return try Look(data: Data(json.utf8))
-    }
+    private func aLook() throws -> Look { try lookFixture() }
 
     func testRoundTripsThroughDisk() throws {
         var project = Project(presets: [.init(name: "Portra", look: try aLook())],
@@ -224,10 +215,7 @@ final class ProjectTests: XCTestCase {
 /// and read back out of its event stream. Skipped without footage, since the engine needs a clip.
 final class LookEngineIntegrationTests: XCTestCase {
     func testTheEngineRendersWithALookTheAppWrote() throws {
-        let here = URL(fileURLWithPath: #filePath)
-        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
-            throw XCTSkip("no engine checkout")
-        }
+        let engine = try engineCheckout()
         let src = engine.root.appendingPathComponent("src")
         let clips = (try? FileManager.default.contentsOfDirectory(at: src,
                                                                   includingPropertiesForKeys: nil))
@@ -268,17 +256,7 @@ final class LookEngineIntegrationTests: XCTestCase {
 
 /// Presets and the project file, exercised through the model's own operations rather than the UI.
 final class PresetTests: XCTestCase {
-    private func aLook(gamma: Double = 2.02) throws -> Look {
-        let json = #"""
-        {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
-         "power":"1,1,1","lum_mix":1},
-         "halation":{"strength":0,"threshold":1,"radius":0.006,"tint":"1,0.3,0.05"},"look":{"lut":"kodak_portra_400_nc","strength":1},"print":{"lut":"none","strength":1},
-         "tone":{"gamma":GAMMA,"pivot":0.39,"contrast":1.09,"toe":0,"shoulder":0.1,"black":0.025},
-         "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8,"shadows":1,"highlights":1},
-         "stabilisation":{"smoothing":30},"match":{"reference_yavg":609}}
-        """#.replacingOccurrences(of: "GAMMA", with: String(gamma))
-        return try Look(data: Data(json.utf8))
-    }
+    private func aLook(gamma: Double = 2.02) throws -> Look { try lookFixture(gamma: gamma) }
 
     func testAProjectSurvivesBeingSavedAndReopened() throws {
         var project = Project(presets: [.init(name: "shipped", look: try aLook())],
@@ -330,15 +308,7 @@ final class OutputDestinationTests: XCTestCase {
     /// scratch and belongs in a temp directory, a deliverable is the thing the app exists to
     /// produce and must not.
     func testAProjectRemembersWhereToDeliver() throws {
-        let json = #"""
-        {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
-         "power":"1,1,1","lum_mix":1},
-         "halation":{"strength":0,"threshold":1,"radius":0.006,"tint":"1,0.3,0.05"},"look":{"lut":"none","strength":1},"print":{"lut":"none","strength":1},
-         "tone":{"gamma":1,"pivot":0.5,"contrast":1,"toe":0,"shoulder":0,"black":0},
-         "colour":{"saturation":1,"warmth":0},"grain":{"strength":8,"shadows":1,"highlights":1},
-         "stabilisation":{"smoothing":30},"match":{"reference_yavg":609}}
-        """#
-        var project = Project(presets: [.init(name: "p", look: try Look(data: Data(json.utf8)))],
+        var project = Project(presets: [.init(name: "p", look: try lookFixture())],
                               activePreset: "p")
         project.outputDirectory = URL(fileURLWithPath: "/Users/someone/Footage/shoot")
         let reread = try Project(data: try project.serialised())
@@ -369,8 +339,9 @@ final class WheelTests: XCTestCase {
                               + "the engine would put the cube back in the graph")
             }
         }
-        // And the text is spelled the way the generator spells it, which is what the engine's own
-        // neutrality check and its cube fingerprint both compare.
+        // And the text is spelled the default way, so a centred wheel writes back the file it
+        // read. Nothing in the engine compares this spelling: its neutrality check parses the
+        // values, which is the only thing a wheel's text has to survive.
         XCTAssertEqual(correct.slope, "1,1,1")
         XCTAssertEqual(correct.offset, "0,0,0")
         XCTAssertEqual(correct.power, "1,1,1")
@@ -388,6 +359,45 @@ final class WheelTests: XCTestCase {
         XCTAssertFalse(Look.Correct(slope: "1,1,1.0001").isNeutral)
         XCTAssertFalse(Look.Correct(slope: "nonsense").isNeutral,
                        "an unparseable triple is not a neutral one — the engine would refuse it")
+    }
+
+    /// `isNeutral` is a second copy of the generator's `is_neutral`, and the generator's is the one
+    /// that decides whether the cube enters the render. So each case is put to the generator with
+    /// the exact arguments the app passes it, and the two answers have to match. The cases are the
+    /// ones a copy gets wrong: a spelling that differs from the default, one value for three, and
+    /// `lum_mix` moved alone, which the generator deliberately ignores because it scales a
+    /// correction that is not there.
+    func testNeutralityAgreesWithTheGenerator() throws {
+        let engine = try engineCheckout()
+        let cases: [(String, Look.Correct)] = [
+            ("the default", .init()),
+            ("exposure", .init(exposure: 0.1)),
+            ("temp", .init(temp: 0.1)),
+            ("tint", .init(tint: -0.1)),
+            ("slope", .init(slope: "1,1,1.1")),
+            ("offset", .init(offset: "0,0.01,0")),
+            ("power", .init(power: "0.9,1,1")),
+            ("spelled by hand", .init(slope: "1.0,1.0,1.0", offset: "0.0,0.0,0.0",
+                                      power: "1.00,1.00,1.00")),
+            ("one value for three", .init(slope: "1", offset: "0", power: "1")),
+            ("lum_mix alone", .init(lumMix: 0)),
+            ("a trailing comma", .init(slope: "1,")),
+        ]
+        for (name, correct) in cases {
+            let answer = try runToCompletion(engine.correctGenerator,
+                                             correct.generatorArguments(size: 2) + ["--check-neutral"])
+            let verdict = answer.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            if answer.status != 0 {
+                // A value the generator refuses cannot be a neutral one: the engine stops there.
+                XCTAssertFalse(correct.isNeutral,
+                               "\(name): the generator refuses it and the app calls it neutral")
+                continue
+            }
+            XCTAssertTrue(verdict == "neutral" || verdict == "active",
+                          "\(name): the generator answered '\(verdict)' \(answer.stderr)")
+            XCTAssertEqual(correct.isNeutral, verdict == "neutral",
+                           "\(name): the generator says \(verdict)")
+        }
     }
 
     func testEachWheelAndChannelIsItsOwnValue() {

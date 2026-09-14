@@ -82,15 +82,7 @@ struct InspectorView: View {
                           + "curve below was set with this cube already in the chain, so changing "
                           + "one without the other is a different grade rather than another "
                           + "stock. Switch them together using a preset.") {
-                    Picker("", selection: $model.look.lookLUT) {
-                        Text("None").tag("none")
-                        ForEach(model.availableLooks, id: \.self) { Text($0).tag($0) }
-                    }
-                    .labelsHidden()
-                    .onChange(of: model.look.lookLUT) { _ in
-                        model.liveUpdate()      // instantly, from the cubes already in memory
-                        model.renderPreview()   // then the exact frame, as with every control
-                    }
+                    cubePicker($model.look.lookLUT, options: model.availableLooks)
                     control("Strength", $model.look.lookStrength, 0...1, format: "%.2f",
                             default: model.defaultLook.lookStrength)
                 }
@@ -100,15 +92,7 @@ struct InspectorView: View {
                           + "adds the print's contrast and colour, which at full strength over a "
                           + "tuned tone curve is usually too much. Strength blends it back toward "
                           + "the picture it was given.") {
-                    Picker("", selection: $model.look.printLUT) {
-                        Text("None").tag("none")
-                        ForEach(model.availablePrints, id: \.self) { Text($0).tag($0) }
-                    }
-                    .labelsHidden()
-                    .onChange(of: model.look.printLUT) { _ in
-                        model.liveUpdate()
-                        model.renderPreview()
-                    }
+                    cubePicker($model.look.printLUT, options: model.availablePrints)
                     control("Strength", $model.look.printStrength, 0...1, format: "%.2f",
                             default: model.defaultLook.printStrength)
                 }
@@ -271,6 +255,20 @@ struct InspectorView: View {
             }
             .disclosureGroupStyle(.automatic)
             .padding(.bottom, last ? 0 : Space.l)
+        }
+    }
+
+    /// A film cube by stem, or none. The look and the print are the same control over different
+    /// folders, so they share one body and cannot come to refresh the picture differently.
+    private func cubePicker(_ selection: Binding<String>, options: [String]) -> some View {
+        Picker("", selection: selection) {
+            Text("None").tag("none")
+            ForEach(options, id: \.self) { Text($0).tag($0) }
+        }
+        .labelsHidden()
+        .onChange(of: selection.wrappedValue) { _ in
+            model.liveUpdate()      // instantly, from the cubes already in memory
+            model.renderPreview()   // then the exact frame, as with every control
         }
     }
 

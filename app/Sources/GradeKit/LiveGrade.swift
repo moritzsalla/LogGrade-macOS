@@ -53,13 +53,13 @@ public struct LiveGrade {
     @inline(__always)
     public func merge(r: Double, g: Double, b: Double,
                lr: Double, lg: Double, lb: Double) -> (Double, Double, Double) {
-        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
-        var cb = (b - y) / 1.8556
-        var cr = (r - y) / 1.5748
+        let y = Rec709.luma(r, g, b)
+        var cb = (b - y) / Rec709.cbScale
+        var cr = (r - y) / Rec709.crScale
 
         // Per channel, then take the luma of that: what lut1d does once ffmpeg has converted the
         // plane to RGB for it.
-        var ny = 0.2126 * lr + 0.7152 * lg + 0.0722 * lb
+        var ny = Rec709.luma(lr, lg, lb)
 
         if saturation != 1 { cb *= saturation; cr *= saturation }
 
@@ -68,9 +68,10 @@ public struct LiveGrade {
         cb = min(127, max(-128, cb))
         cr = min(127, max(-128, cr))
 
-        var outR = ny + 1.5748 * cr
-        var outG = ny - (0.2126 * 1.5748 / 0.7152) * cr - (0.0722 * 1.8556 / 0.7152) * cb
-        var outB = ny + 1.8556 * cb
+        var outR = ny + Rec709.crScale * cr
+        var outG = ny - (Rec709.kr * Rec709.crScale / Rec709.kg) * cr
+            - (Rec709.kb * Rec709.cbScale / Rec709.kg) * cb
+        var outB = ny + Rec709.cbScale * cb
 
         if warmth != 0 {
             let w = warmth * 255 * Self.midtoneWeight(ny / 255)

@@ -50,21 +50,56 @@ final class CropGeometryTests: XCTestCase {
         XCTAssertEqual(square.maximumOffset, 1680)
     }
 
-    /// The box drawn on the picture must be the window the engine crops. `crop_prefix` in lib.sh
-    /// computes `ch = sw * ah / aw`, rounded down to even; this is the same arithmetic, and the
-    /// test exists because the two can drift silently — the interface defaulted to 4:5 and drew a
-    /// Feed box over every deliverable until a deliverable could be any shape.
-    func testTheWindowMatchesWhatTheEngineWouldCrop() {
-        for deliverable in [Deliverable.reels, .feed,
-                            Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1),
-                            Deliverable(name: "wide", aspectWidth: 16, aspectHeight: 9)] {
-            let geometry = CropGeometry(sourceWidth: 2160, sourceHeight: 3840,
-                                        aspectWidth: deliverable.aspectWidth,
-                                        aspectHeight: deliverable.aspectHeight)
-            var expected = 2160 * deliverable.aspectHeight / deliverable.aspectWidth
-            expected -= expected % 2
-            XCTAssertEqual(geometry.windowHeight, expected,
-                           "\(deliverable.name): the box is not the window the engine crops")
+    /// The box drawn on the picture must be the window the engine crops, so this ASKS the engine.
+    /// It used to recompute `crop_prefix`'s arithmetic in Swift, which proved only that two Swift
+    /// expressions agreed and would have stayed green through a change to lib.sh. The two had
+    /// already drifted once: the interface defaulted to 4:5 and drew a Feed box over every
+    /// deliverable until a deliverable could be any shape.
+    ///
+    /// Odd widths are in the set because the round-down-to-even step is where a port goes wrong.
+    func testTheWindowMatchesWhatTheEngineWouldCrop() throws {
+        let engine = try engineCheckout()
+        let shapes = [Deliverable.reels, .feed,
+                      Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1),
+                      Deliverable(name: "tall", aspectWidth: 2, aspectHeight: 3)]
+        for (width, height) in [(2160, 3840), (1081, 3840)] {
+            for deliverable in shapes {
+                let label = "\(deliverable.name) on \(width)x\(height)"
+                let geometry = CropGeometry(sourceWidth: width, sourceHeight: height,
+                                            aspectWidth: deliverable.aspectWidth,
+                                            aspectHeight: deliverable.aspectHeight)
+                let aspect = [String(deliverable.aspectWidth), String(deliverable.aspectHeight)]
+
+                let tall = try libSh(engine, "deliverable_height", [String(width)] + aspect)
+                XCTAssertEqual(tall.status, 0, "\(label): \(tall.stderr)")
+                XCTAssertEqual(Int(tall.stdout.trimmingCharacters(in: .whitespacesAndNewlines)),
+                               geometry.windowHeight,
+                               "\(label): the box is not the height the engine gives this shape")
+
+                // The last offset the picker allows must be one the engine accepts, and one past
+                // it one the engine refuses — that refusal, seconds into a render, is what the
+                // clamp exists to move forward.
+                let size = [String(width), String(height)] + aspect
+                let last = try libSh(engine, "crop_prefix", size + [String(geometry.maximumOffset)])
+                guard last.status == 0 else {
+                    XCTFail("\(label): the last legal offset was refused: \(last.stderr)")
+                    continue
+                }
+                if last.stdout.isEmpty {
+                    XCTAssertEqual(geometry.windowHeight, height,
+                                   "\(label): the engine crops nothing, so the box must be the frame")
+                } else {
+                    XCTAssertEqual(last.stdout,
+                                   "crop=\(width):\(geometry.windowHeight):0:\(geometry.maximumOffset),\n",
+                                   "\(label): the box is not the window the engine crops")
+                    let past = try libSh(engine, "crop_prefix",
+                                         size + [String(geometry.maximumOffset + 1)])
+                    XCTAssertNotEqual(past.status, 0,
+                                      "\(label): the engine took an offset the picker forbids")
+                    XCTAssertTrue(past.stderr.contains("outside 0..\(geometry.maximumOffset)"),
+                                  "\(label): refused for another reason: \(past.stderr)")
+                }
+            }
         }
     }
 

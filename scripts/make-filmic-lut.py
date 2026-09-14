@@ -122,7 +122,7 @@ def main():
     if loglin_path is None:
         import os
         here = os.path.dirname(os.path.abspath(__file__))
-        loglin_path = os.path.join(here, "..", "..", "luts", "apple", "AppleLogToLin-v1.0.cube")
+        loglin_path = os.path.join(here, "..", "luts", "apple", "AppleLogToLin-v1.0.cube")
 
     table = read_apple_log_to_lin(loglin_path)
     norm = hable(a.white, D=a.toe)

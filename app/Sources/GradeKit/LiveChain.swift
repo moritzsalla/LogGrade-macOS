@@ -10,11 +10,12 @@ import Foundation
 /// Starting from the source makes every control live, and it also means the base frame never needs
 /// re-rendering: it is the clip, not a stage of the grade.
 ///
-/// THE STAGES STAY WHERE THEY LIVE. The correction cube comes from the engine's own generator, and
-/// Apple's conversion and the film look are the same `.cube` files the render hands to `lut3d`.
-/// The only thing implemented twice is the sampling, in `Cube3D`, and the tone and trim arithmetic
-/// in `LiveGrade` — both of which the parity golden and `LiveAgainstTheRenderTests` hold to the
-/// render. Nothing here decides anything about the image.
+/// THE STAGES STAY WHERE THEY LIVE. Apple's conversion and the film look are the same `.cube` files
+/// the render hands to `lut3d`. What is implemented twice is held to the engine by a named test:
+/// the correction cube in `CorrectionCube` (`CorrectionCubeTests`), the sampling in `Cube3D`
+/// (`Cube3DTests`), and the tone and trim arithmetic in `LiveGrade` (the parity golden), with
+/// `LiveChainTests.testTheLivePictureMatchesTheRender` measuring the whole of it against a render.
+/// Nothing here decides anything about the image.
 public struct LiveChain {
     /// The colour stages in the order the chain applies them: the correction, halation, Apple's
     /// conversion, then the film look. Absent stages are simply absent, which is the same thing

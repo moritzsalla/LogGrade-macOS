@@ -86,7 +86,7 @@ WORK="$(resolve_work_dir "$ROOT")"
 # probe's decode rather than starting where the report file happens to be created.
 RUN_T0="$(now_ms)"
 
-CST="$ROOT/luts/apple/AppleLogToRec709-v1.0.cube"
+CST="$APPLE_CST"
 PROOF="${PROOF:-}"        # PROOF=<seconds> renders a short proof; see the note below
 # Validated because it is spliced UNQUOTED below (`-t $PROOF`) so that an empty value disappears
 # instead of becoming an empty argument — bash 3.2 cannot expand an empty array under `set -u`.
@@ -123,14 +123,18 @@ case "$FRAME_STAGE" in
 		exit 1;;
 esac
 FRAME_DIR="$WORK/dist/frames"
+# Everything except an ungraded preview frame runs Apple's conversion, including the exposure probe
+# that would otherwise fail into an empty measurement and plan every clip at the reference gamma.
+if [ -z "$FRAME" ] || [ "$FRAME_STAGE" != source ]; then
+	require_apple_cst || exit 1
+fi
 
 # Delivery shape. The sizes were 1080x1920 and 1080x1350 written into the render calls, then an
 # aspect plus one height; they are an aspect plus one shared WIDTH now, because the set of shapes
 # is no longer fixed at two. HEIGHT is kept as the knob it was — the 9:16 reference frame — and the
 # width falls out of it, so a run that says nothing renders 1080 wide exactly as before.
 HEIGHT="$(require_number HEIGHT "${HEIGHT:-1920}")"
-WIDTH="$(require_number WIDTH "${WIDTH:-$(( HEIGHT * 9 / 16 ))}")"
-WIDTH=$(( WIDTH - WIDTH % 2 ))
+WIDTH="$(delivery_width)" || exit 1
 FPS_OUT="${FPS_OUT:-}"
 [ -z "$FPS_OUT" ] || FPS_OUT="$(require_number FPS_OUT "$FPS_OUT")"
 # Two modes that both mean "do not deliver" would otherwise silently pick one. Refuse instead: a
@@ -165,12 +169,12 @@ CACHE="$WORK/dist/.grade-work"
 # quietly substitute a different look.
 # Every one of these is spliced into an ffmpeg filter graph, and look.json is transcribed from the
 # Bench's artifact db rather than typed here — see require_number in lib.sh for why that matters.
-# The look LUT is a look value like any other, so it comes from look.json. LOOK=<name|none|path>
-# overrides it for one run; the app sets it per render.
-LOOK_LUT="$(resolve_look_lut "${LOOK:-$(look .look.lut)}" "$ROOT")"
-PRINT_LUT="$(resolve_look_lut "${PRINT:-$(look .print.lut)}" "$ROOT" print)"
-LOOK_STRENGTH="$(require_unit look.strength "$(look .look.strength)")"
-PRINT_STRENGTH="$(require_unit print.strength "$(look .print.strength)")"
+# LOOK=<name|none|path> and PRINT= override the film cubes for one run; the app sets them per
+# render. The loaders keep a value that is already set, which is for callers that source lib.sh —
+# so the names are cleared first, or a stray SAT in someone's environment would become the grade.
+unset LOOK_LUT PRINT_LUT LOOK_STRENGTH PRINT_STRENGTH SAT WARM
+load_grade_look || exit 1
+load_delivery_look || exit 1
 
 # --- the input correction ---------------------------------------------------------------
 # Exposure, white balance and the CDL wheels, generated into one cube that runs BEFORE Apple's
@@ -182,21 +186,9 @@ PRINT_STRENGTH="$(require_unit print.strength "$(look .print.strength)")"
 # A NEUTRAL correction leaves the filter out of the graph entirely. That is not only cheaper: it
 # is what keeps the default render byte-identical to the engine this was forked from, which
 # tests/conformance.sh measures. The generator owns that rule, so it is not restated here.
-CORRECT_EXPOSURE="$(require_number exposure "$(look .correct.exposure)")"
-CORRECT_TEMP="$(require_number temp "$(look .correct.temp)")"
-CORRECT_TINT="$(require_number tint "$(look .correct.tint)")"
-CORRECT_LUM_MIX="$(require_number lum_mix "$(look .correct.lum_mix)")"
-CORRECT_SLOPE="$(look .correct.slope)"
-CORRECT_OFFSET="$(look .correct.offset)"
-CORRECT_POWER="$(look .correct.power)"
+CORRECT_ARGS="$(correction_args)" || exit 1
+CORRECT_STATE="$(correction_state)" || exit 1
 CORRECT_SIZE="$(require_number CORRECT_SIZE "${CORRECT_SIZE:-33}")"
-# The triples are not validated here: they never reach a filter graph, only this generator's argv,
-# and it refuses a malformed one itself. Validate where a value is READ.
-correct_args() {
-	printf '%s' "--exposure $CORRECT_EXPOSURE --temp $CORRECT_TEMP --tint $CORRECT_TINT"
-	printf '%s' " --slope $CORRECT_SLOPE --offset $CORRECT_OFFSET --power $CORRECT_POWER"
-	printf '%s' " --lum-mix $CORRECT_LUM_MIX --size $CORRECT_SIZE"
-}
 CORRECT_PREFIX=""
 
 # --- halation ------------------------------------------------------------------------------
@@ -207,40 +199,23 @@ CORRECT_PREFIX=""
 #
 # The tint is three numbers spliced into a filter graph, so each is validated where it is read.
 HAL_STRENGTH="$(require_number halation.strength "$(look .halation.strength)")"
+HAL_STATE="$(halation_state)" || exit 1
 HAL_THRESHOLD="$(require_number halation.threshold "$(look .halation.threshold)")"
 HAL_RADIUS="$(require_number halation.radius "$(look .halation.radius)")"
-HAL_TINT="$(look .halation.tint)"
+HAL_TINT="$(require_numbers halation.tint "$(look .halation.tint)")" || exit 1
 IFS=, read -r _tr _tg _tb _extra <<< "$HAL_TINT"
 if [ -n "${_extra:-}" ] || [ -z "${_tb:-}" ]; then
 	echo "halation.tint must be three numbers, r,g,b: got '$HAL_TINT'" >&2
 	exit 1
 fi
-HAL_TINT="$(require_number halation.tint "$_tr"),$(require_number halation.tint "$_tg"),$(require_number halation.tint "$_tb")"
 HAL_DIR=""
-SAT="$(require_number SAT "$(look .colour.saturation)")"
-WARM="$(require_number WARM "$(look .colour.warmth)")"
-G_PIVOT="$(require_number pivot "$(look .tone.pivot)")"
-G_CONTRAST="$(require_number contrast "$(look .tone.contrast)")"
-G_TOE="$(require_number toe "$(look .tone.toe)")"
-G_SHOULDER="$(require_number shoulder "$(look .tone.shoulder)")"
-G_BLACK="$(require_number black "$(look .tone.black)")"
+TONE_SHAPE_ARGS="$(tone_shape_args)" || exit 1
 G_GAMMA_REF="$(require_number gamma "$(look .tone.gamma)")"   # gamma the look was tuned at...
 Y_REF="$(require_number reference_yavg "$(look .match.reference_yavg)")"  # ...against this mean
-GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain.strength)}")"
-GRAIN_SHADOWS="$(require_unit grain.shadows "$(look .grain.shadows)")"
-GRAIN_HIGHLIGHTS="$(require_unit grain.highlights "$(look .grain.highlights)")"
-SMOOTHING="$(require_number SMOOTHING "${SMOOTHING:-$(look .stabilisation.smoothing)}")"
 STAB="${STAB:-1}"; MATCH="${MATCH:-1}"; DRY="${DRY:-0}"
-# Empty means NOT GIVEN, which is a different thing from 0 — 0 is the top of the frame and a real
-# answer. Validated here because it is spliced into `crop=2160:2700:0:` and a comma in it would
-# open a second filter.
-CROP_Y_OK=""
-if [ -n "${CROP_Y:-}" ]; then
-	case "$CROP_Y" in
-		centre|center) CROP_Y_OK="centre";;
-		*) CROP_Y_OK="$(require_number CROP_Y "$CROP_Y")";;
-	esac
-fi
+# Empty means NOT GIVEN, which is a different thing from 0; see crop_offset.
+CROP_Y_OK="$(crop_offset CROP_Y "${CROP_Y:-}")" || exit 1
+[ "$CROP_Y_OK" != "-" ] || CROP_Y_OK=""
 case "$MATCH" in
 	0|1|batch) ;;
 	*)
@@ -342,7 +317,7 @@ PROBE_SIZE=""
 for _src in "${CLIPS[@]}"; do
 	_size="$(source_frame_size "$_src" 2>/dev/null || true)"
 	case "$_size" in
-		*' '*) [ "${_size#* }" -gt "${_size% *}" ] || continue;;
+		*' '*) size_is_portrait "$_size" || continue;;
 	esac
 	# The first shape that will actually be rendered decides, and an unmeasurable one is left empty
 	# so deliverable_crops answers conservatively.
@@ -384,16 +359,15 @@ say() {
 	fi
 }
 
-# shellcheck disable=SC2046  # deliberate split: correct_args is a flag list, not one argument
-if [ "$("$SCRIPT_DIR/make-correct-lut.py" --check-neutral $(correct_args))" = "active" ]; then
+if [ "$CORRECT_STATE" = "active" ]; then
 	CORRECT_LUT="$CACHE/correct.cube"
-	# shellcheck disable=SC2046
-	"$SCRIPT_DIR/make-correct-lut.py" "$CORRECT_LUT" $(correct_args) >/dev/null
+	# shellcheck disable=SC2086  # deliberate split: a flag list of validated values
+	"$SCRIPT_DIR/make-correct-lut.py" "$CORRECT_LUT" $CORRECT_ARGS --size "$CORRECT_SIZE" >/dev/null
 	CORRECT_PREFIX="lut3d=file='${CORRECT_LUT}':interp=tetrahedral,"
 fi
 # The cubes depend only on the threshold, so they are made once per run. The prefix itself is built
 # per clip below, because its radius is a fraction of each clip's own frame.
-if [ "$("$SCRIPT_DIR/make-halation-luts.py" --check-neutral --strength "$HAL_STRENGTH")" = "active" ]; then
+if [ "$HAL_STATE" = "active" ]; then
 	HAL_DIR="$CACHE/halation"
 	# Not on a dry run, which renders nothing — the same rule the per-clip tone cube follows.
 	[ "$DRY" = "1" ] || "$SCRIPT_DIR/make-halation-luts.py" "$HAL_DIR" --threshold "$HAL_THRESHOLD" >/dev/null
@@ -437,7 +411,8 @@ fi
 say "grade run $(date '+%Y-%m-%d %H:%M:%S')  —  ${#CLIPS[@]} clip(s)"
 say "look: sat=$SAT warm=$WARM grain=$GRAIN_STRENGTH stab=$STAB exposure-match=$MATCH"
 say "film: look=${LOOK_LUT:-none}@$LOOK_STRENGTH print=${PRINT_LUT:-none}@$PRINT_STRENGTH"
-[ -z "$CORRECT_PREFIX" ] || say "correction: exposure=$CORRECT_EXPOSURE temp=$CORRECT_TEMP tint=$CORRECT_TINT slope=$CORRECT_SLOPE offset=$CORRECT_OFFSET power=$CORRECT_POWER lum_mix=$CORRECT_LUM_MIX (${CORRECT_SIZE}-point cube)"
+# The flags themselves, which are exactly what the generator ran on, rather than a second spelling.
+[ -z "$CORRECT_PREFIX" ] || say "correction: $CORRECT_ARGS (${CORRECT_SIZE}-point cube)"
 [ -z "$HAL_DIR" ] || say "halation: strength=$HAL_STRENGTH threshold=$HAL_THRESHOLD radius=$HAL_RADIUS tint=$HAL_TINT"
 # Not for FRAME: the app runs one per preview, and on a 2017 Intel MacBook these six process spawns
 # measured ~150ms of a ~3s frame — for a line that is identical in every preview report.
@@ -515,17 +490,12 @@ for SRC in "${CLIPS[@]}"; do
 	# --- stabilisation: detect on the SOURCE, so no intermediate is needed ---------------
 	SFX=""
 	if [ "$STAB" = "1" ] && [ -z "$FRAME" ]; then
-		TRF="$WORK/dist/stab/${CLIP}.trf"
+		TRF="$(transform_path "$WORK" "$CLIP")"
 		if ! transform_is_fresh "$TRF" "$SRC" && [ "$DRY" != "1" ]; then
-			mkdir -p "$(dirname "$TRF")"
-			trap 'rm -f "${TRF}.partial"' EXIT
 			_t=$(now_ms)
-			ffmpeg -v error -y -i "$SRC" -vf "lut3d=file='${CST}':interp=tetrahedral,vidstabdetect=shakiness=5:accuracy=15:stepsize=6:result=${TRF}.partial" -f null -
+			detect_transform "$SRC" "$TRF" "lut3d=file='${CST}':interp=tetrahedral,"
 			_t=$(( $(now_ms) - _t )); T_STAB=$(( T_STAB + _t ))
 			report_line "      stabilisation detect took $(fmt_ms "$_t")"
-			require_nonempty "${TRF}.partial" "stabilisation analysis"
-			mv "${TRF}.partial" "$TRF"
-			trap - EXIT
 		fi
 		if transform_is_fresh "$TRF" "$SRC"; then
 			SFX="$(stab_prefix "$TRF" "$SMOOTHING")"
@@ -585,8 +555,8 @@ for SRC in "${CLIPS[@]}"; do
 	# nothing", and this was writing a 4096-entry cube per clip on a run that renders nothing. The
 	# probe and the solve still happen above, because the solved gamma IS the plan.
 	_t=$(now_ms)
-	"$SCRIPT_DIR/make-tone-lut.py" "$TONE" --gamma "$GAMMA" --pivot "$G_PIVOT" \
-		--contrast "$G_CONTRAST" --toe "$G_TOE" --shoulder "$G_SHOULDER" --black "$G_BLACK" >/dev/null
+	# shellcheck disable=SC2086  # deliberate split: a flag list of validated values
+	"$SCRIPT_DIR/make-tone-lut.py" "$TONE" --gamma "$GAMMA" $TONE_SHAPE_ARGS >/dev/null
 	_t=$(( $(now_ms) - _t )); T_TONE=$(( T_TONE + _t ))
 	report_line "      tone cube took $(fmt_ms "$_t")"
 
@@ -639,9 +609,6 @@ for SRC in "${CLIPS[@]}"; do
 	# Everything else — the grade, then the stabilisation warp onward — is shared with the staged
 	# path and lives in lib.sh, which is where the measurements for each part of it live.
 	#
-	# `0:a:0?` MUST stay quoted: `?` is a glob character. bash only survives it unquoted because an
-	# unmatched glob passes through literally, so a file named `0:a:00` in the launch directory
-	# breaks it — and this path was the one place it was still bare.
 	# A numeric flag pair or nothing at all. Built as a plain string rather than an array because
 	# macOS ships bash 3.2, where expanding an EMPTY array under `set -u` raises "unbound
 	# variable" — the trap lib.sh's header documents.
@@ -650,22 +617,14 @@ for SRC in "${CLIPS[@]}"; do
 
 	render() {  # render <w> <h> <suffix> [crop]
 		local w=$1 h=$2 suffix=$3 crop=${4:-}
-		local out="$OUT_DIR/${CLIP}_${suffix}.mp4"
-		# A proof is named so it can never be mistaken for a deliverable in a folder listing.
-		[ -n "$PROOF" ] && out="$OUT_DIR/${CLIP}_${suffix}_proof-${PROOF}s.mp4"
+		local out
+		out="$(deliverable_path "$OUT_DIR" "$CLIP" "$suffix" "$PROOF")"
 		local t0; t0=$(now_ms)
 		# shellcheck disable=SC2086  # $LIMIT is a deliberate split: a numeric flag pair or nothing
-		render_delivery "$out" "$suffix encode" \
-			-y -i "$SRC" -f lavfi -i "$(grain_plate "$w" "$h" "$FPS")" -filter_complex \
-"[0:v]$(grade_chain "$TONE" "$SAT" "$WARM" \
+		render_deliverable "$out" "$suffix encode" "$SRC" "$w" "$h" "$FPS" \
+"$(grade_chain "$TONE" "$SAT" "$WARM" \
   "${CORRECT_PREFIX}${HALATION_PREFIX}lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},"),\
-$(delivery_image_chain "$w" "$h" "$SFX" "$crop")${FPS_FILTER}[b];\
-[1:v]$(delivery_grain_branch "$w" "$h" "$GRAIN_STRENGTH")[g];\
-$(delivery_grain_merge b g o "$GRAIN_SHADOWS" "$GRAIN_HIGHLIGHTS")" \
-			-map "[o]" -map "0:a:0?" -shortest \
-			-c:v libx264 -profile:v high -preset slow -crf 18 \
-			-color_primaries bt709 -color_trc bt709 -colorspace bt709 \
-			-c:a aac -b:a 192k -movflags +faststart \
+$(delivery_image_chain "$w" "$h" "$SFX" "$crop")${FPS_FILTER}" \
 			$LIMIT || return 1
 		# `|| return 1` above is load-bearing now that the caller invokes render() inside an `if`:
 		# that suppresses `set -e` for this whole body, so without it a failed render would fall

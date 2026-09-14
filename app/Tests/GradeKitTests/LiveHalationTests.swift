@@ -8,12 +8,6 @@ import XCTest
 /// transcription — the render and the preview blur differently sized frames with different kernels
 /// — so it is held to the render by `LiveChainTests` instead.
 final class LiveHalationTests: XCTestCase {
-    private func engine() throws -> EngineLocation {
-        let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        guard let e = EngineLocation.discover(from: here) else { throw XCTSkip("no engine") }
-        return e
-    }
-
     /// The first column of a 1D cube, and the domain it declares.
     private func column(_ url: URL) throws -> (values: [Double], domainMax: Double) {
         var values: [Double] = []
@@ -30,7 +24,7 @@ final class LiveHalationTests: XCTestCase {
     }
 
     func testTheArithmeticIsTheGeneratorsOwn() throws {
-        let engine = try engine()
+        let engine = try engineCheckout()
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("halation-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: dir) }

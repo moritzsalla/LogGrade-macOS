@@ -72,8 +72,13 @@ struct DeliveryPanel: View {
             // to 1080 wide anyway — so the larger sizes buy nothing downstream while multiplying
             // the render. The look was also tuned at 1080: grain and the sharpener have radii in
             // pixels, and scaling them with height is an assumption rather than a measurement.
-            if model.project.delivery.height > 1920 {
-                Label("Instagram re-encodes to 1080 wide. This renders \(model.project.delivery.height / 1920 * (model.project.delivery.height / 1920))× longer for no gain, and the grain was tuned at 1080.",
+            // In floating point: integer division called 2560 tall "1× longer", when its pixel
+            // count is 1.8 times the default's.
+            if model.project.delivery.height > Project.Delivery.defaultHeight {
+                let scale = Double(model.project.delivery.height)
+                    / Double(Project.Delivery.defaultHeight)
+                let cost = String(format: "%g", (scale * scale * 10).rounded() / 10)
+                Label("Instagram re-encodes to 1080 wide. This renders \(cost)× longer for no gain, and the grain was tuned at 1080.",
                       systemImage: "info.circle")
                     .font(Type.caption)
                     .foregroundColor(Palette.inkTertiary)
@@ -228,9 +233,7 @@ struct DeliveryPanel: View {
     private var workload: String {
         let clips = model.clipNames.count
         let passes = model.project.delivery.targets.count
-        let stabilised = model.clipNames.filter {
-            model.project.clips[$0]?.stabilise ?? true
-        }.count
+        let stabilised = model.clipNames.filter { model.project.settings(for: $0).stabilise }.count
         let total = clips * passes + stabilised
         guard total > 0 else { return "Nothing selected to deliver." }
         return "\(clips) clip\(clips == 1 ? "" : "s"), \(total) render pass\(total == 1 ? "" : "es")"

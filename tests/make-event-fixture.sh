@@ -27,22 +27,16 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/src"
 
-# A portrait clip and a landscape one, so the stream carries a planned clip AND a refused one. Same
-# construction the bats suite uses: encode first, then tag in a -c copy remux, because prores_ks
-# does not reliably stamp the flags it is given.
-_mk() {  # _mk <w> <h> <out>
-	ffmpeg -y -v error -f lavfi -i "color=c=gray:s=${1}x${2}:d=0.1:r=24" \
-		-frames:v 1 -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le "$3.raw.mov"
-	ffmpeg -y -v error -i "$3.raw.mov" -map 0:v:0 -c copy \
-		-color_primaries bt709 -color_trc bt709 -colorspace bt709 "$3"
-	rm -f "$3.raw.mov"
-}
+# A portrait clip and a landscape one, so the stream carries a planned clip AND a refused one, from
+# the builder the bats suite uses.
+# shellcheck source=tests/fixture-clip.sh
+source "$ROOT/tests/fixture-clip.sh"
 # 72x128 IS 9:16 EXACTLY, and 128x72 is its landscape counterpart. These were 64x128 and 128x64,
 # i.e. 1:2, which was invisible for as long as the 9:16 deliverable took no crop. Once a deliverable
 # became an aspect, a 1:2 source had to be cropped to reach 9:16, and a two-clip run with no offset
 # is refused — so the generator exited non-zero and produced nothing.
-_mk 72 128 "$WORK/src/TALL.mov"
-_mk 128 72 "$WORK/src/WIDE.mov"
+make_tagged_clip 72 128 bt709 bt709 bt709 "$WORK/src/TALL.mov"
+make_tagged_clip 128 72 bt709 bt709 bt709 "$WORK/src/WIDE.mov"
 
 STREAM="$(JSON=1 DRY=1 MATCH=0 GRADE_WORK_DIR="$WORK" "$ROOT/scripts/grade.sh" "$WORK/src" 2>/dev/null \
 	| sed -e "s|$WORK|<WORK>|g" \

@@ -86,6 +86,7 @@ sys.dont_write_bytecode = True
 # elsewhere, where a bare import finds nothing.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from applelog import decode, encode  # noqa: E402
+from cubefile import is_current, number, title, write_staged  # noqa: E402
 
 # Rec.709 luma weights. The luminance mix needs a luma, and this cube's output is fed to Apple's
 # Rec.709 conversion, so 709 weights are the ones that match what happens next.
@@ -105,17 +106,14 @@ def triple(s, name):
 
 
 def fingerprint(a):
-    """The TITLE line, which doubles as the freshness test — the same arrangement
-    make-tone-lut.py uses, and for the same reason: git does not preserve mtime, so a committed
-    cube always lands newer than the file it was generated from and would be trusted forever."""
-    return (
-        'TITLE "Input correction '
-        "(exposure=%g temp=%g tint=%g slope=%s offset=%s power=%s lum_mix=%g size=%d)\""
-        % (a.exposure, a.temp, a.tint,
-           ",".join("%g" % v for v in a.slope),
-           ",".join("%g" % v for v in a.offset),
-           ",".join("%g" % v for v in a.power),
-           a.lum_mix, a.size)
+    """The TITLE line, which doubles as the freshness test — see cubefile.py."""
+    return title(
+        "Input correction (exposure=%s temp=%s tint=%s slope=%s offset=%s power=%s lum_mix=%s size=%d)"
+        % (number(a.exposure), number(a.temp), number(a.tint),
+           ",".join(number(v) for v in a.slope),
+           ",".join(number(v) for v in a.offset),
+           ",".join(number(v) for v in a.power),
+           number(a.lum_mix), a.size)
     )
 
 
@@ -130,14 +128,6 @@ def is_neutral(a):
     return (a.exposure == 0.0 and a.temp == 0.0 and a.tint == 0.0
             and a.slope == (1.0, 1.0, 1.0) and a.offset == (0.0, 0.0, 0.0)
             and a.power == (1.0, 1.0, 1.0))
-
-
-def is_current(path, a):
-    try:
-        with open(path) as fh:
-            return fh.readline().rstrip("\n") == fingerprint(a)
-    except OSError:
-        return False
 
 
 def correct(rgb, a, wb):
@@ -211,7 +201,7 @@ def main():
           1.0 - 0.30 * a.temp - 0.15 * a.tint)
     wb = tuple(max(0.05, g) for g in wb)
 
-    if not a.stdout and is_current(a.out, a):
+    if not a.stdout and is_current(a.out, fingerprint(a)):
         print("%s is already current" % a.out)
         return
 
@@ -232,15 +222,7 @@ def main():
         print("wrote %d-point 3D LUT to stdout" % n, file=sys.stderr)
         return
 
-    partial = a.out + ".partial"
-    try:
-        with open(partial, "w") as fh:
-            fh.write("\n".join(lines) + "\n")
-        os.replace(partial, a.out)
-    except BaseException:
-        if os.path.exists(partial):
-            os.unlink(partial)
-        raise
+    write_staged(a.out, "\n".join(lines) + "\n")
     print("wrote %s (%d-point 3D LUT)" % (a.out, n))
 
 

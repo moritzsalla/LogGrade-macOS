@@ -46,6 +46,11 @@ import argparse
 import os
 import sys
 
+# The app vendors scripts/ inside a signed bundle, and a byte-cache written there would change it.
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from cubefile import is_current, number, title, write_staged  # noqa: E402
+
 SIZE = 4096
 
 
@@ -62,34 +67,16 @@ def soft(x, k):
 
 
 def fingerprint(a):
-    """The TITLE line, which doubles as the freshness test for a generated cube.
-
-    ensure_tone_lut used to compare the cube's mtime against look.json's. git does not preserve
-    mtimes, so on every fresh clone the committed cube lands NEWER than look.json and is trusted
-    forever — verified: with look.json backdated and contrast changed to 0.5, the stale 1.09 curve
-    stayed in place in silence. Comparing content instead removes the whole failure class.
+    """The TITLE line, which doubles as the freshness test for a generated cube — see cubefile.py.
 
     The old TITLE recorded every parameter except gamma, which is the one that was re-tuned, so a
     committed cube could not be traced to the gamma it was built at.
     """
-    return (
-        'TITLE "Filmic tone shaping '
-        f"(gamma={a.gamma} pivot={a.pivot} contrast={a.contrast} "
-        f'toe={a.toe} shoulder={a.shoulder} black={a.black})"'
+    return title(
+        "Filmic tone shaping "
+        f"(gamma={number(a.gamma)} pivot={number(a.pivot)} contrast={number(a.contrast)} "
+        f"toe={number(a.toe)} shoulder={number(a.shoulder)} black={number(a.black)})"
     )
-
-
-def is_current(path, a):
-    """True when `path` already encodes exactly these parameters.
-
-    The format lives here, in one place, rather than being reimplemented in shell — a second copy
-    of a fingerprint format is just the drift it exists to detect, one level down.
-    """
-    try:
-        with open(path) as fh:
-            return fh.readline().rstrip("\n") == fingerprint(a)
-    except OSError:
-        return False
 
 
 def main():
@@ -112,7 +99,7 @@ def main():
     # logic. Generating the 4096-entry table costs ~0.1s, so there is nothing to save by guessing.
     # There is nothing to compare against on the stdout path: the caller asked for the curve, not
     # for a file that might already hold it.
-    if not a.stdout and is_current(a.out, a):
+    if not a.stdout and is_current(a.out, fingerprint(a)):
         print(f"{a.out} is already current")
         return
 
@@ -142,11 +129,6 @@ def main():
         v = max(0.0, min(1.0, v))
         lines.append(f"{v:.8f} {v:.8f} {v:.8f}")
 
-    # Write then rename, never write in place. is_current() above reads only the TITLE line, so a
-    # file truncated by an interrupted or short write keeps a valid-looking fingerprint and is
-    # treated as current forever — silently grading every clip through a partial curve. Staging
-    # makes a half-written cube impossible to observe. Same failure class 00-stabilise-detect.sh
-    # guards with its .partial file, one layer down.
     # The cube itself goes to stdout and the commentary to stderr. A progress line mixed into the
     # curve would be read as a table entry by whatever is parsing it.
     if a.stdout:
@@ -154,15 +136,7 @@ def main():
         print(f"wrote {SIZE}-entry 1D LUT to stdout", file=sys.stderr)
         return
 
-    partial = a.out + ".partial"
-    try:
-        with open(partial, "w") as fh:
-            fh.write("\n".join(lines) + "\n")
-        os.replace(partial, a.out)
-    except BaseException:
-        if os.path.exists(partial):
-            os.unlink(partial)
-        raise
+    write_staged(a.out, "\n".join(lines) + "\n")
     print(f"wrote {a.out} ({SIZE}-entry 1D LUT)")
 
 

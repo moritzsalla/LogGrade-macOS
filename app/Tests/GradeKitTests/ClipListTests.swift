@@ -45,10 +45,7 @@ final class ClipListTests: XCTestCase {
     }
 
     func testRealFootageIsUsableAndGetsAThumbnail() throws {
-        let here = URL(fileURLWithPath: #filePath)
-        guard let engine = EngineLocation.discover(from: here.deletingLastPathComponent()) else {
-            throw XCTSkip("no engine checkout")
-        }
+        let engine = try engineCheckout()
         let clips = (try? FileManager.default.contentsOfDirectory(
             at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil)) ?? []
         guard let clip = clips.first(where: { $0.pathExtension.lowercased() == "mov" }) else {

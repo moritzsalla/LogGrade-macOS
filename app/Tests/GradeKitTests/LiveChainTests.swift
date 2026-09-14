@@ -20,10 +20,7 @@ final class LiveChainTests: XCTestCase {
     }
 
     private func rig() throws -> Rig {
-        let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        guard let engine = EngineLocation.discover(from: here) else {
-            throw XCTSkip("no engine checkout")
-        }
+        let engine = try engineCheckout()
         try XCTSkipIf(!engine.preflight().isEmpty, "engine preflight not clean")
         let clips = (try? FileManager.default.contentsOfDirectory(
             at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil)) ?? []
