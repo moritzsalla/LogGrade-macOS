@@ -19,80 +19,62 @@ per-clip answer, and each has already been got wrong by assuming the previous cl
    It is the same chain, not a lookalike: the previous instruction here was to reproduce "the same
    filter chain as the real export" by hand, which meant a fourth copy of the chain existing
    nowhere in `scripts/`.
-5. **Pick the Feed crop offset** — pull one or two crop candidates from the graded master at
-   different vertical offsets, look at them, pick one. Don't reuse IMG_0609's offset (750) blindly;
-   composition differs per clip, and `grade.sh` now refuses `FEED=1` across several clips unless
-   you pass `CROP_Y` explicitly.
-6. **On sign-off, run the real finals**:
+5. **Pick the crop offset** for any deliverable that crops — pull one or two candidates from the
+   graded master at different vertical offsets, look at them, pick one. Don't reuse IMG_0609's
+   offset (750) blindly; composition differs per clip, and `grade.sh` refuses a cropped deliverable
+   across several clips unless you pass `CROP_Y` explicitly.
+6. **On sign-off, run the real finals**. A deliverable is a preset name or `name:aspect-w:aspect-h`:
    - `./scripts/03-final.sh IMG_XXXX reels`
    - `./scripts/03-final.sh IMG_XXXX feed <crop_y>`
+   - `./scripts/03-final.sh IMG_XXXX square:1:1 <crop_y>` — or any other shape
 7. **Clean up**: once both finals are confirmed good, delete that clip's
    `dist/01-baseline/<clip>_baseline.mov` and `dist/02-graded/<clip>_graded.mov` — see
    docs/PIPELINE.md's disk space policy. Keep only `dist/03-final/*` for that clip going forward.
 
-## Running a grading session (the Grade Bench)
+## Running a grading session (the app)
 
-The grade is decided by eye in the Grade Bench — `bench/`, a browser tool published as an
-Artifact. (**Bench** is the term — see `CONTEXT.md`. In this trade a grader is a person, which is
-why the folder is not called that.) It exists because the alternative
-(render a proof → watch it → describe the problem in words → Claude reinterprets → render again)
-costs a round trip per adjustment and loses information at both the "describe" and "reinterpret"
-steps.
+The grade is decided by eye in the Mac app, `dist/LogGrade.app` — `./app/make-app.sh` builds it.
+Open a clip, move a control, and the picture follows; let go and the engine renders the same frame
+through the real chain. The scopes read the rendered frame and draw the three RAL references beside
+it, so a change that pushes a known colour off its spec is visible while you make it.
+
+It replaced a browser tool, the Grade Bench, which was deleted — see
+`docs/adr/0007_THE_GRADE_IS_DECIDED_IN_A_BENCH_AND_SENT_AS_DATA.md` for what carried over. The
+substance did: the grade is still decided by eye against references in frame, and still leaves as
+data in `look.json`. Only the venue changed. **If you are following an old note that tells you to
+export a JPEG, drag it into an Artifact and paste `look.json` into a load panel, stop — none of
+that exists.**
 
 **To grade a clip:**
 
-0. **Or skip this by hand entirely:** `FRAME=<seconds> ./scripts/grade.sh src/IMG_XXXX.mov`
-   renders one still through the real chain into `dist/frames/` — the same CST, the same look cube,
-   the same solved tone curve. That is strictly better than the hand-export below, which bypasses
-   both the real conversion and the look and therefore mispredicts every reading. The steps below
-   are kept because they describe what the Bench expects to be given.
+1. Open the app and add the clip. Already-converted footage is refused, since grading it again
+   applies Apple's conversion twice.
+2. Move the controls. Exposure and white balance run *before* Apple's conversion, so they are live
+   too — that is why the app grades a decoded source frame rather than a converted one.
+3. Watch the scopes. The references are places to measure from, not places to arrive at: the
+   shipped grade sits deliberately off spec, which is ADR 0001.
+4. Hold **C** to see the picture before the change you are making. Double-click a control's name to
+   put it back to the preset's value.
+5. Save. `look.json` is the output, and it is the only thing every stage reads.
 
-1. Extract a frame from the **baseline, with the look LUT applied but no tone stage** — that is
-   exactly the input the tone LUT sees, so the preview matches the render. (The Bench's own hint
-   says only "post-CST, pre-tone"; post-*look* is the part it leaves out, and a frame without the
-   look in it will mispredict every reading.)
-   ```bash
-   ffmpeg -y -i dist/01-baseline/IMG_XXXX_baseline.mov -ss 4 -frames:v 1 \
-     -vf "lut3d=file='luts/looks/kodak_portra_400_nc.cube':interp=tetrahedral,scale=810:-1" \
-     -q:v 3 frame.jpg
-   ```
-2. Open the Artifact, drag the frame in (or use "Open frame…").
-3. Place the reference samplers: click a reference name in the panel, then click that object in the
-   picture. They are **not** at fixed coordinates across shoots — a plate or sign is wherever it is.
-4. **Load the current `look.json` first** — paste it into the "load the current look.json" panel
-   and press Load. The sliders then start from the shipped look rather than from generic defaults,
-   and the blocks the Bench does not edit (`grain`, `stabilisation`, `match`) are carried through
-   into its output. Without this the emitted file is incomplete and every stage aborts on the first
-   missing key, because `look()` deliberately has no fallbacks.
-5. Grade with the sliders. The readouts show each reference against its RAL spec live.
-6. Add a note if the numbers don't capture it, and hit **Send grade**.
+**Without a Swift toolchain**, `look.json` is just numbers — edit it by hand and the tone LUT
+regenerates itself on the next run, by content rather than timestamp. `FRAME=<seconds>
+./scripts/grade.sh src/IMG_XXXX.mov` renders one still through the real chain into `dist/frames/`
+to judge it, which is the same CST, the same look cube and the same solved tone curve.
 
-Claude reads the result from the artifact's db (`grades` collection) — each entry carries the
-parameters, the measured readings, the note and the clip name.
-
-**The tool's curve maths is a port of `make-tone-lut.py`** and it applies the curve to luma only,
-mirroring `mergeplanes=0x001112`. Keep them in step: if one changes, change the other, or the
-preview stops predicting the render.
-
-**Republishing:** the source of truth is `bench/index.html`. The Artifact tool will only
-publish from the working directory or the session scratchpad, so copy it there first and publish
-from the copy; pass the artifact's existing URL to update in place rather than creating a second
-one.
-
-**Two fidelity caveats to keep in mind while grading:** the preview frame is an 8-bit JPEG, so very
-fine gradients look slightly rougher than the 10-bit render; and objects in shade read darker and
-less saturated than their RAL spec, so the references are hue and ratio guides, not exposure ones.
+**One fidelity caveat while grading:** objects in shade read darker and less saturated than their
+RAL spec, so the references are hue and ratio guides, not exposure ones.
 
 ## Orientation
 
 The pipeline contains no rotation logic and assumes the source plays the right way up. The one
 guard, `require_portrait`, refuses a non-portrait clip in the delivery stage rather than letting it
-be squashed into 1080x1920. The reasoning, and the mixed-orientation episode that blocked this
+be squashed into a vertical deliverable. The reasoning, and the mixed-orientation episode that blocked this
 shoot's batch for hours, are in `docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md`, which is the
 only copy.
 
 ## What's safe to batch, what isn't
 
 Safe to loop unattended: the mechanical stages, given a proof that has been signed off. What is
-never safe to batch is the Feed crop, because its offset is a composition call per clip; step 5
-above says what `grade.sh` does about that. This pipeline is "scripted mechanics, per-clip human gate," not "point at the folder and walk away."
+never safe to batch is a crop offset, because it is a composition call per clip; step 5 above says
+what `grade.sh` does about that. This pipeline is "scripted mechanics, per-clip human gate," not "point at the folder and walk away."

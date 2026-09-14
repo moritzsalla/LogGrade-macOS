@@ -1,8 +1,8 @@
 # The app's visual design
 
-Written before the interface was built, kept because the reasons outlast the pixels. `bench/`'s
-own header makes the same argument for its dark theme; this is that argument applied to a window
-with three columns in it.
+Written before the interface was built, kept because the reasons outlast the pixels. The browser
+Bench it replaced made the same argument for its dark theme; this is that argument applied to a
+window with three columns in it.
 
 ## Subject
 A measuring instrument that happens to make pictures. One person, his own street footage,
@@ -18,7 +18,7 @@ numbers readable.
     hairline   #2E2E2E   structure, never decoration
     ink        #E8E8E8 / #9A9A9A / #6E6E6E
     plate      #F3C300   RAL 1021, the plate yellow this pipeline MEASURES against. The one
-                         accent, reused from the Bench, because a tool's accent should be a
+                         accent, inherited from the Bench, because a tool's accent should be a
                          colour it knows the value of.
     lamp       #E06A4B   refusals only. A signal lamp, not a web error.
 No green anywhere: "ready" is the absence of a warning, and a green tick next to a photograph is

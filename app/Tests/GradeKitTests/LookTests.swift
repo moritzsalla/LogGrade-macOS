@@ -129,7 +129,7 @@ final class ProjectTests: XCTestCase {
     func testRoundTripsThroughDisk() throws {
         var project = Project(presets: [.init(name: "Portra", look: try aLook())],
                               activePreset: "Portra",
-                              delivery: .init(reels: true, feed: true, height: 1440, fps: 24))
+                              delivery: .init(targets: [.reels, .feed], height: 1440, fps: 24))
         project.clips["IMG_0609"] = .init(cropOffset: 750, previewSeconds: 4, stabilise: true)
         project.clips["IMG_0610"] = .init(cropOffset: nil, previewSeconds: 1, stabilise: false)
 
@@ -142,24 +142,24 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(reread.clips["IMG_0610"]?.stabilise, false)
     }
 
-    func testAFeedRenderIsBlockedUntilEveryClipHasAnOffset() throws {
+    func testACroppedRenderIsBlockedUntilEveryClipHasAnOffset() throws {
         var project = Project(presets: [.init(name: "Portra", look: try aLook())],
                               activePreset: "Portra",
-                              delivery: .init(reels: true, feed: true))
+                              delivery: .init(targets: [.reels, .feed]))
         project.clips["A"] = .init(cropOffset: 750)
         project.clips["B"] = .init(cropOffset: nil)
         let blockers = project.blockers(for: ["A", "B"])
-        XCTAssertEqual(blockers, [.feedWithoutCropOffset(["B"])])
+        XCTAssertEqual(blockers, [.cropWithoutOffset(deliverables: [.feed], clips: ["B"])])
         XCTAssertTrue(blockers[0].description.contains("per-clip"),
                       "the reason matters more than the fact: \(blockers[0].description)")
-        // Reels alone needs no offset at all.
-        project.delivery.feed = false
+        // The shape that does not crop needs no offset at all.
+        project.delivery.setTarget(.feed, selected: false)
         XCTAssertTrue(project.blockers(for: ["A", "B"]).isEmpty)
     }
 
     func testTheEnvironmentCarriesOnlyVariables() throws {
         var project = Project(presets: [.init(name: "P", look: try aLook())], activePreset: "P",
-                              delivery: .init(reels: true, feed: true, height: 1080, fps: 12))
+                              delivery: .init(targets: [.reels, .feed], height: 1080, fps: 12))
         project.clips["IMG_0609"] = .init(cropOffset: 600, stabilise: false)
         let env = project.environment(for: "IMG_0609",
                                       lookFile: URL(fileURLWithPath: "/tmp/look.json"))
@@ -265,7 +265,7 @@ final class PresetTests: XCTestCase {
     func testAProjectSurvivesBeingSavedAndReopened() throws {
         var project = Project(presets: [.init(name: "shipped", look: try aLook())],
                               activePreset: "shipped",
-                              delivery: .init(reels: true, feed: true, height: 2560, fps: 24))
+                              delivery: .init(targets: [.reels, .feed], height: 2560, fps: 24))
         project.clips["IMG_0609"] = .init(cropOffset: 812, previewSeconds: 4, stabilise: false)
         project.clips["IMG_0610"] = .init(cropOffset: nil)
 

@@ -76,7 +76,45 @@ someone bleached the footage.
 **The crop is dragged per clip.** Default it to centre and a batch of twelve gives you twelve files
 that all look finished and are all framed wrong.
 
-![The Grade Bench](docs/grade-bench.png)
+---
+
+## Deliver in any shape
+
+A deliverable is a name, an aspect and a crop offset — not a size written into the pipeline. Two
+ship as presets and the set is open:
+
+```sh
+DELIVERABLES=reels,feed ./scripts/grade.sh src/            # the two presets
+DELIVERABLES=square:1:1,wide:16:9:400 ./scripts/grade.sh src/IMG_0609.mov
+```
+
+Height follows the aspect off one shared delivery width, because the platform re-encodes to a fixed
+width and two deliverables that differed in it would be re-encoded differently for no reason. A
+shape that is a crop of the master gets one, computed from the frame that is actually on disk; a
+shape that is already the master's own gets no crop filter at all.
+
+Sharpening and grain were tuned at 1080×1920 and are merely scaled away from it, so other sizes
+render but are not yet judged.
+
+→ [`adr/0010`](docs/adr/0010_A_DELIVERABLE_IS_DATA_NOT_A_CASE_BRANCH.md)
+
+---
+
+## Match a shoot to itself
+
+Clips shot across an evening land differently under one curve, so each clip's exposure is measured
+and its gamma solved to land them together. What they land *on* used to be a constant in
+`look.json`: 609, the luma mean of one frame of one clip of one shoot. Right for that footage,
+meaningless for anyone else's, and applied silently either way.
+
+```sh
+MATCH=batch ./scripts/grade.sh src/     # anchor on the median of these clips instead
+```
+
+The default is unchanged, because changing it would change every existing render and the fork's
+whole claim is that it still renders what its precursor did.
+
+→ [`adr/0011`](docs/adr/0011_THE_EXPOSURE_REFERENCE_CAN_COME_FROM_THE_SHOOT.md)
 
 ---
 

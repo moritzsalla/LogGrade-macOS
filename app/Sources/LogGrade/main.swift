@@ -275,10 +275,10 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
         if key == "c" { grade.isComparing = false }
         return event
     }
-    // The crop, by the pixel. Arrow keys only mean the crop while a Feed render is asked for;
-    // otherwise they belong to whatever has focus. Shift moves by ten, the way a nudge does
+    // The crop, by the pixel. Arrow keys only mean the crop while something that crops is asked
+    // for; otherwise they belong to whatever has focus. Shift moves by ten, the way a nudge does
     // everywhere else on this platform.
-    if grade.project.delivery.feed, grade.cropGeometry != nil {
+    if grade.project.delivery.anyTargetCrops, grade.cropGeometry != nil {
         let step = event.modifierFlags.contains(.shift) ? 10 : 1
         if event.keyCode == 126 { grade.nudgeCrop(by: -step); return nil }   // up
         if event.keyCode == 125 { grade.nudgeCrop(by: step); return nil }    // down

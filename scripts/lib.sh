@@ -451,6 +451,14 @@ crop_prefix() {  # crop_prefix <src-w> <src-h> <aspect-w> <aspect-h> <offset>  -
 		echo "crop window ${sw}x${ch} is taller than the source ${sw}x${sh}" >&2
 		return 1
 	fi
+	# A deliverable that is already the source's OWN shape gets no crop filter, and its offset is
+	# not an error — there is exactly one window, so there is nothing to place. This is what keeps
+	# the 9:16 deliverable byte-identical now that EVERY deliverable resolves its crop through
+	# here: it used to be the one whose case branch handed the chain a literal empty string, and a
+	# no-op `crop=2160:3840:0:0` in the graph is a change tests/conformance.sh would see.
+	if [ "$ch" -eq "$sh" ]; then
+		return 0
+	fi
 	max=$(( sh - ch ))
 	if [ "$y" -lt 0 ] || [ "$y" -gt "$max" ]; then
 		echo "REFUSING: crop offset $y is outside 0..$max for a ${sw}x${ch} window on ${sw}x${sh}." >&2
@@ -458,6 +466,115 @@ crop_prefix() {  # crop_prefix <src-w> <src-h> <aspect-w> <aspect-h> <offset>  -
 		return 1
 	fi
 	printf 'crop=%s:%s:0:%s,\n' "$sw" "$ch" "$y"
+}
+
+# The clip's post-CST luma mean, from ONE decoded frame rather than a pass. It is what the exposure
+# match solves against, and it does not change when a look does — so an interface adjusting a curve
+# re-measures the same number on every render, which is why grade.sh lets a caller hand it back.
+#
+# `metadata=print:file=-`, never a plain `metadata=print`: the latter logs at INFO level, which
+# `-v error` suppresses, so the probe returned EMPTY on every clip and every clip silently got the
+# reference gamma. The exposure match appeared to run and did nothing.
+#
+# Lives here rather than inline in grade.sh because two callers need the IDENTICAL command: the
+# per-clip match and the batch reference. Two copies of this string is how the INFO-level bug would
+# come back in one of them.
+probe_yavg() {  # probe_yavg <src> <cst-cube>  -> the mean, or empty
+	ffmpeg -v error -ss 1 -i "$1" -frames:v 1 \
+		-vf "lut3d=file='${2}':interp=tetrahedral,scale=320:-1,signalstats,metadata=print:file=-" \
+		-f null - 2>/dev/null | grep -m1 -oE 'YAVG=[0-9.]+' | cut -d= -f2 || true
+}
+
+# --- deliverables -------------------------------------------------------------------------
+# A deliverable was two names with their sizes written into a `case` branch, so "any other shape"
+# meant editing the pipeline. It is DATA now: an aspect, an optional crop offset, and a name that
+# reaches the output filename. Instagram's two shapes survive as presets rather than as the only
+# options. See docs/adr/0010.
+#
+# WHY WIDTH IS THE ANCHOR, not height. Every deliverable is the same portrait master scaled to the
+# same horizontal resolution: the platform re-encodes to a fixed width, so two deliverables that
+# differed in width would be re-encoded differently for no reason anyone chose. Height follows from
+# the aspect. It is also what makes the old numbers fall out unchanged rather than by coincidence —
+# 1080 wide is 1920 tall at 9:16 and 1350 at 4:5, which is exactly what the two branches hardcoded.
+#
+# A spec is either a preset name or `name:aspect-w:aspect-h[:offset]`. The offset is per
+# DELIVERABLE because a crop offset is a composition call, and the one case where two cropped
+# deliverables want different framing should not need two runs.
+deliverable_spec() {  # deliverable_spec <spec>  -> "<name> <aw> <ah> <offset|-> <suffix>"
+	local spec="$1" name aw ah off
+	# The preset suffixes are the ones already on disk. They are kept verbatim so that opening the
+	# set up does not rename anybody's existing deliverables.
+	case "$spec" in
+		reels) printf 'reels 9 16 - reels-stories_9x16\n'; return 0;;
+		feed)  printf 'feed 4 5 - feed_4x5\n'; return 0;;
+	esac
+	case "$spec" in
+		*:*) ;;
+		*)
+			echo "REFUSING: unknown deliverable '$spec'." >&2
+			echo "  Expected a preset (reels, feed) or name:aspect-w:aspect-h[:offset]," >&2
+			echo "  e.g. square:1:1 or wide:16:9:400." >&2
+			return 1;;
+	esac
+	IFS=: read -r name aw ah off <<< "$spec"
+	# The name reaches a path component and the deliverable label in the event stream, so it goes
+	# through the same guard a clip name does rather than a weaker one written here.
+	name="$(require_clip_name "$name")" || return 1
+	case "$aw$ah" in
+		''|*[!0-9]*)
+			echo "REFUSING: deliverable '$name' has a non-integer aspect '${aw}:${ah}'." >&2
+			return 1;;
+	esac
+	if [ "$aw" -le 0 ] || [ "$ah" -le 0 ]; then
+		echo "REFUSING: deliverable '$name' has a zero aspect term." >&2
+		return 1
+	fi
+	if [ -n "$off" ]; then
+		off="$(require_number "deliverable $name offset" "$off")" || return 1
+	else
+		off="-"
+	fi
+	printf '%s %s %s %s %s_%sx%s\n' "$name" "$aw" "$ah" "$off" "$name" "$aw" "$ah"
+}
+
+# Whether this deliverable takes a crop out of a source of the given size, which is a fact about
+# the SOURCE's shape rather than about the deliverable's name: 4:5 is a crop of a 9:16 master and
+# the whole frame of a 4:5 one. It answers the same question crop_prefix answers by returning an
+# empty string, and it exists separately because the refusal that needs it has to fire before any
+# clip is opened, where there is no offset to validate yet.
+#
+# An UNMEASURABLE source counts as cropping. The caller's guard then fires when it may not have
+# needed to, which costs a re-run; the other way costs a batch of silently reframed deliverables.
+deliverable_crops() {  # deliverable_crops "<src-w> <src-h>" <aw> <ah>  -> 0 if it crops
+	local size="$1" aw="$2" ah="$3" sw sh ch
+	case "$size" in
+		*' '*) ;;
+		*) return 0;;
+	esac
+	sw="${size% *}"; sh="${size#* }"
+	ch=$(( sw * ah / aw ))
+	ch=$(( ch - ch % 2 ))
+	[ "$ch" -ne "$sh" ]
+}
+
+# Height follows the aspect off the shared width. Even, because libx264 rejects an odd dimension
+# and does it at encode time, after the graph is built and the first frames are decoded.
+deliverable_height() {  # deliverable_height <width> <aw> <ah>  -> <h>
+	local h
+	h=$(( $1 * $3 / $2 ))
+	printf '%s\n' "$(( h - h % 2 ))"
+}
+
+# The middle value, for deriving an exposure reference from a shoot rather than from one frame of
+# one clip. LOWER median on an even count: picking a real clip's measurement beats averaging two
+# into a number no clip has, and it makes the choice reproducible rather than dependent on how the
+# list happened to be ordered.
+median() {  # median  (values on stdin, one per line)  -> the middle one
+	local sorted n
+	sorted="$(sort -n)"
+	n="$(printf '%s\n' "$sorted" | grep -c .)"
+	[ "$n" -gt 0 ] || return 1
+	printf '%s\n' "$sorted" | sed -n "$(( (n + 1) / 2 ))p"
 }
 
 require_portrait() {

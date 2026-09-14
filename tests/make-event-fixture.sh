@@ -37,8 +37,12 @@ _mk() {  # _mk <w> <h> <out>
 		-color_primaries bt709 -color_trc bt709 -colorspace bt709 "$3"
 	rm -f "$3.raw.mov"
 }
-_mk 64 128 "$WORK/src/TALL.mov"
-_mk 128 64 "$WORK/src/WIDE.mov"
+# 72x128 IS 9:16 EXACTLY, and 128x72 is its landscape counterpart. These were 64x128 and 128x64,
+# i.e. 1:2, which was invisible for as long as the 9:16 deliverable took no crop. Once a deliverable
+# became an aspect, a 1:2 source had to be cropped to reach 9:16, and a two-clip run with no offset
+# is refused — so the generator exited non-zero and produced nothing.
+_mk 72 128 "$WORK/src/TALL.mov"
+_mk 128 72 "$WORK/src/WIDE.mov"
 
 STREAM="$(JSON=1 DRY=1 MATCH=0 GRADE_WORK_DIR="$WORK" "$ROOT/scripts/grade.sh" "$WORK/src" 2>/dev/null \
 	| sed -e "s|$WORK|<WORK>|g" \

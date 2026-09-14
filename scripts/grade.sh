@@ -5,18 +5,26 @@
 #   ./scripts/grade.sh <folder|clip.mov> [...]   process a shoot folder or named clips
 #
 # Every knob is an environment variable, and this list is the only place they are documented:
-#   FEED=1            also emit the 4:5 Feed crop (refused across several clips without CROP_Y)
-#   CROP_Y=<px>       vertical offset of the 4:5 crop window on the 2160x3840 master (default 750,
-#                     which is IMG_0609's composition — it is a per-clip framing call)
+#   DELIVERABLES=<list>  what to render, comma separated. Default 'reels'. Each entry is either a
+#                     preset — 'reels' (9:16) or 'feed' (4:5) — or 'name:aspect-w:aspect-h[:offset]',
+#                     e.g. 'reels,feed' or 'square:1:1,wide:16:9:400'. Height follows the aspect off
+#                     the shared delivery width; see WIDTH.
+#   CROP_Y=<px>       vertical offset for every deliverable that crops and does not carry its own
+#                     (default 750, which is IMG_0609's composition — it is a per-clip framing call)
+#   WIDTH=<px>        the delivery width every deliverable shares. Defaults to HEIGHT's 9:16 width,
+#                     so the default run is 1080 wide exactly as before.
 #   STAB=0            skip stabilisation entirely (faster)
 #   SMOOTHING=<n>     frames of camera-path lowpass; higher is closer to locked-off
 #   MATCH=0           skip exposure matching and use look.json's gamma raw
+#   MATCH=batch       solve every clip against the MEDIAN of this run's own clips instead of
+#                     look.json's reference_yavg, which was measured on one frame of one shoot
 #   YAVG_IN=<n>       the clip's post-CST mean, if it has already been measured. Skips the probe,
 #                     which costs about a second; the render is identical either way.
 #   GRAIN_STRENGTH=<n>  override look.json's grain strength
 #   PROOF=<seconds>   render this many seconds through the real chain into dist/proofs/
 #   DRY=1             plan only, render nothing
-#   HEIGHT=<px>       output height (default 1920). Width follows the deliverable's aspect.
+#   HEIGHT=<px>       height of the 9:16 reference frame (default 1920). It sets the shared
+#                     delivery width; each deliverable's own height follows its aspect.
 #   FPS_OUT=<n>       output frame rate. Default is the source's. Only an integer relation is
 #                     accepted — anything needing retiming is refused rather than interpolated.
 #   CORRECT_SIZE=<n>  points per axis in the correction cube (default 33; see its header for
@@ -42,17 +50,23 @@
 #
 # WHAT IS AUTOMATIC vs WHAT THIS REFUSES TO GUESS:
 #   automatic  exposure match, stabilisation, the whole grade, tag verification
-#   refuses    a clip that does not decode as portrait, and a Feed crop across several clips
-#              without an explicit CROP_Y — that offset is a composition call per clip
+#   refuses    a clip that does not decode as portrait, and a cropped deliverable across several
+#              clips without an explicit offset — that offset is a composition call per clip
 #
 # Orientation is NOT handled here or anywhere: it is an ingest concern and the source is trusted.
 # See docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md.
 #
-# EXPOSURE MATCHING is the part that makes "one recipe" actually mean "one look". The grade was
-# tuned on a single frame of IMG_0609, ~20 minutes before sunset. Golden hour moves fast; clips
-# shot across a shoot window land differently under a fixed curve, and in an unattended batch
-# nobody notices until the edit. Each clip's post-CST mean is measured and the tone curve's gamma
-# is solved per clip to land on the same place. Disable with MATCH=0 to get the frozen curve raw.
+# EXPOSURE MATCHING is the part that makes "one recipe" actually mean "one look". Clips shot across
+# a shoot window land differently under a fixed curve, and in an unattended batch nobody notices
+# until the edit. Each clip's post-CST mean is measured and the tone curve's gamma is solved per
+# clip to land on the same place. Disable with MATCH=0 to get the frozen curve raw.
+#
+# WHERE "the same place" IS, is the part that does not travel. MATCH=1 lands every clip on
+# look.json's match.reference_yavg, which is a measurement of one frame of IMG_0609 ~20 minutes
+# before sunset. For that shoot it is the right anchor; for anyone else's footage, or for another
+# shoot under different light, it is a number with no meaning that still moves every clip's gamma.
+# MATCH=batch anchors on the run's OWN median instead, so a shoot is matched to itself. The default
+# stays MATCH=1 because changing it would change every existing render — see docs/adr/0011.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -97,9 +111,13 @@ case "$FRAME_STAGE" in
 esac
 FRAME_DIR="$WORK/dist/frames"
 
-# Delivery shape. The sizes were 1080x1920 and 1080x1350 written into the render calls; they are
-# the deliverable's ASPECT plus one height now, because the app offers the height as a choice.
+# Delivery shape. The sizes were 1080x1920 and 1080x1350 written into the render calls, then an
+# aspect plus one height; they are an aspect plus one shared WIDTH now, because the set of shapes
+# is no longer fixed at two. HEIGHT is kept as the knob it was — the 9:16 reference frame — and the
+# width falls out of it, so a run that says nothing renders 1080 wide exactly as before.
 HEIGHT="$(require_number HEIGHT "${HEIGHT:-1920}")"
+WIDTH="$(require_number WIDTH "${WIDTH:-$(( HEIGHT * 9 / 16 ))}")"
+WIDTH=$(( WIDTH - WIDTH % 2 ))
 FPS_OUT="${FPS_OUT:-}"
 [ -z "$FPS_OUT" ] || FPS_OUT="$(require_number FPS_OUT "$FPS_OUT")"
 # Two modes that both mean "do not deliver" would otherwise silently pick one. Refuse instead: a
@@ -175,7 +193,46 @@ G_GAMMA_REF="$(require_number gamma "$(look .tone.gamma)")"   # gamma the look w
 Y_REF="$(require_number reference_yavg "$(look .match.reference_yavg)")"  # ...against this mean
 GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain.strength)}")"
 SMOOTHING="$(require_number SMOOTHING "${SMOOTHING:-$(look .stabilisation.smoothing)}")"
-STAB="${STAB:-1}"; FEED="${FEED:-0}"; MATCH="${MATCH:-1}"; DRY="${DRY:-0}"
+STAB="${STAB:-1}"; MATCH="${MATCH:-1}"; DRY="${DRY:-0}"
+case "$MATCH" in
+	0|1|batch) ;;
+	*)
+		echo "REFUSING: MATCH must be 0, 1 or batch, got: $MATCH" >&2
+		echo "  0 uses look.json's gamma raw, 1 solves against look.json's reference_yavg," >&2
+		echo "  batch solves against the median of this run's own clips." >&2
+		emit_code REFUSE_MATCH_MODE
+		emit refused code REFUSE_MATCH_MODE
+		exit 1;;
+esac
+
+# --- what to render ---------------------------------------------------------------------
+# Parallel arrays rather than one array of records: macOS ships bash 3.2, which has no associative
+# arrays and no nested ones. They are built together and read together, so they cannot drift.
+#
+# Globbing is off across the split because a deliverable name reaches a filename, and an unquoted
+# `*` in DELIVERABLES would otherwise expand against the launch directory before it is ever seen.
+D_NAME=(); D_AW=(); D_AH=(); D_OFF=(); D_SUFFIX=()
+set -f
+OLD_IFS="$IFS"; IFS=','
+for _spec in ${DELIVERABLES:-reels}; do
+	IFS="$OLD_IFS"
+	_fields="$(deliverable_spec "$_spec")" || {
+		emit_code REFUSE_DELIVERABLE
+		emit refused code REFUSE_DELIVERABLE spec "$_spec"
+		exit 1
+	}
+	read -r _n _aw _ah _off _sfx <<< "$_fields"
+	D_NAME+=("$_n"); D_AW+=("$_aw"); D_AH+=("$_ah"); D_OFF+=("$_off"); D_SUFFIX+=("$_sfx")
+	IFS=','
+done
+IFS="$OLD_IFS"
+set +f
+if [ "${#D_NAME[@]}" -eq 0 ]; then
+	echo "REFUSING: DELIVERABLES is empty — there is nothing to render." >&2
+	emit_code REFUSE_NO_DELIVERABLES
+	emit refused code REFUSE_NO_DELIVERABLES
+	exit 1
+fi
 # PROOF=<seconds> renders that many seconds through the REAL chain, into dist/proofs/ rather than
 # dist/03-final/. Two reasons it exists. docs/BATCH_RUNBOOK.md makes a proof a required sign-off
 # before committing to the slow render, and until now that recipe lived only in shell history. And
@@ -204,18 +261,52 @@ if [ "${#CLIPS[@]}" -eq 0 ]; then
 	exit 1
 fi
 
-# The Feed crop is a per-clip judgement — 750 is IMG_0609's composition, chosen to drop the
+# A crop offset is a per-clip judgement — 750 is IMG_0609's composition, chosen to drop the
 # parking-ceiling strip at the top. Applied to a batch it silently reframes 18 other clips, and
 # the files look done. That is CONTEXT.md's "squashed" failure class in another dimension, so it
-# is refused rather than warned about. Setting CROP_Y explicitly is taken as "yes, this offset for
-# all of them", which is a decision someone made rather than a default nobody saw.
-if [ "$FEED" = "1" ] && [ "${#CLIPS[@]}" -gt 1 ] && [ -z "${CROP_Y:-}" ]; then
-	echo "REFUSING: FEED=1 across ${#CLIPS[@]} clips with no CROP_Y." >&2
-	echo "  The 4:5 crop offset is a per-clip framing call; the default 750 is IMG_0609's." >&2
-	echo "  Either run one clip at a time, or pass CROP_Y=<pixels> to accept one offset for all." >&2
-	emit_code REFUSE_FEED_NO_CROP_Y
-	emit refused code REFUSE_FEED_NO_CROP_Y clips "${#CLIPS[@]}"
-	exit 1
+# is refused rather than warned about. Setting an offset explicitly — CROP_Y, or the spec's own
+# fourth field — is taken as "yes, this offset for all of them", which is a decision someone made
+# rather than a default nobody saw.
+#
+# WHICH deliverables crop is a fact about the SOURCE's shape, not about their names: a 4:5 frame is
+# a crop of a 9:16 master and the whole frame of a 4:5 one. So it needs one measurement, taken here
+# because this refusal has to land before anything is created — a run that refuses halfway through
+# has already written files someone has to reason about. It costs one decode (~0.6s), against three
+# minutes a clip.
+#
+# If that measurement fails, every deliverable is ASSUMED to crop. The guard then fires when it did
+# not strictly need to, which costs a re-run; guessing the other way costs a batch of silently
+# reframed files, which is the failure this exists to prevent.
+if [ "${#CLIPS[@]}" -gt 1 ] && [ -z "${CROP_Y:-}" ]; then
+	# EVERY clip, not just the first. Whether a deliverable crops depends on the shape of the clip
+	# in front of it, so one clip's answer is not the batch's — and the first clip is exactly the
+	# one that might be about to be skipped, which would decide the run on a frame it never renders.
+	# A clip that is not portrait is left out for that reason: the loop below skips it, so it has no
+	# vote on a refusal about files that will exist.
+	PROBE_SIZE=""
+	for _src in "${CLIPS[@]}"; do
+		_size="$(source_frame_size "$_src" 2>/dev/null || true)"
+		case "$_size" in
+			*' '*) [ "${_size#* }" -gt "${_size% *}" ] || continue;;
+		esac
+		# The first shape that will actually be rendered decides, and an unmeasurable one is left
+		# empty so deliverable_crops answers conservatively.
+		PROBE_SIZE="$_size"
+		break
+	done
+	_i=0
+	while [ "$_i" -lt "${#D_NAME[@]}" ]; do
+		if [ "${D_OFF[$_i]}" = "-" ] && deliverable_crops "$PROBE_SIZE" "${D_AW[$_i]}" "${D_AH[$_i]}"; then
+			echo "REFUSING: '${D_NAME[$_i]}' crops, across ${#CLIPS[@]} clips, with no offset." >&2
+			echo "  A crop offset is a per-clip framing call; the default 750 is IMG_0609's." >&2
+			echo "  Either run one clip at a time, pass CROP_Y=<pixels> to accept one offset for" >&2
+			echo "  all of them, or give this deliverable its own: ${D_NAME[$_i]}:${D_AW[$_i]}:${D_AH[$_i]}:<px>." >&2
+			emit_code REFUSE_CROP_NO_OFFSET
+			emit refused code REFUSE_CROP_NO_OFFSET clips "${#CLIPS[@]}" deliverable "${D_NAME[$_i]}"
+			exit 1
+		fi
+		_i=$(( _i + 1 ))
+	done
 fi
 
 # Nothing is CREATED until the arguments are known to be good. This used to run first, so
@@ -249,16 +340,53 @@ if [ "$("$SCRIPT_DIR/make-correct-lut.py" --check-neutral $(correct_args))" = "a
 	CORRECT_PREFIX="lut3d=file='${CORRECT_LUT}':interp=tetrahedral,"
 fi
 
+# --- MATCH=batch: the exposure reference comes from this run's own clips -----------------
+# One probe per clip, up front, so the median is known before the first render. The results are
+# kept and handed to the loop: probing twice would double the cost for a number that cannot have
+# changed, and it is the same command either way because both callers use probe_yavg.
+#
+# A clip whose probe comes back empty is left out of the MEDIAN but still rendered — it falls back
+# to the reference gamma below, exactly as it does under MATCH=1.
+BATCH_YAVGS=()
+if [ "$MATCH" = "batch" ]; then
+	say "measuring ${#CLIPS[@]} clip(s) for a batch exposure reference"
+	for SRC in "${CLIPS[@]}"; do
+		_y="$(probe_yavg "$SRC" "$CST")"
+		[ -n "$_y" ] || _y="-"
+		BATCH_YAVGS+=("$_y")
+	done
+	# `|| true` would hide an all-empty run behind look.json's reference, which is the silent
+	# substitution this whole file refuses to make. Stop instead.
+	if ! Y_REF="$(printf '%s\n' "${BATCH_YAVGS[@]}" | grep -v '^-$' | median)"; then
+		echo "REFUSING: MATCH=batch, but not one clip's exposure could be measured." >&2
+		echo "  Without a measurement there is nothing to match to. Use MATCH=1 to grade" >&2
+		echo "  against look.json's reference, or MATCH=0 for its gamma raw." >&2
+		emit_code REFUSE_BATCH_NO_PROBE
+		emit refused code REFUSE_BATCH_NO_PROBE clips "${#CLIPS[@]}"
+		exit 1
+	fi
+	say "batch exposure reference: YAVG=$Y_REF (look.json's is not used under MATCH=batch)"
+fi
+
 say "grade run $(date '+%Y-%m-%d %H:%M:%S')  —  ${#CLIPS[@]} clip(s)"
 say "look: sat=$SAT warm=$WARM grain=$GRAIN_STRENGTH stab=$STAB exposure-match=$MATCH"
 [ -z "$CORRECT_PREFIX" ] || say "correction: exposure=$CORRECT_EXPOSURE temp=$CORRECT_TEMP tint=$CORRECT_TINT slope=$CORRECT_SLOPE offset=$CORRECT_OFFSET power=$CORRECT_POWER lum_mix=$CORRECT_LUM_MIX (${CORRECT_SIZE}-point cube)"
 say ""
 emit run_start clips "${#CLIPS[@]}" saturation "$SAT" warmth "$WARM" \
 	grain "$GRAIN_STRENGTH" stabilisation "$STAB" exposure_match "$MATCH" \
+	exposure_reference "$Y_REF" deliverables "$(IFS=,; printf '%s' "${D_NAME[*]}")" \
 	proof "${PROOF:-0}" dry "$DRY" report "$REPORT" out_dir "$OUT_DIR"
 
 OK=0; SKIPPED=0; FAILED=0
+# Indexed rather than `for SRC in "${CLIPS[@]}"`: under MATCH=batch the probe already ran, and the
+# result is found by position.
+CLIP_I=0
 for SRC in "${CLIPS[@]}"; do
+	# Taken and advanced BEFORE any `continue`, because BATCH_YAVGS is aligned with CLIPS — every
+	# clip, including the ones about to be skipped. Advancing it further down would silently hand
+	# clip n+1 the measurement of clip n as soon as anything ahead of it skipped.
+	BI="$CLIP_I"; CLIP_I=$(( CLIP_I + 1 ))
+
 	# The clip name becomes a path component AND reaches the filter graph, through the per-clip
 	# tone LUT and the transform path. It is the one input nobody types.
 	CLIP="$(require_clip_name "$(basename "${SRC%.*}")")"
@@ -274,25 +402,25 @@ for SRC in "${CLIPS[@]}"; do
 	SRC_W="${SRC_SIZE% *}"; SRC_H="${SRC_SIZE#* }"
 
 	# --- exposure match: one cheap probe, not a full pass --------------------------------
+	# The solve lives in scripts/solve-gamma.py, not in a python3 -c string here: a degenerate
+	# probe used to raise inside it and take the whole batch down at clip n, and a program built by
+	# interpolation cannot be tested. Arguments go through argv.
 	GAMMA="$G_GAMMA_REF"; YAVG="-"
-	if [ "$MATCH" = "1" ] && [ -n "${YAVG_IN:-}" ]; then
-		# ALREADY MEASURED. The probe reads the clip's post-CST mean, which does not change when a
-		# look does — so an interface adjusting a curve re-measures the same number on every
-		# render. It costs about a second of a four-second preview. Passing it back skips that,
-		# and the render is identical either way, which a test asserts.
-		YAVG="$(require_number YAVG_IN "$YAVG_IN")"
-		GAMMA=$("$SCRIPT_DIR/solve-gamma.py" "$YAVG" "$Y_REF" "$G_GAMMA_REF")
-	elif [ "$MATCH" = "1" ]; then
-		YAVG=$(ffmpeg -v error -ss 1 -i "$SRC" -frames:v 1 \
-			-vf "lut3d=file='${CST}':interp=tetrahedral,scale=320:-1,signalstats,metadata=print:file=-" \
-			-f null - 2>/dev/null | grep -m1 -oE 'YAVG=[0-9.]+' | cut -d= -f2 || true)
-		# `metadata=print:file=-` not plain `metadata=print`: the latter logs at INFO level, which
-		# `-v error` suppresses, so the probe returned EMPTY on every clip and every clip silently
-		# got the reference gamma. The exposure match appeared to run and did nothing.
-		# The solve lives in scripts/solve-gamma.py, not in a python3 -c string here: a degenerate
-		# probe used to raise inside it and take the whole batch down at clip n, and a program
-		# built by interpolation cannot be tested. Arguments go through argv.
-		if [ -n "$YAVG" ]; then
+	if [ "$MATCH" != "0" ]; then
+		if [ -n "${YAVG_IN:-}" ]; then
+			# ALREADY MEASURED. The probe reads the clip's post-CST mean, which does not change
+			# when a look does — so an interface adjusting a curve re-measures the same number on
+			# every render. It costs about a second of a four-second preview. Passing it back skips
+			# that, and the render is identical either way, which a test asserts.
+			YAVG="$(require_number YAVG_IN "$YAVG_IN")"
+		elif [ "$MATCH" = "batch" ]; then
+			# Measured in the pre-pass that produced Y_REF; "-" means that probe came back empty.
+			YAVG="${BATCH_YAVGS[$BI]}"
+		else
+			YAVG="$(probe_yavg "$SRC" "$CST")"
+			[ -n "$YAVG" ] || YAVG="-"
+		fi
+		if [ "$YAVG" != "-" ]; then
 			GAMMA=$("$SCRIPT_DIR/solve-gamma.py" "$YAVG" "$Y_REF" "$G_GAMMA_REF")
 		fi
 	fi
@@ -347,11 +475,17 @@ for SRC in "${CLIPS[@]}"; do
 			SKIPPED=$((SKIPPED+1)); continue
 		fi
 	fi
-	say "$CLIP  post-CST YAVG=${YAVG}  gamma=${GAMMA}$([ "$GAMMA" != "$G_GAMMA_REF" ] && echo " (matched)")"
+	# NUMERICALLY, not as strings. solve-gamma.py prints 2.020 where look.json says 2.02, so a
+	# clip the solve left exactly where it started was reported as "(matched)" — a claim that the
+	# grade moved when it did not. Harmless under MATCH=1, where landing precisely on the reference
+	# is a coincidence; under MATCH=batch the median clip lands there BY CONSTRUCTION, so the field
+	# would have been wrong for one clip in every run.
+	MATCHED="$(awk -v a="$GAMMA" -v b="$G_GAMMA_REF" 'BEGIN { print (a == b) ? 0 : 1 }')"
+	say "$CLIP  post-CST YAVG=${YAVG}  gamma=${GAMMA}$([ "$MATCHED" = "1" ] && echo " (matched)")"
 	# matched is 1/0 rather than true/false: emit() writes a bare number or a quoted string, and a
 	# JSON boolean would need a third case for one field.
 	emit clip_planned clip "$CLIP" source "$SRC" yavg "$YAVG" gamma "$GAMMA" \
-		matched "$([ "$GAMMA" != "$G_GAMMA_REF" ] && echo 1 || echo 0)" fps "$FPS"
+		matched "$MATCHED" fps "$FPS"
 	[ "$DRY" = "1" ] && continue
 
 	# Generated AFTER the dry-run exit, not before: DRY=1 is documented as "plan only, render
@@ -445,15 +579,33 @@ $(delivery_image_chain "$w" "$h" "$SFX" "$crop")${FPS_FILTER}[b];\
 	# silently costs the other 16. The non-portrait path a few lines up already skips and continues;
 	# this gives the render path the same treatment, and the exit status below makes sure a run with
 	# failures in it can never be read as a clean one.
-	# Even widths: libx264 rejects an odd dimension, and it rejects it at encode time, after the
-	# graph has been built and the first frames decoded.
-	REELS_W=$(( HEIGHT * 9 / 16 )); REELS_W=$(( REELS_W - REELS_W % 2 ))
-	FEED_H=$(( HEIGHT * 1350 / 1920 )); FEED_H=$(( FEED_H - FEED_H % 2 ))
-	FEED_W=$(( FEED_H * 4 / 5 )); FEED_W=$(( FEED_W - FEED_W % 2 ))
-	if render "$REELS_W" "$HEIGHT" "reels-stories_9x16" \
-		&& { [ "$FEED" != "1" ] || render "$FEED_W" "$FEED_H" "feed_4x5" \
-			"$(crop_prefix "$SRC_W" "$SRC_H" 4 5 "$CROP_Y_OK")"; }
-	then
+	# Every deliverable in the set, in the order it was given. The set used to be one `if` with
+	# `reels` in the condition and `feed` in its tail, which is why adding a third shape meant
+	# editing this line rather than a list.
+	#
+	# THE SIZE IS SAID OUT LOUD, per deliverable, because it is DERIVED now. Height follows the
+	# aspect off the shared width, so a HEIGHT that is not a multiple of 16 lands a 9:16 frame a
+	# pixel or two off the number that was asked for. Stating it is the difference between a
+	# rounding and a silent wrongness; this file has no budget for the second kind.
+	CLIP_OK=1
+	_i=0
+	while [ "$_i" -lt "${#D_NAME[@]}" ]; do
+		_h="$(deliverable_height "$WIDTH" "${D_AW[$_i]}" "${D_AH[$_i]}")"
+		# The deliverable's own offset if it carries one, otherwise the run's. A deliverable that
+		# does not crop ignores both, and crop_prefix is what decides that.
+		_off="${D_OFF[$_i]}"
+		[ "$_off" != "-" ] || _off="$CROP_Y_OK"
+		if ! _crop="$(crop_prefix "$SRC_W" "$SRC_H" "${D_AW[$_i]}" "${D_AH[$_i]}" "$_off")"; then
+			say "FAIL  $CLIP — ${D_NAME[$_i]}: that crop does not fit ${SRC_W}x${SRC_H}."
+			emit_code REFUSE_CROP_WINDOW
+			emit clip_failed clip "$CLIP" source "$SRC" deliverable "${D_NAME[$_i]}"
+			CLIP_OK=0; break
+		fi
+		say "      ${D_NAME[$_i]}: ${WIDTH}x${_h}${_crop:+ cropped at $_off}"
+		render "$WIDTH" "$_h" "${D_SUFFIX[$_i]}" "$_crop" || { CLIP_OK=0; break; }
+		_i=$(( _i + 1 ))
+	done
+	if [ "$CLIP_OK" = "1" ]; then
 		OK=$((OK+1))
 	else
 		say "FAIL  $CLIP — render failed, previous output left as it was. Continuing."

@@ -450,7 +450,7 @@ print('R %.1f G %.1f B %.1f'%(sum(d[0::3])/n,sum(d[1::3])/n,sum(d[2::3])/n))"
 
 For a *saturated* reference (a sign, a plate) don't average the whole patch — it includes the white
 background and black glyphs. Sort pixels by how much of the target hue they carry and average the
-top 20–30%; the Grade Bench does the same thing, which is why its readings match these.
+top 20–30%; the app's scopes do the same thing, which is why their readings match these.
 
 **Always verify the patch is where you think it is.** Crop it to a PNG and look at it before
 trusting a number from it. One measurement here was nearly acted on before checking that the

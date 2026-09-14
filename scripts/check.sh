@@ -52,13 +52,18 @@ else
 fi
 
 echo
-echo "== grade parity (Bench JS vs ffmpeg's own output) =="
-if command -v node >/dev/null; then
+echo "== grade golden (ffmpeg's recorded output, against the chain and the probe) =="
+# It used to gate on node, because this check ran the browser Bench's JavaScript. The Bench is
+# gone (docs/adr/0007) and the per-pixel comparison moved to LiveGradeTests, which the swift block
+# below runs. What is left here is the golden itself: fresh against grade_chain, matching the probe
+# it was measured on, and still carrying a tolerance for every case — that last one is what keeps
+# LiveGradeTests from silently skipping a case and reading as coverage.
+if command -v python3 >/dev/null; then
 	./tests/grade-parity.py
 else
-	echo "node NOT INSTALLED. This is the check that catches the Bench's preview silently"
-	echo "diverging from the renderer."
-	SKIPPED="$SKIPPED grade-parity"
+	echo "python3 NOT INSTALLED. This is the check that catches a golden describing a chain that"
+	echo "no longer exists, which would leave the app's parity gate measuring nothing."
+	SKIPPED="$SKIPPED grade-golden"
 fi
 
 echo

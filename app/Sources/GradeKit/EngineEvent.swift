@@ -110,7 +110,12 @@ public struct EngineEvent: Equatable {
 /// added to the engine shows up in the interface instead of vanishing.
 public enum EngineCode: Equatable {
     case notPortrait
-    case feedWithoutCropOffset
+    case cropWithoutOffset
+    case cropWindowDoesNotFit
+    case unknownDeliverable
+    case noDeliverables
+    case unknownMatchMode
+    case batchWithoutMeasurement
     case notFound
     case noArguments
     case proofAndFrameTogether
@@ -125,7 +130,16 @@ public enum EngineCode: Equatable {
     public init(rawValue: String) {
         switch rawValue {
         case "REFUSE_NOT_PORTRAIT": self = .notPortrait
-        case "REFUSE_FEED_NO_CROP_Y": self = .feedWithoutCropOffset
+        // Was REFUSE_FEED_NO_CROP_Y. The refusal is not about the Feed deliverable — it is about
+        // ANY deliverable that crops, which is a fact about the source's shape rather than about
+        // a name. Renamed rather than aliased: two spellings of one code is how a consumer ends up
+        // handling only the one it was written against.
+        case "REFUSE_CROP_NO_OFFSET": self = .cropWithoutOffset
+        case "REFUSE_CROP_WINDOW": self = .cropWindowDoesNotFit
+        case "REFUSE_DELIVERABLE": self = .unknownDeliverable
+        case "REFUSE_NO_DELIVERABLES": self = .noDeliverables
+        case "REFUSE_MATCH_MODE": self = .unknownMatchMode
+        case "REFUSE_BATCH_NO_PROBE": self = .batchWithoutMeasurement
         case "REFUSE_NOT_FOUND": self = .notFound
         case "REFUSE_NO_ARGS": self = .noArguments
         case "REFUSE_PROOF_AND_FRAME": self = .proofAndFrameTogether
@@ -145,8 +159,18 @@ public enum EngineCode: Equatable {
         switch self {
         case .notPortrait:
             return "not portrait — see docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md"
-        case .feedWithoutCropOffset:
-            return "the 4:5 crop offset is a per-clip framing call — pick one per clip"
+        case .cropWithoutOffset:
+            return "a crop offset is a per-clip framing call — pick one per clip"
+        case .cropWindowDoesNotFit:
+            return "that shape does not fit inside this clip's frame"
+        case .unknownDeliverable:
+            return "no such deliverable — a preset, or name:aspect-w:aspect-h"
+        case .noDeliverables:
+            return "nothing selected to deliver"
+        case .unknownMatchMode:
+            return "the exposure match is off, look.json's reference, or the batch's own median"
+        case .batchWithoutMeasurement:
+            return "no clip in this run could be measured, so there is nothing to match to"
         case .notFound: return "that file is not there"
         case .noArguments: return "no clips given"
         case .proofAndFrameTogether:

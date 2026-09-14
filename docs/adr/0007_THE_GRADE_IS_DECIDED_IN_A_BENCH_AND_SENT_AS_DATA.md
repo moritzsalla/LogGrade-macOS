@@ -1,5 +1,11 @@
 # The grade is decided in a bench and sent back as data
 
+**Status: the decision stands, its venue does not.** The bench was a browser page under `bench/`,
+and that directory is gone. The Mac app's inspector does that job now. Everything below is still
+the current design — the grade is still a visual judgement, still decided against the picture, and
+still sent back as `look.json` — so read it with "bench" meaning "the app's inspector". The last
+section records the move and what it bought. The filename is pinned by a test and is left alone.
+
 A grade is a visual judgement, and the only way to make one is to look at the picture while the
 numbers move. The alternative this replaced was a round trip in prose: render a proof, watch it,
 describe what is wrong in words, have that reinterpreted into parameters, render again. It loses
@@ -32,3 +38,34 @@ block it does not itself edit through to its output verbatim.
 
 This was owed as a record by the precursor's own backlog and never written. `PROVENANCE.md` carries
 why it is being written here instead.
+
+## The bench was deleted; the decision was not
+
+The `bench/` directory — one browser page and three reference frames — is gone. Nothing above
+changes, because the app satisfies
+every property the bench was chosen for: the picture is in front of you, the references are read
+live beside it, and what comes back is `look.json` rather than a description.
+
+**The references came across.** `app/Sources/GradeKit/Scopes.swift` carries the same three the
+bench's samplers did — plate yellow RAL 1021, traffic red RAL 3020 and the traffic blue — drawn on
+a vectorscope as targets to measure from, not places to arrive at. That last phrasing is the point
+of ADR 0001 and it survived the move intact.
+
+**What the deletion bought.** The tone-and-trim arithmetic existed three times: JavaScript in the
+bench, Swift in `LiveGrade`, and the ffmpeg filter graph. It is now two. That duplication was not
+theoretical — the bench modelled the chain's *description* ("curve the luma") rather than what
+ffmpeg does, and sat about 30 code values out for months, and a second copy of the arithmetic
+inside Swift disagreed with the first on how it spelled the green coefficient while every test
+stayed green.
+
+**It cost no coverage, because the oracle was never the bench.** `tests/fixtures/grade-golden.json`
+is ffmpeg's own recorded output over a fixed probe, and `app/Tests/GradeKitTests/LiveGradeTests.swift`
+already read it. `tests/grade-parity.py` still renders that golden and still fails by name when the
+chain outruns it; what it no longer does is run JavaScript. The one thing to know about it is in its
+header: with no second implementation left that it can execute, `--regenerate` carries
+`grade_worst_by_case` forward rather than re-measuring it, so a chain change means re-measuring
+those tolerances in the Swift suite deliberately.
+
+**What was genuinely lost.** The shell-only path has no grading interface any more. Without
+building the app, a look is set by editing `look.json` by hand. That is acceptable now and would
+not have been before the app existed.

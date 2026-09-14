@@ -143,7 +143,7 @@ single-line ffprobe answer without checking what it actually printed.
   sourced `lib.sh` and called `grade_chain` silently got a chain with no look filter in it, and
   both looked correct. The golden's freshness guard caught it; nothing else would have.
 - **Look values live in `look.json`,** never hardcoded in a script. `grade.sh` broke this with its
-  own copy of the tone block, so a grade from the Bench changed `shipped.cube` and the staged path
+  own copy of the tone block, so a grade from the Bench (since removed) changed `shipped.cube` and the staged path
   while production kept rendering the old tone. `look()` has **no fallbacks** on purpose: a missing
   key must stop the run, not substitute a different look. That makes the key set a contract, and a
   test checks the scripts and `look.json` against each other.
