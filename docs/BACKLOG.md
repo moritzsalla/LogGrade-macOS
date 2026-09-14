@@ -10,7 +10,7 @@ says what came across. The universal-app work has its own plan in `docs/UNIVERSA
 
 Give iPhone Apple Log footage an incredible look, very easily. Today it takes lots of input and still
 doesn't look good. Judge every entry below by that, and by whether a non-technical photographer
-could use the result. Work that changes nothing they see or can do waits.
+could use the result.
 
 ## Next, in order
 
