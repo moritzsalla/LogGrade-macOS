@@ -23,21 +23,13 @@ final class LiveGradeTests: XCTestCase {
         return Golden(cases: cases, tolerances: tolerances)
     }
 
-    func testItMatchesFfmpegWithinTheMeasuredTolerance() throws {
-        let g = try golden()
-        let engine = try engineCheckout()
-        guard let base = g.cases.first(where: { $0["name"] as? String == "post-look" }),
-              let inputs = base["output"] as? [[Int]] else {
-            throw XCTSkip("the golden has no post-look case to grade from")
-        }
-        let perCase = g.tolerances["grade_worst_by_case"] as? [String: Double] ?? [:]
-        let margin = g.tolerances["grade_margin_code_values"] as? Double ?? 0.5
-        XCTAssertFalse(perCase.isEmpty, "no tolerances, so this test proves nothing")
-
-        var checked = 0
+    /// Measure the per-case worst divergence between LiveGrade and ffmpeg's oracle output.
+    /// ONE BODY, ONE CALL SITE. The measurement loop is factored here so both the assertion
+    /// test and the remeasure path share it, preventing the two-copies-one-edited pattern.
+    private func measurePerCase(golden g: Golden, engine: EngineLocation, inputs: [[Int]]) throws -> [String: Double] {
+        var result: [String: Double] = [:]
         for c in g.cases {
             guard let name = c["name"] as? String,
-                  let tolerance = perCase[name],
                   let params = c["params"] as? [String: Double],
                   let sat = c["saturation"] as? Double,
                   let warm = c["warmth"] as? Double,
@@ -62,16 +54,38 @@ final class LiveGradeTests: XCTestCase {
                 worst = max(worst, abs(got.1 - want.1))
                 worst = max(worst, abs(got.2 - want.2))
             }
-            // A CEILING CARRIED FORWARD, not a measurement of this code. The per-case tolerances
-            // were measured against the browser Bench's JavaScript, which modelled the same
-            // renderer; the Bench is gone and `--regenerate` now copies the numbers rather than
-            // recomputing them, saying so loudly. That is what makes this a regression gate: the
-            // ceiling is fixed, so a chain change that widens the real divergence turns this red.
-            // What it cannot do is LOWER the ceiling when a change is meant to move it — see
-            // docs/BACKLOG.md.
-            XCTAssertLessThanOrEqual(worst, tolerance + margin,
-                                     "\(name): \(worst) code values against \(tolerance)")
-            checked += 1
+            result[name] = worst
+        }
+        return result
+    }
+
+    func testItMatchesFfmpegWithinTheMeasuredTolerance() throws {
+        let g = try golden()
+        let engine = try engineCheckout()
+        guard let base = g.cases.first(where: { $0["name"] as? String == "post-look" }),
+              let inputs = base["output"] as? [[Int]] else {
+            throw XCTSkip("the golden has no post-look case to grade from")
+        }
+        let perCase = g.tolerances["grade_worst_by_case"] as? [String: Double] ?? [:]
+        let margin = g.tolerances["grade_margin_code_values"] as? Double ?? 0.5
+        XCTAssertFalse(perCase.isEmpty, "no tolerances, so this test proves nothing")
+
+        let measured = try measurePerCase(golden: g, engine: engine, inputs: inputs)
+
+        var checked = 0
+        for (name, worst) in measured {
+            if let tolerance = perCase[name] {
+                // A CEILING CARRIED FORWARD, not a measurement of this code. The per-case tolerances
+                // were measured against the browser Bench's JavaScript, which modelled the same
+                // renderer; the Bench is gone and `--regenerate` now copies the numbers rather than
+                // recomputing them, saying so loudly. That is what makes this a regression gate: the
+                // ceiling is fixed, so a chain change that widens the real divergence turns this red.
+                // What it cannot do is LOWER the ceiling when a change is meant to move it — use
+                // tests/grade-parity.py --remeasure "<reason>" to update the ceiling deliberately.
+                XCTAssertLessThanOrEqual(worst, tolerance + margin,
+                                         "\(name): \(worst) code values against \(tolerance)")
+                checked += 1
+            }
         }
         XCTAssertGreaterThan(checked, 4, "only \(checked) cases were checked")
     }
@@ -86,6 +100,27 @@ final class LiveGradeTests: XCTestCase {
         XCTAssertLessThan(shipped, 4.0,
                           "the shipped look diverges by \(shipped) code values; a live preview "
                           + "would be showing something the render does not produce")
+    }
+
+    func testRemeasureGradeWorstByCase() throws {
+        // ENVIRONMENT-GATED: this test only runs when invoked by tests/grade-parity.py --remeasure.
+        // When GRADE_REMEASURE_OUT is set, measure and write; otherwise skip silently so the normal
+        // test suite is unaffected. This is the path that Python uses to refresh the golden.
+        guard let outputPath = ProcessInfo.processInfo.environment["GRADE_REMEASURE_OUT"] else {
+            throw XCTSkip("GRADE_REMEASURE_OUT not set; this is only for --remeasure")
+        }
+
+        let g = try golden()
+        let engine = try engineCheckout()
+        guard let base = g.cases.first(where: { $0["name"] as? String == "post-look" }),
+              let inputs = base["output"] as? [[Int]] else {
+            throw XCTSkip("the golden has no post-look case to grade from")
+        }
+
+        let measured = try measurePerCase(golden: g, engine: engine, inputs: inputs)
+
+        let json = try JSONSerialization.data(withJSONObject: measured, options: [.prettyPrinted, .sortedKeys])
+        try json.write(to: URL(fileURLWithPath: outputPath))
     }
 
     // NO TIMING TEST HERE, deliberately. One used to assert a frame took under 0.1s, and it

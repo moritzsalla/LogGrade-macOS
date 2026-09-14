@@ -2066,6 +2066,37 @@ print("ok")
 	[ "$status" -eq 0 ] || fail "$output"
 }
 
+@test "--remeasure refuses without a reason" {
+	local root probe_sha
+	root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+	probe_sha="$(shasum -a 256 "$root/tests/fixtures/grade-probe.png" | cut -d' ' -f1)"
+
+	# Test with no argument
+	run python3 "$root/tests/grade-parity.py" --remeasure
+	[ "$status" -ne 0 ] || fail "should have refused"
+	echo "$output" | grep -q "remeasure requires a non-empty reason" || fail "did not print the refusal message: $output"
+
+	# Verify golden was not changed
+	local new_probe_sha
+	new_probe_sha="$(shasum -a 256 "$root/tests/fixtures/grade-probe.png" | cut -d' ' -f1)"
+	[ "$probe_sha" = "$new_probe_sha" ] || fail "probe was modified by refusal"
+}
+
+@test "--remeasure refuses with empty string" {
+	local root golden_sha
+	root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+	golden_sha="$(shasum -a 256 "$root/tests/fixtures/grade-golden.json" | cut -d' ' -f1)"
+
+	run python3 "$root/tests/grade-parity.py" --remeasure ""
+	[ "$status" -ne 0 ] || fail "should have refused empty reason"
+	echo "$output" | grep -q "remeasure requires a non-empty reason" || fail "did not print the refusal message: $output"
+
+	# Verify golden was not changed
+	local new_golden_sha
+	new_golden_sha="$(shasum -a 256 "$root/tests/fixtures/grade-golden.json" | cut -d' ' -f1)"
+	[ "$golden_sha" = "$new_golden_sha" ] || fail "golden was modified by refusal"
+}
+
 # --- the input correction -----------------------------------------------------
 # Exposure, white balance and the CDL wheels, as one generated cube that runs BEFORE Apple's
 # conversion — in log, where highlights up to 12x diffuse white still exist. A neutral correction leaves the

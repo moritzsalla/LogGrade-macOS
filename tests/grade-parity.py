@@ -103,8 +103,9 @@ reader and a writer in different files is the two-copies-one-edited failure this
 finding.
 
 Usage:
-  tests/grade-parity.py               check the golden against the chain and the probe
-  tests/grade-parity.py --regenerate  re-render the probe and the golden (needs ffmpeg)
+  tests/grade-parity.py                       check the golden against the chain and the probe
+  tests/grade-parity.py --regenerate          re-render the probe and the golden (needs ffmpeg)
+  tests/grade-parity.py --remeasure "<reason>"  measure LiveGrade divergence and update the golden
 """
 import hashlib
 import json
@@ -327,6 +328,128 @@ def worst_delta(a_rows, b_rows):
     return w
 
 
+# --- building the golden -------------------------------------------------------
+def build_golden(cases, png, measured_worst=None, measured_stamp=None):
+    """Construct the golden dict. Shared between regenerate and remeasure so there is one writer."""
+    patches = probe_patches()
+    by = {c["name"]: c for c in cases}
+
+    # Carry forward from existing golden, or use measured values if provided.
+    if measured_worst is not None:
+        worst = measured_worst
+    else:
+        worst = {}
+        if os.path.exists(GOLDEN):
+            with open(GOLDEN) as f:
+                worst = json.load(f)["tolerances"].get("grade_worst_by_case", {})
+        worst = {k: v for k, v in worst.items() if k not in CALIBRATION}
+
+    floor = worst_delta([to8(v) for v in by["floor"]["output"]], [to8(v) for v in patches])
+
+    tolerances = {
+        "conversion_floor_code_values": round(floor, 3),
+        "_floor_why": [
+            "What the `floor` case moves: identity look cube, identity curve, saturation 1,",
+            "warmth 0. So this is the RGB/YUV round-trip ffmpeg performs either side of the",
+            "chain, not anyone's maths, and every other number here has to be read on top of",
+            "it. Measured with two separate runs because measuring it with one — the real look",
+            "cube and a neutral curve — reported the look LUT's own effect as a 189-code-value",
+            "conversion error.",
+        ],
+        "grade_code_values": max(worst.values()) if worst else 0.0,
+        "_grade_why": [
+            "MEASURED, not chosen. A tolerance picked to make a test pass leaves a guard that",
+            "cannot fail, so this records what an approximation of the chain actually costs.",
+            "",
+        ],
+        "grade_worst_by_case": worst,
+        "grade_margin_code_values": 0.5,
+        "_margin_why": [
+            "Each case is asserted against its own number above, plus this margin. Both sides",
+            "are deterministic — one ffmpeg build, one Swift build — so the margin only",
+            "absorbs floating-point jitter. A single global tolerance was the alternative and",
+            "it would have let the shipped look drift by the extreme case's hundred code",
+            "values while still reporting green.",
+        ],
+    }
+
+    # Extend _grade_why based on whether we measured or carried forward.
+    if measured_worst is not None:
+        tolerances["_grade_why"].extend([
+            "MEASURED BY --remeasure, per the reason below. These numbers are fresh from",
+            "LiveGrade's per-pixel comparison against ffmpeg. They replace the carried-forward",
+            "ones and are the new ceiling for a regression gate.",
+            "",
+            "REASON: " + (measured_stamp.get("reason", "") if measured_stamp else ""),
+            "",
+        ])
+    else:
+        tolerances["_grade_why"].extend([
+            "CARRIED FORWARD BY --regenerate, NOT RE-MEASURED. These were measured against the",
+            "browser Bench's JavaScript, which has since been deleted (docs/adr/0007). The only",
+            "approximation left is Swift's LiveGrade, and tests/grade-parity.py cannot run it,",
+            "so it copies these numbers rather than inventing or dropping them. A CHAIN CHANGE",
+            "MAKES THEM STALE: re-measure with",
+            "  tests/grade-parity.py --remeasure \"<reason>\"",
+            "",
+        ])
+
+    tolerances["_grade_why"].extend([
+        "WHERE IT COMES FROM, and it is not where it was assumed to be. Decomposed on the",
+        "shipped look, worst case in 8-bit code values:",
+        "",
+        "                 cube    ramp    refs",
+        "  tone-only     36.21    2.49   28.69",
+        "  trims-only     6.32    2.83    5.08",
+        "  shipped       28.81    3.97   23.28",
+        "",
+        "So the trims are the SMALL half. The Bench's saturation and warmth stand-ins cost",
+        "about six code values, and the two partly cancel, which is why `shipped` measures",
+        "lower than `tone-only` alone.",
+        "",
+        "The large half is the tone stage's APPLICATION. On neutral tones the Bench is",
+        "faithful to within 2.5 code values, so the curve and its domain are right — and a",
+        "separate experiment confirmed ffmpeg curves a FULL-range luma, not a 16-235 one",
+        "(the limited-range model measured 16.8 against 2.49). What diverges is saturated",
+        "colour: the Bench subtracts one luma delta from all three channels, which drives",
+        "already-low channels below zero and clamps them, while the renderer curves the Y",
+        "plane and merges the ORIGINAL chroma back. The worst patch, a saturated orange,",
+        "goes to 187.7/0.0/0.0 in the Bench against 223.9/25.8/0.0 in the renderer.",
+        "",
+        "That is ADR 0003 seen from the other side: an equal RGB offset is not what",
+        "mergeplanes=0x001112 does. The consequence for the app is concrete — its Metal",
+        "preview must curve Y and keep CbCr, not shift RGB — and it is a requirement",
+        "measured here rather than assumed.",
+    ])
+
+    if measured_stamp:
+        tolerances["grade_worst_measured"] = measured_stamp
+
+    golden = {
+        "_comment": [
+            "Generated by tests/grade-parity.py. Do not hand-edit: the harness that",
+            "reads this file is the one that writes it, so an edited value is a claim nothing",
+            "produced.",
+            "",
+            "chain_fingerprint hashes grade_chain's SHAPE, with the parameters and the checkout",
+            "path tokenised out. It is how freshness is decided: a chain edit that outruns this",
+            "file fails by name. mtime cannot work, because git does not preserve it.",
+            "",
+            "output holds ffmpeg's own result per probe patch, 16-bit RGB. That is what makes",
+            "ffmpeg the oracle rather than anyone's transcription of it.",
+        ],
+        "chain_fingerprint": chain_fingerprint(),
+        "probe": {
+            "sha256": hashlib.sha256(png).hexdigest(),
+            "patch": PATCH, "grid_w": GRID_W,
+            "cube_steps": CUBE_STEPS, "ramp_steps": RAMP_STEPS, "refs": len(REFS),
+        },
+        "tolerances": tolerances,
+        "cases": cases,
+    }
+    return golden
+
+
 # --- regenerate ---------------------------------------------------------------
 def regenerate():
     if not os.path.isdir(FIXTURES):
@@ -345,103 +468,13 @@ def regenerate():
                           warmth=case.warm, look=case.look, output=out))
         print("render  %-15s %d samples (%s look LUT)" % (case.name, len(out), case.look))
 
-    by = {c["name"]: c for c in cases}
-
-    # CARRIED FORWARD, NOT MEASURED HERE. These numbers are how far an approximation of the chain
-    # sits from ffmpeg, and the only approximation left is Swift's `LiveGrade`, which this file
-    # cannot run — the JavaScript one went with the Bench. Inventing them is worse than copying
-    # them and dropping them is worse still: LiveGradeTests reads this field, and an absent one
-    # leaves `XCTAssertFalse(perCase.isEmpty)` as the only guard against a vacuous pass.
-    worst = {}
-    if os.path.exists(GOLDEN):
-        with open(GOLDEN) as f:
-            worst = json.load(f)["tolerances"].get("grade_worst_by_case", {})
-    worst = {k: v for k, v in worst.items() if k not in CALIBRATION}
-
-    floor = worst_delta([to8(v) for v in by["floor"]["output"]], [to8(v) for v in patches])
-
-    golden = {
-        "_comment": [
-            "Generated by tests/grade-parity.py --regenerate. Do not hand-edit: the harness that",
-            "reads this file is the one that writes it, so an edited value is a claim nothing",
-            "produced.",
-            "",
-            "chain_fingerprint hashes grade_chain's SHAPE, with the parameters and the checkout",
-            "path tokenised out. It is how freshness is decided: a chain edit that outruns this",
-            "file fails by name. mtime cannot work, because git does not preserve it.",
-            "",
-            "output holds ffmpeg's own result per probe patch, 16-bit RGB. That is what makes",
-            "ffmpeg the oracle rather than anyone's transcription of it.",
-        ],
-        "chain_fingerprint": chain_fingerprint(),
-        "probe": {
-            "sha256": hashlib.sha256(png).hexdigest(),
-            "patch": PATCH, "grid_w": GRID_W,
-            "cube_steps": CUBE_STEPS, "ramp_steps": RAMP_STEPS, "refs": len(REFS),
-        },
-        "tolerances": {
-            "conversion_floor_code_values": round(floor, 3),
-            "_floor_why": [
-                "What the `floor` case moves: identity look cube, identity curve, saturation 1,",
-                "warmth 0. So this is the RGB/YUV round-trip ffmpeg performs either side of the",
-                "chain, not anyone's maths, and every other number here has to be read on top of",
-                "it. Measured with two separate runs because measuring it with one — the real look",
-                "cube and a neutral curve — reported the look LUT's own effect as a 189-code-value",
-                "conversion error.",
-            ],
-            "grade_code_values": max(worst.values()) if worst else 0.0,
-            "_grade_why": [
-                "MEASURED, not chosen. A tolerance picked to make a test pass leaves a guard that",
-                "cannot fail, so this records what an approximation of the chain actually costs.",
-                "",
-                "CARRIED FORWARD BY --regenerate, NOT RE-MEASURED. These were measured against the",
-                "browser Bench's JavaScript, which has since been deleted (docs/adr/0007). The only",
-                "approximation left is Swift's LiveGrade, and tests/grade-parity.py cannot run it,",
-                "so it copies these numbers rather than inventing or dropping them. A CHAIN CHANGE",
-                "MAKES THEM STALE: re-measure in app/Tests/GradeKitTests/LiveGradeTests.swift and",
-                "write the new numbers in deliberately.",
-                "",
-                "WHERE IT COMES FROM, and it is not where it was assumed to be. Decomposed on the",
-                "shipped look, worst case in 8-bit code values:",
-                "",
-                "                 cube    ramp    refs",
-                "  tone-only     36.21    2.49   28.69",
-                "  trims-only     6.32    2.83    5.08",
-                "  shipped       28.81    3.97   23.28",
-                "",
-                "So the trims are the SMALL half. The Bench's saturation and warmth stand-ins cost",
-                "about six code values, and the two partly cancel, which is why `shipped` measures",
-                "lower than `tone-only` alone.",
-                "",
-                "The large half is the tone stage's APPLICATION. On neutral tones the Bench is",
-                "faithful to within 2.5 code values, so the curve and its domain are right — and a",
-                "separate experiment confirmed ffmpeg curves a FULL-range luma, not a 16-235 one",
-                "(the limited-range model measured 16.8 against 2.49). What diverges is saturated",
-                "colour: the Bench subtracts one luma delta from all three channels, which drives",
-                "already-low channels below zero and clamps them, while the renderer curves the Y",
-                "plane and merges the ORIGINAL chroma back. The worst patch, a saturated orange,",
-                "goes to 187.7/0.0/0.0 in the Bench against 223.9/25.8/0.0 in the renderer.",
-                "",
-                "That is ADR 0003 seen from the other side: an equal RGB offset is not what",
-                "mergeplanes=0x001112 does. The consequence for the app is concrete — its Metal",
-                "preview must curve Y and keep CbCr, not shift RGB — and it is a requirement",
-                "measured here rather than assumed.",
-            ],
-            "grade_worst_by_case": worst,
-            "grade_margin_code_values": 0.5,
-            "_margin_why": [
-                "Each case is asserted against its own number above, plus this margin. Both sides",
-                "are deterministic — one ffmpeg build, one Swift build — so the margin only",
-                "absorbs floating-point jitter. A single global tolerance was the alternative and",
-                "it would have let the shipped look drift by the extreme case's hundred code",
-                "values while still reporting green.",
-            ],
-        },
-        "cases": cases,
-    }
+    golden = build_golden(cases, png)
     with open(GOLDEN, "w") as f:
         json.dump(golden, f, indent=1)
         f.write("\n")
+
+    floor = golden["tolerances"]["conversion_floor_code_values"]
+    worst = golden["tolerances"]["grade_worst_by_case"]
     print("\nfloor   %.3f code values (RGB/YUV round-trip)" % floor)
     print("wrote   %s (%d bytes)" % (os.path.relpath(GOLDEN, ROOT), os.path.getsize(GOLDEN)))
     if worst:
@@ -450,13 +483,97 @@ def regenerate():
               "  an approximation of the chain, and the only one left is Swift's LiveGrade, which\n"
               "  this harness cannot run.\n"
               "  IF YOU CHANGED THE CHAIN THEY ARE NOW STALE. Re-measure with\n"
-              "    swift test --package-path app --filter LiveGradeTests\n"
-              "  and write the new numbers into the golden deliberately."
+              "    tests/grade-parity.py --remeasure \"<reason>\"\n"
+              "  and commit the changed golden with the reason in the message."
               % (len(worst), max(worst.values())), file=sys.stderr)
     else:
         print("\nNO TOLERANCES CARRIED FORWARD — there was no golden to copy them from.\n"
               "  LiveGradeTests will fail on an empty grade_worst_by_case, which is the intended\n"
               "  direction: measure them there and write them in.", file=sys.stderr)
+
+
+# --- remeasure -----------------------------------------------------------------
+def remeasure(reason):
+    """Measure LiveGrade's divergence against the fresh ffmpeg oracle and update the golden."""
+    if not reason or not reason.strip():
+        sys.exit("--remeasure requires a non-empty reason. Usage:\n"
+                 "  tests/grade-parity.py --remeasure \"reason for this measurement\"")
+
+    if not os.path.isdir(FIXTURES):
+        os.makedirs(FIXTURES)
+    png = probe_png_bytes()
+    with open(PROBE, "wb") as f:
+        f.write(png)
+    patches = probe_patches()
+    w, h = probe_size(len(patches))
+    print("probe   %dx%d, %d patches, %d bytes" % (w, h, len(patches), len(png)))
+
+    cases = []
+    for case in CASES:
+        out = render_case(case.params, case.sat, case.warm, PROBE, case.look)
+        cases.append(dict(name=case.name, params=case.params, saturation=case.sat,
+                          warmth=case.warm, look=case.look, output=out))
+        print("render  %-15s %d samples (%s look LUT)" % (case.name, len(out), case.look))
+
+    # Invoke Swift to measure LiveGrade against the golden's ffmpeg output.
+    import tempfile
+    from datetime import datetime
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        env = os.environ.copy()
+        env["GRADE_REMEASURE_OUT"] = tmp_path
+        result = subprocess.run(["swift", "test", "--package-path", os.path.join(ROOT, "app"),
+                                "--filter", "LiveGradeTests/testRemeasureGradeWorstByCase"],
+                               env=env, capture_output=True, text=True, cwd=ROOT)
+        if result.returncode != 0:
+            sys.exit("Swift measurement failed:\n" + result.stderr)
+
+        with open(tmp_path) as f:
+            all_measured = json.load(f)
+
+        # Exclude calibration cases, which are not tolerances.
+        measured_worst = {k: v for k, v in all_measured.items() if k not in CALIBRATION}
+
+        measured_stamp = {
+            "date": datetime.utcnow().isoformat() + "Z",
+            "reason": reason,
+            "implementation": "LiveGrade"
+        }
+
+        golden = build_golden(cases, png, measured_worst=measured_worst, measured_stamp=measured_stamp)
+        with open(GOLDEN, "w") as f:
+            json.dump(golden, f, indent=1)
+            f.write("\n")
+
+        floor = golden["tolerances"]["conversion_floor_code_values"]
+        print("\nfloor   %.3f code values (RGB/YUV round-trip)" % floor)
+        print("wrote   %s (%d bytes)" % (os.path.relpath(GOLDEN, ROOT), os.path.getsize(GOLDEN)))
+
+        old_worst = {}
+        if os.path.exists(GOLDEN):
+            try:
+                with open(GOLDEN) as f:
+                    prev = json.load(f)
+                    old_worst = prev.get("tolerances", {}).get("grade_worst_by_case", {})
+            except:
+                pass
+
+        print("\nMEASURED GRADE_WORST_BY_CASE with --remeasure:")
+        print("  reason: %s" % reason)
+        for name in sorted(measured_worst.keys()):
+            old = old_worst.get(name, "—")
+            new = measured_worst[name]
+            if isinstance(old, (int, float)):
+                delta = new - old
+                sign = "+" if delta >= 0 else ""
+                print("  %-15s old %.3f → new %.3f  (%s%.3f)" % (name, old, new, sign, delta))
+            else:
+                print("  %-15s new %.3f" % (name, new))
+
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 # --- check --------------------------------------------------------------------
@@ -574,6 +691,21 @@ def check():
 
 if __name__ == "__main__":
     if "--regenerate" in sys.argv[1:]:
+        if "--remeasure" in sys.argv[1:]:
+            sys.exit("--regenerate and --remeasure are mutually exclusive")
         regenerate()
         sys.exit(0)
+
+    # Look for --remeasure "<reason>"
+    remeasure_idx = None
+    for i, arg in enumerate(sys.argv[1:]):
+        if arg == "--remeasure":
+            remeasure_idx = i + 1
+            break
+
+    if remeasure_idx is not None:
+        reason = sys.argv[remeasure_idx + 1] if remeasure_idx + 1 < len(sys.argv) else ""
+        remeasure(reason)
+        sys.exit(0)
+
     sys.exit(check())
