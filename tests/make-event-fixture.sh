@@ -15,7 +15,9 @@
 #
 # Usage:  ./tests/make-event-fixture.sh [--check]
 #           (no flag) rewrite the fixture
-#           --check   print the stream and exit non-zero if it differs from the fixture
+#           --check   print the stream and write nothing; the caller compares it with the fixture
+#                     (tests/lib.bats does). Exits 0 whether or not it differs; non-zero only if
+#                     the engine run fails, and 3 without ffmpeg.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE="$ROOT/tests/fixtures/events.jsonl"
@@ -40,8 +42,8 @@ make_tagged_clip 128 72 bt709 bt709 bt709 "$WORK/src/WIDE.mov"
 
 STREAM="$(JSON=1 DRY=1 MATCH=0 GRADE_WORK_DIR="$WORK" "$ROOT/scripts/grade.sh" "$WORK/src" 2>/dev/null \
 	| sed -e "s|$WORK|<WORK>|g" \
-	      -e 's|"report":"[^"]*"|"report":"<REPORT>"|' \
-	      -e 's|"available_gb":[0-9]*|"available_gb":"<GB>"|')"
+		-e 's|"report":"[^"]*"|"report":"<REPORT>"|' \
+		-e 's|"available_gb":[0-9]*|"available_gb":"<GB>"|')"
 
 if [ "$MODE" = "--check" ]; then
 	printf '%s\n' "$STREAM"

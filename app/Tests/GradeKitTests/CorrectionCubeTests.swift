@@ -63,9 +63,9 @@ final class CorrectionCubeTests: XCTestCase {
 
     /// The published transfer function's two measured properties, which are what make the port
     /// exact rather than fitted. Both are stated in the generator's header.
-    func testTheTransferFunctionRoundTripsAndHoldsTwelveStops() {
+    func testTheTransferFunctionRoundTripsAndPeaksAtTwelve() {
         XCTAssertEqual(CorrectionCube.decode(1.0), 12.0, accuracy: 0.0001,
-                       "decode(1.0) is the twelve stops of headroom")
+                       "decode(1.0) is 12x diffuse white, about 3.6 stops of headroom")
         for i in 0...100 {
             let p = Double(i) / 100
             XCTAssertEqual(CorrectionCube.encode(CorrectionCube.decode(p)), p, accuracy: 1e-12,

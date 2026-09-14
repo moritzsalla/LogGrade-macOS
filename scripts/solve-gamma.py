@@ -22,7 +22,9 @@ nobody has looked at.
 import math
 import sys
 
+# The clamp judged in the docstring. ToneCurve.solvedGamma carries the same bounds.
 CLAMP_LO, CLAMP_HI = 1.2, 3.2
+USAGE = "Usage: solve-gamma.py <clip-yavg> <reference-yavg> <reference-gamma>"
 
 
 def solve(clip_yavg, reference_yavg, reference_gamma, peak=1023.0):
@@ -38,7 +40,7 @@ def solve(clip_yavg, reference_yavg, reference_gamma, peak=1023.0):
 
 def main(argv):
 	if len(argv) != 4:
-		print(__doc__.strip().splitlines()[2], file=sys.stderr)
+		print(USAGE, file=sys.stderr)
 		return 2
 	try:
 		clip, reference, gamma = (float(a) for a in argv[1:])

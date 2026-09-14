@@ -32,16 +32,17 @@ also edits is an import nobody can verify.
 
 ## Inherited debt, known at import
 
-Each of these is a thing to fix *here*, since the precursor cannot be touched.
+Each of these was a thing to fix *here*, since the precursor cannot be touched. All four are
+resolved; the list stays so the precursor's behaviour is not mistaken for this fork's.
 
-- The stale-transform branch warns and renders anyway. It is the one place the pipeline does not
-  fail loudly.
-- An unmerged branch in the precursor carries input validation that never landed — a numeric guard
-  for every value spliced into a filter graph, and a clip-name guard. It cannot be merged there
-  because it predates the chain dedupe and would reinstate an inlined copy of the chain. It belongs
-  here instead.
-- `luts/apple/SOURCE.txt` says the Apple Log transfer function is proprietary. Apple published it,
-  in the Apple Log Profile white paper. The Rec.709 cube is the part that is not reproducible,
-  because it carries an unpublished display rendering.
-- `docs/BACKLOG.md` asks for a fifth decision record when six exist, and `docs/PIPELINE.md` still
-  opens with "the four decisions".
+- ~~The stale-transform branch warns and renders anyway.~~ Resolved: `03-final.sh` refuses a stale
+  transform and emits `STALE_TRANSFORM`, unless `ACCEPT_STALE=1` says unstabilised is intended;
+  `grade.sh` recomputes one instead.
+- ~~An unmerged branch in the precursor carries input validation that never landed.~~ Resolved:
+  `require_number` and `require_clip_name` live in `scripts/lib.sh`, and the entry scripts call them
+  on every value spliced into a graph or a path.
+- ~~`luts/apple/SOURCE.txt` says the Apple Log transfer function is proprietary.~~ Resolved: it now
+  says the function is published and that the Rec.709 cube's display rendering is what is not.
+- ~~`docs/BACKLOG.md` asks for a fifth decision record when six exist, and `docs/PIPELINE.md` still
+  opens with "the four decisions".~~ Resolved: the BACKLOG item is struck, and `docs/PIPELINE.md`
+  points at `docs/adr/` as the index instead of counting it.

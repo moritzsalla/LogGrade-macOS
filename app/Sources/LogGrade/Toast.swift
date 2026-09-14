@@ -49,7 +49,7 @@ struct ToastView: View {
         if let toast = toaster.current {
             HStack(spacing: Space.s) {
                 Image(systemName: toast.symbol)
-                    .font(.system(size: 15))
+                    .font(Type.symbol)
                     .foregroundColor(Palette.plate)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(toast.title).font(Type.label).foregroundColor(Palette.ink)

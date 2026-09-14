@@ -150,7 +150,7 @@ struct QueuePanel: View {
         Binding(get: { queue.concurrency },
                 set: {
                     queue.concurrency = $0
-                    UserDefaults.standard.set($0, forKey: "concurrency")
+                    UserDefaults.standard.set($0, forKey: DefaultsKey.concurrency)
                 })
     }
 }

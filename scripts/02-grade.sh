@@ -12,8 +12,7 @@
 # must be yuv444p10le. This stage adds only the ProRes encode: no CST (stage 01 did it) and no
 # setparams (nothing downstream here negotiates a colourspace).
 #
-# The saturation and warmth below are a CREATIVE choice made by eye in the Grade Bench, not a
-# correction. Measured against the standardised colours in frame, the Apple CST's own colour is
+# The saturation and warmth below are a CREATIVE choice made by eye, not a correction. Measured against the standardised colours in frame, the Apple CST's own colour is
 # already accurate (traffic blue lands at B/G 1.99 against a 1.98 spec with nothing applied). The
 # values here deliberately depart from that. Change them because the look should change, never
 # because a reading looks "wrong" — being off-spec here is the intent.
@@ -30,7 +29,7 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(resolve_work_dir "$ROOT")"
 BASELINE="$(baseline_path "$WORK" "$CLIP")"
 TONE="$ROOT/luts/tone/shipped.cube"
-# Graded by eye against the RAL references in frame, then sent back as data. Deliberately off-spec:
+# Graded by eye against the RAL references in frame, and kept as data. Deliberately off-spec:
 # saturation 1.27 puts the traffic blue at B/G 2.39 against a 1.98 spec. That is a grade, not an
 # error — accuracy is the reference you depart from on purpose.
 #
@@ -70,6 +69,7 @@ if [ "$CORRECT_STATE" = "active" ] || [ "$HAL_STATE" = "active" ]; then
 	emit_code REFUSE_STAGED_PRE_CONVERSION
 	exit 1
 fi
+# Same margin as 01-baseline.sh, over the same measurement.
 check_disk_space "$WORK/dist" 10
 # Create the output directory. This used to rely on a checked-in dist/*/.gitkeep marker, which
 # is wrong the moment a work dir is set: the marker was in the repo and the output was not.

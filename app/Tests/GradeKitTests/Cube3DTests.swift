@@ -24,7 +24,6 @@ final class Cube3DTests: XCTestCase {
     func testItInterpolatesTheWayFfmpegDoes() throws {
         let engine = try engineCheckout()
         guard let ffmpeg = EngineLocation.resolveTool("ffmpeg") else { throw XCTSkip("no ffmpeg") }
-        _ = engine
 
         let size = 5
         var random = Random()
@@ -107,6 +106,9 @@ final class Cube3DTests: XCTestCase {
 
     func testItReadsTheCubesTheRenderApplies() throws {
         let engine = try engineCheckout()
+        // Apple's licence keeps this cube out of the repo, so a fresh clone does not have it.
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: engine.appleCube.path),
+                          "Apple's conversion cube is absent — see luts/apple/SOURCE.txt")
         let conversion = try Cube3D(contentsOf: engine.appleCube)
         XCTAssertEqual(conversion.size, 65)
         XCTAssertEqual(conversion.samples.count, 65 * 65 * 65)

@@ -9,16 +9,16 @@ import SwiftUI
 /// ObservableObject, not @Observable: the latter is macOS 14 and this builds against 13.
 final class GradeModel: ObservableObject {
     @Published var look: Look
-        /// The picture, in its OWN observable. A new frame must not rebuild the inspector, which is
+    /// The picture, in its OWN observable. A new frame must not rebuild the inspector, which is
     /// what made a drag feel slow even though grading the frame took four milliseconds.
     let preview = LivePreview()
     // ONE PLACE, not every call site. A clip becomes the selected one from a drop, a click, the
     // arrow keys and an opened project, and the live tier needs its source frame however it got
     // there. Hanging it off the property means a new path cannot forget.
     @Published var selectedClip: ClipList.Entry? { didSet { prepareLivePreview() } }
-    @Published var previewSeconds: Double = 1 { didSet { prepareLivePreview() } }
+    let previewSeconds: Double = 1
     /// Held down rather than clicked. A colourist compares by holding a key and letting go, which
-    /// is what the Bench does too; a long press on a label was undiscoverable and awkward.
+    /// is what the Bench did too; a long press on a label was undiscoverable and awkward.
     @Published var isComparing = false
     /// The look the last ENGINE render used. Comparing it with the current one is how the panel
     /// knows the exact frame is out of date. The live tier keeps the picture current in between,
@@ -51,7 +51,7 @@ final class GradeModel: ObservableObject {
 
     func setStage(_ title: String, open: Bool) {
         if open { openStages.insert(title) } else { openStages.remove(title) }
-        UserDefaults.standard.set(Array(openStages), forKey: "openStages")
+        UserDefaults.standard.set(Array(openStages), forKey: DefaultsKey.openStages)
     }
 
     /// The cubes on disk, read once: the interface offers what is there.
@@ -72,11 +72,7 @@ final class GradeModel: ObservableObject {
     private var sourceClip: URL?
     private var sourceSeconds: Double?
     private var isFetchingSource = false
-    /// Set while a control is under the pointer, which is only used to decide whether a render in
-    /// flight is worth cancelling. It is NOT what decides whether the live tier runs: a preset or
-    /// a film look changes the picture just as much as a drag does, and used to cost a three
-    /// second render to see.
-    private var isDragging = false
+    private static let sourceFrameHeight = 480
     /// The gamma the engine will apply to this clip. The midtone slider holds the REFERENCE
     /// gamma, and the two are different numbers on every clip that was not shot at the exposure
     /// the look was tuned at — so the interface shows both rather than letting the readout claim a
@@ -92,6 +88,10 @@ final class GradeModel: ObservableObject {
     /// 60 times a second.
     private var correctionCube: Cube3D?
     private var correctionFor: Look.Correct?
+    /// The engine's own default (`CORRECT_SIZE` in grade.sh), because the live picture has to be
+    /// built from the cube the render builds. The error at 17, 33 and 65 is measured in
+    /// `make-correct-lut.py`.
+    private static let correctionCubeSize = 33
     /// The source through the colour stages, kept so a tone or trim drag costs only the curve.
     /// Dragging midtone does not move the correction, the conversion or the look, and those three
     /// are most of the work.
@@ -113,6 +113,11 @@ final class GradeModel: ObservableObject {
             printLUT = look.printLUT; printStrength = look.printStrength
         }
     }
+
+    /// Whether a stem asks for a cube at all. Mirrors `EngineLocation.lookCube(named:)`, which
+    /// answers nil both for "none" and for a cube it cannot find — and only the first of those is
+    /// a picture the live tier may draw without the stage.
+    private static func namesCube(_ stem: String) -> Bool { stem != "none" && !stem.isEmpty }
 
     private func lookCube(for stem: String) -> Cube3D? {
         filmCube(at: engine.lookCube(named: stem))
@@ -153,7 +158,6 @@ final class GradeModel: ObservableObject {
     /// away from it — so it is stopped here rather than left to finish and be discarded. Without
     /// this, letting go and immediately grabbing again gives three dead seconds.
     func beginDrag() {
-        isDragging = true
         // Unless nothing is live yet for THIS clip at THIS timecode. `sourceImage` alone is not
         // that question: right after a clip switch it still holds the previous clip's frame, so
         // checking it cancelled the very render that would have fetched the new one, and grabbing
@@ -166,8 +170,6 @@ final class GradeModel: ObservableObject {
             preview.isRendering = false
         }
     }
-
-    func endDrag() { isDragging = false }
 
     /// What the live tier is currently grading, and what it should be grading.
     ///
@@ -206,7 +208,7 @@ final class GradeModel: ObservableObject {
         // Built here, on the main thread, because they read the caches this class owns.
         if correctionFor != wanted.correct {
             correctionCube = wanted.correct.isNeutral ? nil
-                : CorrectionCube.cube(for: wanted.correct, size: 33)
+                : CorrectionCube.cube(for: wanted.correct, size: Self.correctionCubeSize)
             correctionFor = wanted.correct
         }
         // A correction the engine would refuse gets no live picture, rather than a picture of
@@ -226,11 +228,27 @@ final class GradeModel: ObservableObject {
             preview.say("That halation tint isn’t a value the engine accepts.", failure: true)
             return
         }
+        // The same refusal for a film cube that was named and would not load: drawn without it,
+        // the picture is a grade with a stage missing that reads as the grade.
+        let lookStage = lookCube(for: wanted.lookLUT)
+        if Self.namesCube(wanted.lookLUT) && lookStage == nil {
+            gradeInFlight = false
+            preview.isLive = false
+            preview.say("The film look “\(wanted.lookLUT)” couldn’t be read.", failure: true)
+            return
+        }
+        let printStage = printCube(for: wanted.printLUT)
+        if Self.namesCube(wanted.printLUT) && printStage == nil {
+            gradeInFlight = false
+            preview.isLive = false
+            preview.say("The print “\(wanted.printLUT)” couldn’t be read.", failure: true)
+            return
+        }
         let stages = LiveChain.colourStages(correction: correctionCube, halation: halation,
                                             conversion: conversion,
-                                            look: lookCube(for: wanted.lookLUT),
+                                            look: lookStage,
                                             lookStrength: wanted.lookStrength,
-                                            print: printCube(for: wanted.printLUT),
+                                            print: printStage,
                                             printStrength: wanted.printStrength)
         let reuse = convertedFor == ColourKey(wanted) ? convertedFrame : nil
         let grade = LiveGrade(curve: curve, saturation: wanted.colour.saturation,
@@ -277,13 +295,19 @@ final class GradeModel: ObservableObject {
     /// those is the class of bug this repo keeps finding.
     ///
     /// `look` is passed in rather than read here: this runs off the main thread, and reading a
-    /// published property from one is the mistake CLAUDE.md names.
+    /// published property from one races the main thread's writes to it.
     private func refreshSource(for clip: ClipList.Entry, seconds: Double, look: Look) {
-        guard let frame = try? renderer.render(clip: clip.url, seconds: seconds, look: look,
-                                               height: 480, stage: .source),
-              let image = NSImage(contentsOf: frame.url)?
-                .cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-            DispatchQueue.main.async { self.isFetchingSource = false }
+        let frame: PreviewRenderer.Frame
+        do {
+            frame = try renderer.render(clip: clip.url, seconds: seconds, look: look,
+                                        height: Self.sourceFrameHeight, stage: .source)
+        } catch {
+            sourceFailed("The live preview couldn’t read this clip: \(error)")
+            return
+        }
+        guard let image = NSImage(contentsOf: frame.url)?
+            .cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            sourceFailed("The live preview couldn’t decode the frame it rendered.")
             return
         }
         DispatchQueue.main.async {
@@ -302,6 +326,15 @@ final class GradeModel: ObservableObject {
                 self.measuredYAVG[clip.url] = yavg
                 self.refreshCurve()
             }
+        }
+    }
+
+    /// SAID, not only reset. Clearing the flag alone left the controls answering nothing with no
+    /// reason given, which reads as the app being slow rather than as a clip it cannot read.
+    private func sourceFailed(_ reason: String) {
+        DispatchQueue.main.async {
+            self.isFetchingSource = false
+            self.preview.say(reason, failure: true)
         }
     }
 
@@ -336,7 +369,7 @@ final class GradeModel: ObservableObject {
         // Read once, here: it is 65 points and parsing it costs more than a frame does. A missing
         // cube is not fatal — preflight reports it, and the live tier simply does not start.
         self.conversionCube = try? Cube3D(contentsOf: engine.appleCube)
-        if let remembered = UserDefaults.standard.stringArray(forKey: "openStages") {
+        if let remembered = UserDefaults.standard.stringArray(forKey: DefaultsKey.openStages) {
             self.openStages = Set(remembered)
         }
         refreshCurve()
@@ -400,17 +433,15 @@ final class GradeModel: ObservableObject {
     }
 
     func saveProject(to url: URL) throws {
-        var copy = project
-        copy.outputDirectory = project.outputDirectory
-        try copy.serialised().write(to: url, options: .atomic)
+        try project.serialised().write(to: url, options: .atomic)
         projectURL = url
-        UserDefaults.standard.set(url, forKey: "lastProject")
+        UserDefaults.standard.set(url, forKey: DefaultsKey.lastProject)
     }
 
     func openProject(at url: URL) throws {
         project = try Project(data: try Data(contentsOf: url))
         projectURL = url
-        UserDefaults.standard.set(url, forKey: "lastProject")
+        UserDefaults.standard.set(url, forKey: DefaultsKey.lastProject)
         if let active = project.active {
             look = active.look
             refreshCurve()
@@ -441,29 +472,34 @@ final class GradeModel: ObservableObject {
     /// look is written to a file per run and handed over with LOOK_FILE, so a render never edits
     /// the checkout's own look.json.
     func convert(queue: RenderQueue) {
-        guard let clips = clipEntries else { return }
-        queue.clearFinished()
-        queue.enqueue(clips.map { (url: $0.url, stem: $0.stem, frames: $0.fields?.frameCount) })
+        guard let clips = clipEntries, let destination = outputDirectory else { return }
         let project = self.project
-        let look = self.look
         // The look file is scratch and stays in the scratch directory; the RENDER goes where the
         // person said, or beside their footage.
-        let work = self.workDirectory
-        guard let destination = outputDirectory else { return }
-        queue.enqueue([])
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
-            let lookFile = work.appendingPathComponent("render-look.json")
-            try? FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-            try? look.write(to: lookFile)
-            try? FileManager.default.createDirectory(at: destination,
-                                                      withIntermediateDirectories: true)
+        let lookFile = workDirectory.appendingPathComponent("render-look.json")
+        // BEFORE ANYTHING IS QUEUED, and refused outright on failure. A look file that could not
+        // be written is the PREVIOUS run's look still on disk, so carrying on renders a whole
+        // shoot with a grade nobody is looking at.
+        do {
+            try FileManager.default.createDirectory(at: workDirectory,
+                                                    withIntermediateDirectories: true)
+            try look.write(to: lookFile)
+            try FileManager.default.createDirectory(at: destination,
+                                                    withIntermediateDirectories: true)
+        } catch {
+            toaster?.show("exclamationmark.triangle.fill", "Export not started",
+                          String(describing: error))
+            return
+        }
+        queue.clearFinished()
+        queue.enqueue(clips.map { (url: $0.url, stem: $0.stem, frames: $0.fields?.frameCount) })
+        // Off the main thread: `start` returns only when the whole queue has run.
+        DispatchQueue.global(qos: .userInitiated).async {
             queue.start(environment: { stem in
                 var env = project.environment(for: stem, lookFile: lookFile)
                 env["GRADE_WORK_DIR"] = destination.path
                 return env
             })
-            _ = self
         }
     }
 
@@ -556,7 +592,6 @@ final class GradeModel: ObservableObject {
         project.blockers(for: clipNames)
     }
 
-
     func renderPreview() {
         guard let clip = selectedClip, clip.isUsable else { return }
         let look = self.look
@@ -623,4 +658,12 @@ final class GradeModel: ObservableObject {
             }
         }
     }
+}
+
+/// Every preference the app remembers, named once. A key is spelled in two places — where it is
+/// written and where it is read — and a typo in either is a setting that silently never comes back.
+enum DefaultsKey {
+    static let lastProject = "lastProject"
+    static let openStages = "openStages"
+    static let concurrency = "concurrency"
 }

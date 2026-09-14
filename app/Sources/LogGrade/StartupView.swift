@@ -14,7 +14,7 @@ import SwiftUI
 /// actually runnable. A preflight failure discovered here costs a sentence; discovered at convert
 /// time it costs a three-minute render.
 struct StartupView: View {
-    let problems: [EngineLocation.Problem]
+    let problems: [String]
     let recentProject: URL?
     let onOpenProject: (URL) -> Void
     let onChooseFiles: () -> Void
@@ -26,7 +26,7 @@ struct StartupView: View {
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
                     .frame(width: 72, height: 72)
-                Text("LogGrade").font(.system(size: 22, weight: .semibold))
+                Text("LogGrade").font(Type.splash)
                     .foregroundColor(Palette.ink)
                 Text("Grade Apple Log clips from an iPhone and deliver them for Instagram.")
                     .font(Type.label)
@@ -67,7 +67,7 @@ struct StartupView: View {
                         .font(Type.label)
                         .foregroundColor(Palette.lamp)
                     ForEach(problems.indices, id: \.self) { i in
-                        Text(problems[i].description)
+                        Text(problems[i])
                             .font(Type.caption)
                             .foregroundColor(Palette.inkSecondary)
                             .fixedSize(horizontal: false, vertical: true)

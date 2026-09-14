@@ -1,7 +1,7 @@
-# Grading pipeline — 11 Sep house shoot
+# Grading pipeline — vocabulary
 
-The vocabulary this project uses for turning one shoot's iPhone ProRes / Apple Log recordings into
-Instagram deliverables. Several of these words were being used for two things at once during
+The vocabulary this project uses for turning a shoot's iPhone ProRes / Apple Log recordings into
+deliverables. It was first written for the 11 Sep house shoot; the terms are not specific to it. Several of these words were being used for two things at once during
 development; the entries below pick one meaning each and name what was ruled out. Where a file,
 folder or variable still carries a ruled-out word, this file is right and the name is wrong.
 
@@ -49,8 +49,8 @@ _Avoid_: draft, test render, sample
 
 **Preview**:
 The still the interface shows while a control moves. It is not a render and not a proof: it covers
-the grade only — CST, look, tone, trims — and cannot show grain, the sharpener, the chroma
-denoise, the stabiliser or the dither, all of which are delivery-stage. The word was previously
+the grade only — correction, halation, CST, look, print, tone, trims — and cannot show grain, the
+sharpener, the chroma denoise, the stabiliser or the dither, all of which are delivery-stage. The word was previously
 ruled out as a synonym for *proof*; it now has its own job and the two are not interchangeable.
 A proof answers "is this deliverable"; a preview answers "is this the grade".
 _Avoid_: using it for a proof, or for anything that has been through the delivery chain
@@ -81,23 +81,30 @@ The generated luma curve that gives the image density and separation. The half o
 actually makes it read as graded.
 _Avoid_: contrast curve, S-curve, tone map (reserved for the filmic route), grade
 
+**Correction**:
+The input stage: exposure, white balance and lift/gamma/gain wheels, applied in Apple Log before
+the CST so it works on the whole of the source's headroom. A neutral correction is left out of the
+graph entirely. It is a tool the grader reaches for, not a move toward spec.
+_Avoid_: colour correction (see below), input LUT, pre-grade
+
 **Grade**:
-Halation plus look plus print plus tone plus the saturation and warmth trims — the whole creative transform, and what a
-grading session decides.
+Correction plus halation plus look plus print plus tone plus the saturation and warmth trims — the
+whole creative transform, and what a grading session decides.
 _Avoid_: look, edit, post, colour correction
 
 **Colour correction**:
-Moving colour toward its measured spec. Named here only because this project has none: every
-correction tried moved a reference off spec.
-_Avoid_: using it loosely as a synonym for grade
+Moving colour toward its measured spec. The shipped grade does none: every such move tried took a
+reference off spec. Not the same thing as the **correction** stage, which exists and is creative.
+_Avoid_: using it loosely as a synonym for grade, or for the correction stage
 
-**Variant**:
-One generated candidate tone LUT in a sweep, named series-and-step (`t_a`, `w_b`).
-_Avoid_: version, option, test
+**Variant**: _retired._
+Meant one generated candidate tone LUT in a sweep, named series-and-step (`t_a`, `w_b`). Nothing in
+the engine or the app produces them any more. Kept here only so the phrase is recognisable in old
+notes and in the ladder images the README and `docs/PIPELINE.md` still show.
 
-**Ladder**:
-One image holding the same frame through several variants side by side, to pick one by eye.
-_Avoid_: grid, strip, steps, contact sheet
+**Ladder**: _retired._
+Meant one image holding the same frame through several variants side by side, to pick one by eye.
+Retired with **Variant**, for the same reason and with the same caveat.
 
 **Filmic route**:
 The abandoned approach that replaced the CST with log → scene-linear → filmic tone map →

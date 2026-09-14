@@ -29,8 +29,6 @@ public final class PreviewRenderer {
         public let gamma: Double?
     }
 
-    /// Renders a still for one clip at one timecode with one look. Synchronous: the caller decides
-    /// which queue it wants to wait on, and the interface debounces rather than pipelining.
     /// The clip's post-CST mean, measured once by the engine and remembered here. It does not
     /// change when a look does, and re-measuring it costs about a second of every preview.
     private var measuredExposure: [String: Double] = [:]
@@ -41,11 +39,6 @@ public final class PreviewRenderer {
         measuredExposure[clip.deletingPathExtension().lastPathComponent]
     }
 
-    /// `match` is the engine's exposure matching. It defaults on, because every render this app
-    /// performs has it on. It is turned OFF for exactly one caller: the base frame the live tier
-    /// grades from, which wants the tone stage to do nothing. With matching on, a gamma of 1 is
-    /// not passed through — it is solved, and `solve-gamma.py` clamps the result to at least 1.2,
-    /// so the "neutral" base would come back with a curve already baked into it.
     /// Which frame the engine should produce.
     public enum Stage: String {
         /// Everything a control moves, through the real chain. What gets judged.
@@ -55,6 +48,14 @@ public final class PreviewRenderer {
         case source
     }
 
+    /// Renders a still for one clip at one timecode with one look. Synchronous: the caller decides
+    /// which queue it wants to wait on, and the interface debounces rather than pipelining.
+    ///
+    /// `match` is the engine's exposure matching. It defaults on, because every render this app
+    /// performs has it on. It is turned OFF for exactly one caller: the base frame the live tier
+    /// grades from, which wants the tone stage to do nothing. With matching on, a gamma of 1 is
+    /// not passed through — it is solved, and `solve-gamma.py` clamps the result to at least 1.2,
+    /// so the "neutral" base would come back with a curve already baked into it.
     public func render(clip: URL, seconds: Double, look: Look, height: Int = 1440,
                        match: Bool = true, stage: Stage = .graded,
                        onStart: ((Process) -> Void)? = nil) throws -> Frame {

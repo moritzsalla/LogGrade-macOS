@@ -187,8 +187,7 @@ public final class RenderQueue: ObservableObject {
             } else if outcome.succeeded {
                 // A skip is not a success: the engine exits 0 for a clip it refused, and a queue
                 // that shows it as done is the interface lying about what is on disk.
-                if let code = outcome.codes.first(where: { $0 == .notPortrait
-                                                        || $0 == .fpsWouldNeedRetiming }) {
+                if let code = outcome.codes.first(where: \.skipsTheClip) {
                     update(job.id) { $0.state = .skipped(code) }
                 } else {
                     update(job.id) { $0.state = .done }

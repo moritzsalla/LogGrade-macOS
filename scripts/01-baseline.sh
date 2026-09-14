@@ -5,7 +5,7 @@
 # Rotation is NOT handled anywhere in this pipeline. Orientation is an ingest concern and the
 # source is trusted — see docs/adr/0005 and CLAUDE.md. This stage does not check it either: a
 # baseline is not a deliverable, so a sideways clip here is merely sideways. The refusal lives in
-# the two final stages, where a landscape frame would be silently squashed into a vertical
+# the two render paths that deliver, 03-final.sh and grade.sh, where a landscape frame would be silently squashed into a vertical
 # delivery. That is the failure worth catching, and catching it costs a decode, so it is paid once
 # at the point where it matters.
 set -euo pipefail
@@ -24,6 +24,8 @@ OUT="$(baseline_path "$WORK" "$CLIP")"
 
 [ -f "$SRC" ] || { echo "source not found: $SRC" >&2; exit 1; }
 require_apple_cst || exit 1
+# A clip's baseline and graded masters measured 4.6GB together (docs/PIPELINE.md, "Disk space
+# policy"); 10GB is a margin over that, not a measurement.
 check_disk_space "$WORK/dist" 10
 # Create the output directory. This used to rely on a checked-in dist/*/.gitkeep marker, which
 # is wrong the moment a work dir is set: the marker was in the repo and the output was not.

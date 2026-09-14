@@ -11,10 +11,13 @@ final class RenderQueueTests: XCTestCase {
             done.fulfill()
         }
         wait(for: [done], timeout: timeout)
-        // The queue publishes on the main queue, so let those land before asserting.
-        let settled = expectation(description: "settled")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { settled.fulfill() }
-        wait(for: [settled], timeout: 5)
+        // The queue publishes on the main queue, so let those land before asserting. POLLED for
+        // every job finishing rather than a fixed pause, which is a guess about scheduling.
+        // Progress and outputs are published before the finished state, so they have landed too.
+        let deadline = Date().addingTimeInterval(5)
+        while !queue.jobs.allSatisfy({ $0.state.isFinished }) && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
     }
 
     func testAFailedClipDoesNotTakeTheBatchWithIt() throws {

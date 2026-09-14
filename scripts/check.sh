@@ -11,7 +11,7 @@
 # it used to exit 0 having skipped shellcheck and the grade parity check — so "green" could mean
 # "ran the bats suite and nothing else". Each skip is now recorded and the run exits non-zero at
 # the end, naming what did not run. Pass --allow-skips when you genuinely want a partial run, e.g.
-# iterating on one bats test without node installed.
+# iterating on one bats test without the Swift toolchain installed.
 #
 # --conformance additionally renders one clip through this fork AND through the frozen precursor
 # and asserts the bytes match (tests/conformance.sh). It is opt-in because it costs minutes, not
@@ -65,13 +65,15 @@ if command -v shellcheck >/dev/null; then
 	# tests/ is included because a shell script there is production code too: conformance.sh is the
 	# guard that the fork still renders what the precursor rendered, and it was unlinted for exactly
 	# as long as this loop only looked in scripts/.
-	( targets=""
-	  for f in scripts/* tests/*; do
-	    [ -f "$f" ] || continue
-	    head -1 "$f" | grep -q '^#!/.*bash' && targets="$targets $f"
-	  done
-	  # shellcheck disable=SC2086
-	  shellcheck -x -s bash $targets && echo "clean:$targets" )
+	(
+		targets=""
+		for f in scripts/* tests/*; do
+			[ -f "$f" ] || continue
+			head -1 "$f" | grep -q '^#!/.*bash' && targets="$targets $f"
+		done
+		# shellcheck disable=SC2086
+		shellcheck -x -s bash $targets && echo "clean:$targets"
+	)
 else
 	echo "shellcheck NOT INSTALLED (binary: github.com/koalaman/shellcheck/releases)"
 	SKIPPED="$SKIPPED shellcheck"

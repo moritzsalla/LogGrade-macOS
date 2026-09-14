@@ -4,8 +4,8 @@ import Foundation
 /// The grade, applied in the app, so a control can be dragged and seen.
 ///
 /// THIS IS A SECOND IMPLEMENTATION OF THE IMAGE, which this repo allows only when a test can hold
-/// it to the first. Two exist: `tests/grade-parity.py` measures this model against ffmpeg's own
-/// output over a probe and `LiveGradeTests` runs the same comparison in Swift, while
+/// it to the first. Two do: `LiveGradeTests` measures this model against ffmpeg's own output over
+/// a probe, recorded in the golden that `tests/grade-parity.py` keeps fresh, while
 /// `LiveChainTests` measures the whole live preview against the engine's own render of real
 /// footage. On the shipped look the finished picture is 1.3 code values from the render on
 /// average.
@@ -40,8 +40,8 @@ public struct LiveGrade {
         return (0.3922 - level) / (0.3922 - 0.2510) * 0.6999
     }
 
-    /// One pixel, in 0...255, from a frame that has been through the conversion and the look.
-    /// One pixel, given the curve already applied to each channel.
+    /// One pixel, in 0...255, from a frame that has been through the colour stages, given the
+    /// curve already applied to each channel.
     ///
     /// ONE BODY, TWO CALLERS, and that is not tidiness either. This arithmetic was written twice —
     /// once here and once inside the whole-frame loop — and the two copies already disagreed on
@@ -51,7 +51,7 @@ public struct LiveGrade {
     /// differently — one evaluates the curve, one reads a table — and that is the only difference
     /// between them that is allowed to exist.
     @inline(__always)
-    public func merge(r: Double, g: Double, b: Double,
+    func merge(r: Double, g: Double, b: Double,
                lr: Double, lg: Double, lb: Double) -> (Double, Double, Double) {
         let y = Rec709.luma(r, g, b)
         var cb = (b - y) / Rec709.cbScale
@@ -69,7 +69,7 @@ public struct LiveGrade {
         cr = min(127, max(-128, cr))
 
         var outR = ny + Rec709.crScale * cr
-        var outG = ny - (Rec709.kr * Rec709.crScale / Rec709.kg) * cr
+        let outG = ny - (Rec709.kr * Rec709.crScale / Rec709.kg) * cr
             - (Rec709.kb * Rec709.cbScale / Rec709.kg) * cb
         var outB = ny + Rec709.cbScale * cb
 

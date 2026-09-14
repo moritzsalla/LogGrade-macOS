@@ -28,7 +28,8 @@ Apply with ffmpeg's `lut3d` filter (interp=tetrahedral).
 
 USAGE
     ./make-filmic-lut.py OUT.cube [--exposure 1.0] [--white 11.2]
-                                  [--contrast 1.0] [--toe 0.20]
+                                  [--contrast 1.0] [--toe 0.20] [--sat 1.0]
+                                  [--loglin luts/apple/AppleLogToLin-v1.0.cube]
 
     --exposure  linear gain before the tone curve. >1 brighter. This is the main exposure control
                 and it operates in LINEAR, which is why highlights roll off instead of clipping.
@@ -41,8 +42,10 @@ USAGE
                 each channel independently, which desaturates — badly in the highlights. This is
                 the standard compensation; without it the output measures markedly flatter than
                 Apple's own CST (brick R-B 8.6 vs 17.0 when first tested).
+    --loglin    Apple's AppleLogToLin cube. Defaults to luts/apple/ in this checkout.
 """
 import argparse
+import os
 import sys
 
 SIZE = 65  # per-axis grid of the generated 3D LUT (65^3, matching Apple's own CST)
@@ -54,20 +57,24 @@ BT2020_TO_709 = (
     (-0.0182, -0.1006,  1.1187),
 )
 
+# Rec.709 luma weights: the saturation compensation runs on the Rec.709 output.
+REC709_LUMA = (0.2126, 0.7152, 0.0722)
+
 
 def read_apple_log_to_lin(path):
     """Apple's LogToLin is itself a 4096-entry 1D LUT; return its linear values."""
     vals = []
-    for line in open(path):
-        s = line.strip()
-        if not s or s.startswith("#") or s.startswith("TITLE") or s.startswith("LUT_"):
-            continue
-        p = s.split()
-        if len(p) == 3:
-            try:
-                vals.append(float(p[0]))  # R=G=B for a transfer function
-            except ValueError:
-                pass
+    with open(path) as fh:
+        for line in fh:
+            s = line.strip()
+            if not s or s.startswith("#") or s.startswith("TITLE") or s.startswith("LUT_"):
+                continue
+            p = s.split()
+            if len(p) == 3:
+                try:
+                    vals.append(float(p[0]))  # R=G=B for a transfer function
+                except ValueError:
+                    pass
     if not vals:
         sys.exit(f"no LUT data parsed from {path}")
     return vals
@@ -108,19 +115,24 @@ def scurve(v, amount):
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("out")
-    ap.add_argument("--loglin", default=None, help="path to AppleLogToLin-v1.0.cube")
-    ap.add_argument("--exposure", type=float, default=1.0)
-    ap.add_argument("--white", type=float, default=11.2)
-    ap.add_argument("--contrast", type=float, default=1.0)
-    ap.add_argument("--toe", type=float, default=0.20)
-    ap.add_argument("--sat", type=float, default=1.0)
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("out", help="file to write")
+    ap.add_argument("--loglin", default=None,
+                    help="path to AppleLogToLin-v1.0.cube; defaults to luts/apple/ in this checkout")
+    ap.add_argument("--exposure", type=float, default=1.0,
+                    help="linear gain before the tone curve; >1 brighter")
+    ap.add_argument("--white", type=float, default=11.2,
+                    help="linear value mapped to display white; 11.2 is the Hable default")
+    ap.add_argument("--contrast", type=float, default=1.0,
+                    help="display-space S-curve after the tone map; 1.0 is none")
+    ap.add_argument("--toe", type=float, default=0.20, help="Hable toe strength; higher is denser")
+    ap.add_argument("--sat", type=float, default=1.0,
+                    help="saturation restored after the tone map; 1.0 is none")
     a = ap.parse_args()
 
     loglin_path = a.loglin
     if loglin_path is None:
-        import os
         here = os.path.dirname(os.path.abspath(__file__))
         loglin_path = os.path.join(here, "..", "luts", "apple", "AppleLogToLin-v1.0.cube")
 
@@ -151,11 +163,12 @@ def main():
                     d = max(0.0, min(1.0, hable(c, D=a.toe) / norm))
                     out.append(scurve(rec709_oetf(d), a.contrast))
                 if a.sat != 1.0:
-                    y = 0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2]
+                    y = sum(w * c for w, c in zip(REC709_LUMA, out))
                     out = [max(0.0, min(1.0, y + (c - y) * a.sat)) for c in out]
                 lines.append("%.6f %.6f %.6f" % tuple(out))
 
-    open(a.out, "w").write("\n".join(lines) + "\n")
+    with open(a.out, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
 
     # report where the landmarks land, as a sanity check
     def out_for_linear(target):

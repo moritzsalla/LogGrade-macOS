@@ -14,7 +14,7 @@ struct HelpButton: View {
     var body: some View {
         Button { shown.toggle() } label: {
             Image(systemName: "questionmark.circle")
-                .font(.system(size: 11))
+                .font(Type.label)
                 .foregroundColor(Palette.inkTertiary)
         }
         .buttonStyle(.plain)

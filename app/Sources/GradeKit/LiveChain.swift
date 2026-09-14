@@ -4,23 +4,26 @@ import Foundation
 /// The whole grade, applied in this process to the decoded source frame.
 ///
 /// WHY IT TAKES THE SOURCE AND NOT A GRADED FRAME. The correction stage — exposure, white balance,
-/// the CDL — runs BEFORE Apple's conversion, deliberately, because that is where twelve stops of
-/// log headroom still exist. Nothing downstream of the conversion can show it, so a live tier that
-/// starts from a converted frame leaves the first control anybody reaches for dead until release.
-/// Starting from the source makes every control live, and it also means the base frame never needs
-/// re-rendering: it is the clip, not a stage of the grade.
+/// the CDL — runs BEFORE Apple's conversion, deliberately, because that is where the log highlight
+/// headroom still exists: code 1.0 decodes to 12 times diffuse white, about 3.6 stops above it.
+/// Nothing downstream of the conversion can show it, so a live tier that starts from a converted
+/// frame leaves the first control anybody reaches for dead until release. Starting from the source
+/// makes every control live, and it also means the base frame never needs re-rendering: it is the
+/// clip, not a stage of the grade.
 ///
-/// THE STAGES STAY WHERE THEY LIVE. Apple's conversion and the film look are the same `.cube` files
-/// the render hands to `lut3d`. What is implemented twice is held to the engine by a named test:
-/// the correction cube in `CorrectionCube` (`CorrectionCubeTests`), the sampling in `Cube3D`
-/// (`Cube3DTests`), and the tone and trim arithmetic in `LiveGrade` (the parity golden), with
-/// `LiveChainTests.testTheLivePictureMatchesTheRender` measuring the whole of it against a render.
-/// Nothing here decides anything about the image.
+/// WHAT IS IMPLEMENTED TWICE, AND WHAT HOLDS EACH COPY. Apple's conversion, the film look and the
+/// print are the same `.cube` files the render hands to `lut3d`. Everything else is a second
+/// implementation, each licensed by its own test: the sampling in `Cube3D` (`Cube3DTests`), the
+/// correction cube in `CorrectionCube` (`CorrectionCubeTests`), the tone curve in
+/// `ToneCurve.generated` (`ToneCurvePortTests`), halation's arithmetic in `LiveHalation`
+/// (`LiveHalationTests`), and the tone and trim arithmetic in `LiveGrade` (`LiveGradeTests`,
+/// against the parity golden). `LiveChainTests` then holds the assembled chain to the engine's own
+/// render of real footage. This type only wires them together in the engine's order.
 public struct LiveChain {
     /// The colour stages in the order the chain applies them: the correction, halation, Apple's
-    /// conversion, then the film look. Absent stages are simply absent, which is the same thing
-    /// the engine does — it leaves a neutral correction, a neutral halation and a look of "none"
-    /// out of the filter graph rather than passing an identity.
+    /// conversion, the film look, then the print. Absent stages are simply absent, which is the
+    /// same thing the engine does — it leaves a neutral correction, a neutral halation and a look
+    /// or print of "none" out of the filter graph rather than passing an identity.
     ///
     /// SAMPLED IN SEQUENCE, NOT COMPOSED INTO ONE. Flattening them into a single lookup was tried
     /// and it cost accuracy: the composite has to be resampled on one grid, and the film look's is
@@ -85,12 +88,12 @@ public struct LiveChain {
                      printStrength: Float(printStrength))
     }
 
-    /// The source through the colour stages only: correction, conversion, look. The result is
-    /// what the tone curve and the trims act on.
+    /// The source through the colour stages only: correction, halation, conversion, look, print.
+    /// The result is what the tone curve and the trims act on.
     ///
     /// SEPARATE FROM THE GRADE BECAUSE OF WHAT CHANGES. Dragging midtone or saturation does not
-    /// move any of the colour stages, and they are the expensive part — three cube samples per
-    /// pixel against a handful of multiplies. Converting once and keeping the result makes a tone
+    /// move any of the colour stages, and they are the expensive part — up to four cube samples
+    /// per pixel, and a blur, against a handful of multiplies. Converting once and keeping the result makes a tone
     /// drag about 3ms instead of 13.
     ///
     /// Eight bits out because that is what the tone stage is defined on: `LiveGrade` models the
@@ -135,9 +138,7 @@ public struct LiveChain {
                         for i in (rows.lowerBound * width)..<(rows.upperBound * width) {
                             var c = SIMD3(src[i * 3], src[i * 3 + 1], src[i * 3 + 2])
                             for stage in after { c = stage.sample(c) }
-                            out[i * 4] = UInt8(min(255, max(0, c.x * 255)))
-                            out[i * 4 + 1] = UInt8(min(255, max(0, c.y * 255)))
-                            out[i * 4 + 2] = UInt8(min(255, max(0, c.z * 255)))
+                            Self.store(c, in: out, at: i * 4)
                         }
                     }
                 }
@@ -158,15 +159,21 @@ public struct LiveChain {
                             var c = SIMD3(Float(src[s]) * scale, Float(src[s + 1]) * scale,
                                           Float(src[s + 2]) * scale)
                             for stage in cubes { c = stage.sample(c) }
-                            out[s] = UInt8(min(255, max(0, c.x * 255)))
-                            out[s + 1] = UInt8(min(255, max(0, c.y * 255)))
-                            out[s + 2] = UInt8(min(255, max(0, c.z * 255)))
+                            Self.store(c, in: out, at: s)
                         }
                     }
                 }
             }
         }
         return Converted(width: width, height: height, pixels: rgb)
+    }
+
+    @inline(__always)
+    private static func store(_ c: SIMD3<Float>, in out: UnsafeMutableBufferPointer<UInt8>,
+                              at offset: Int) {
+        out[offset] = UInt8(min(255, max(0, c.x * 255)))
+        out[offset + 1] = UInt8(min(255, max(0, c.y * 255)))
+        out[offset + 2] = UInt8(min(255, max(0, c.z * 255)))
     }
 
     /// A frame after the colour stages, kept so the tone and trim controls can be dragged without

@@ -32,7 +32,7 @@ final class LiveChainTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: work) }
         let look = try Look(data: Data(contentsOf: engine.lookFile))
         let conversion = try Cube3D(contentsOf: engine.appleCube)
-        let lookCube = engine.lookCube(named: look.lookLUT).map { try? Cube3D(contentsOf: $0) } ?? nil
+        let lookCube = engine.lookCube(named: look.lookLUT).flatMap { try? Cube3D(contentsOf: $0) }
         return Rig(engine: engine,
                    renderer: PreviewRenderer(engine: engine, workDirectory: work),
                    clip: clip, look: look, conversion: conversion, lookCube: lookCube)
@@ -160,23 +160,22 @@ final class LiveChainTests: XCTestCase {
 
         // The percentile each case is held to; see above for why a print needs more.
         let edgeBound = 24.0, printedEdgeBound = 42.0
-        let cases: [(String, Look, Rig, Double)] = [
-            ("the shipped look", rig.look, rig, edgeBound),
+        // No rig per case: `compare` leaves the look cube out for a look of "none" by itself.
+        let cases: [(String, Look, Double)] = [
+            ("the shipped look", rig.look, edgeBound),
             // THE ONE THE OLD TIER COULD NOT DO AT ALL. A correction runs before Apple's
             // conversion, so a live preview built on a converted frame showed nothing while this
             // slider moved.
-            ("a live correction", withCorrection, rig, edgeBound),
+            ("a live correction", withCorrection, edgeBound),
             // SPATIAL, so the one stage that cannot be a transcription. The render blurs a quarter-
             // resolution copy of the 4K frame with ffmpeg's recursive approximation; this blurs the
             // 480-line frame with a true Gaussian.
-            ("halation", withHalation, rig, edgeBound),
-            ("a print over a weakened look", withPrint, rig, printedEdgeBound),
-            ("no film look", withoutLook, Rig(engine: rig.engine, renderer: rig.renderer,
-                                              clip: rig.clip, look: withoutLook,
-                                              conversion: rig.conversion, lookCube: nil), edgeBound),
+            ("halation", withHalation, edgeBound),
+            ("a print over a weakened look", withPrint, printedEdgeBound),
+            ("no film look", withoutLook, edgeBound),
         ]
-        for (name, look, useRig, percentileBound) in cases {
-            let (mean, p999, worst) = try compare(useRig, look: look)
+        for (name, look, percentileBound) in cases {
+            let (mean, p999, worst) = try compare(rig, look: look)
             XCTAssertLessThan(mean, 3, "\(name): \(mean) code values from the render on average")
             XCTAssertLessThan(p999, percentileBound,
                               "\(name): a thousandth of it is more than \(p999) out")

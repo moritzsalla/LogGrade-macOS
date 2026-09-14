@@ -1,12 +1,13 @@
 import CoreGraphics
 import Foundation
 
-/// Waveform, parade and vectorscope, measured on the frame the ENGINE rendered.
+/// Waveform, parade and vectorscope, measured on a processed frame rather than predicted.
 ///
-/// That is the whole reason these are cheap and trustworthy. The preview is not an approximation
-/// of the render, it IS the render — one frame through the real chain — so a scope computed from
-/// it measures what was produced rather than what an app thinks would be produced. Every grading
-/// suite's scopes read the processed image for the same reason.
+/// Two frames reach them. The engine's still is the render itself — one frame through the real
+/// chain — so a scope computed from it measures what was produced rather than what an app thinks
+/// would be produced. While a control is moving they read the live preview's frame instead, which
+/// `LiveChainTests` holds to within a few code values of that render. Every grading suite's scopes
+/// read the processed image for the same reason.
 ///
 /// The three reference targets are the colours this pipeline calibrates against: the Dutch plate
 /// yellow and two traffic signs, whose values are legally standardised. They are drawn as targets
@@ -48,7 +49,7 @@ public struct Scopes: Equatable {
     ]
 
     /// Rec.709 full range, matching the space the engine's tone stage works in.
-    public static func chroma(_ r: Double, _ g: Double, _ b: Double) -> (cb: Double, cr: Double) {
+    static func chroma(_ r: Double, _ g: Double, _ b: Double) -> (cb: Double, cr: Double) {
         let y = Rec709.luma(r, g, b)
         return (cb: (b - y) / Rec709.cbScale, cr: (r - y) / Rec709.crScale)
     }

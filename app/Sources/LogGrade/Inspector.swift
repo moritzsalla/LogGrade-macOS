@@ -16,136 +16,169 @@ struct InspectorView: View {
     /// rather than with a guess.
     static let headingRow: CGFloat = 18
 
-    enum Mark2 {
+    private static let appliedGammaTolerance = 0.005
+
+    enum Mark {
         case locked      // filled: not yours to move
         case editable    // open
         case unpreviewed // dotted: real, but a still cannot show it
     }
-    typealias Mark = Mark2
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 presetRow
-                stage("Convert", mark: .locked,
-                      help: "Apple Log to Rec.709, using Apple's own conversion. It is always "
-                          + "applied and cannot be adjusted: its colour is more accurate than "
-                          + "anything this app could do instead, and the cube carries a display "
-                          + "rendering Apple has not published.") {
-                    Text("Apple Log to Rec.709")
-                        .font(Type.caption)
-                        .foregroundColor(Palette.inkTertiary)
-                }
-                stage("Correct", mark: .editable,
-                      help: "Exposure, white balance and the three wheels run before the "
-                          + "conversion, on the log picture, where twelve stops of highlight "
-                          + "still exist. Brightening here keeps the highlights instead of "
-                          + "flattening them against a ceiling.\n\nLuminance mix decides how much "
-                          + "of a wheel move lands on brightness against colour. At 0 the move is "
-                          + "colour only, because separating channels shifts saturation whether "
-                          + "you meant it to or not.") {
-                    control("Exposure", $model.look.correct.exposure, -3...3, format: "%+.2f",
-                            default: model.defaultLook.correct.exposure)
-                    control("Temperature", $model.look.correct.temp, -1...1,
-                            default: model.defaultLook.correct.temp)
-                    control("Tint", $model.look.correct.tint, -1...1,
-                            default: model.defaultLook.correct.tint)
-                    wheel(.offset, "Lift")
-                    wheel(.power, "Gamma")
-                    wheel(.slope, "Gain")
-                    control("Luminance", $model.look.correct.lumMix, 0...1,
-                            default: model.defaultLook.correct.lumMix)
-                }
-                stage("Halation", mark: .editable,
-                      help: "The warm glow film grows around bright things, where light reflects "
-                          + "off the film base and exposes the red layer a second time.\n\nIt is "
-                          + "added in linear light before the conversion, and only past edges: a "
-                          + "bright field does not glow onto itself. Threshold is in scene light, "
-                          + "where 1 is diffuse white. Radius is a fraction of the frame's height. "
-                          + "Strength 0 leaves the stage out entirely.") {
-                    control("Strength", $model.look.halation.strength, 0...1.5,
-                            default: model.defaultLook.halation.strength)
-                    control("Threshold", $model.look.halation.threshold, 0.25...6,
-                            format: "%.2f", default: model.defaultLook.halation.threshold)
-                    control("Radius", $model.look.halation.radius, 0.001...0.03, format: "%.4f",
-                            default: model.defaultLook.halation.radius)
-                    ForEach(Array(["R", "G", "B"].enumerated()), id: \.offset) { channel, name in
-                        control("Tint \(name)", Binding(
-                            get: { model.look.halation.tint(channel) },
-                            set: { model.look.halation.setTint(channel, $0) }),
-                                0...1, format: "%.2f",
-                                default: model.defaultLook.halation.tint(channel))
-                    }
-                }
-                stage("Film look", mark: .editable,
-                      help: "A film-emulation lookup, applied after the conversion.\n\nThe tone "
-                          + "curve below was set with this cube already in the chain, so changing "
-                          + "one without the other is a different grade rather than another "
-                          + "stock. Switch them together using a preset.") {
-                    cubePicker($model.look.lookLUT, options: model.availableLooks)
-                    control("Strength", $model.look.lookStrength, 0...1, format: "%.2f",
-                            default: model.defaultLook.lookStrength)
-                }
-                stage("Print", mark: .editable,
-                      help: "A print-film emulation — Kodak 2383 is the cinema print stock — "
-                          + "applied after the film look, the way a negative is printed.\n\nIt "
-                          + "adds the print's contrast and colour, which at full strength over a "
-                          + "tuned tone curve is usually too much. Strength blends it back toward "
-                          + "the picture it was given.") {
-                    cubePicker($model.look.printLUT, options: model.availablePrints)
-                    control("Strength", $model.look.printStrength, 0...1, format: "%.2f",
-                            default: model.defaultLook.printStrength)
-                }
-                stage("Tone", mark: .editable,
-                      help: "Brightness and contrast, applied to the luma plane only so the "
-                          + "colour is untouched. Applying a curve per channel crushes a "
-                          + "saturated colour's two low channels harder than its high one, which "
-                          + "is what makes signage glow.\n\nMidtone is a gamma, so higher is "
-                          + "darker. The graph beside the picture is this curve.") {
-                    control("Midtone", $model.look.tone.gamma, 1...2.6,
-                            default: model.defaultLook.tone.gamma)
-                    appliedGammaNote
-                    control("Contrast", $model.look.tone.contrast, 0.8...1.8,
-                            default: model.defaultLook.tone.contrast)
-                    control("Pivot", $model.look.tone.pivot, 0.25...0.65,
-                            default: model.defaultLook.tone.pivot)
-                    control("Shoulder", $model.look.tone.shoulder, 0...0.8,
-                            default: model.defaultLook.tone.shoulder)
-                    control("Toe", $model.look.tone.toe, 0...0.8,
-                            default: model.defaultLook.tone.toe)
-                    control("Black", $model.look.tone.black, -0.08...0.08, format: "%+.3f",
-                            default: model.defaultLook.tone.black)
-                }
-                stage("Trims", mark: .editable,
-                      help: "The last small moves, after the curve. Warmth acts on the midtones "
-                          + "only, so it barely moves a bright sky or a deep shadow.") {
-                    control("Saturation", $model.look.colour.saturation, 0.6...1.6,
-                            default: model.defaultLook.colour.saturation)
-                    control("Warmth", $model.look.colour.warmth, -0.12...0.12, format: "%+.3f",
-                            default: model.defaultLook.colour.warmth)
-                }
-                stage("Delivery", mark: .unpreviewed,
-                      help: "Grain and stabilisation are applied to the video, never to the "
-                          + "preview. Both need moving footage to judge, so a still leaves them "
-                          + "out rather than showing a version that is not what renders.\n\n"
-                          + "Grain shadows and highlights set how much grain reaches black and "
-                          + "white, as film prints do: most in the midtones, less at either end. "
-                          + "Both at 1 is flat grain.",
-                      last: true) {
-                    control("Grain", $model.look.grainStrength, 0...20, format: "%.0f",
-                            default: model.defaultLook.grainStrength)
-                    control("Grain shadows", $model.look.grainShadows, 0...1, format: "%.2f",
-                            default: model.defaultLook.grainShadows)
-                    control("Grain highs", $model.look.grainHighlights, 0...1, format: "%.2f",
-                            default: model.defaultLook.grainHighlights)
-                    control("Stabiliser", $model.look.stabilisationSmoothing, 0...60, format: "%.0f",
-                            default: model.defaultLook.stabilisationSmoothing)
-                }
+                convertStage
+                correctStage
+                halationStage
+                filmLookStage
+                printStage
+                toneStage
+                trimsStage
+                deliveryStage
             }
             .padding(.vertical, 18)
             .padding(.trailing, 16)
         }
         .background(Palette.panel)
+    }
+
+    private var convertStage: some View {
+        stage("Convert", mark: .locked,
+              help: "Apple Log to Rec.709, using Apple's own conversion. It is always "
+                  + "applied and cannot be adjusted: its colour is more accurate than "
+                  + "anything this app could do instead, and the cube carries a display "
+                  + "rendering Apple has not published.") {
+            Text("Apple Log to Rec.709")
+                .font(Type.caption)
+                .foregroundColor(Palette.inkTertiary)
+        }
+    }
+
+    private var correctStage: some View {
+        stage("Correct", mark: .editable,
+              help: "Exposure, white balance and the three wheels run before the "
+                  + "conversion, on the log picture, where the highlights above white "
+                  + "still exist. Brightening here keeps the highlights instead of "
+                  + "flattening them against a ceiling.\n\nLuminance mix decides how much "
+                  + "of a wheel move lands on brightness against colour. At 0 the move is "
+                  + "colour only, because separating channels shifts saturation whether "
+                  + "you meant it to or not.") {
+            control("Exposure", $model.look.correct.exposure, -3...3, format: "%+.2f",
+                    default: model.defaultLook.correct.exposure)
+            control("Temperature", $model.look.correct.temp, -1...1,
+                    default: model.defaultLook.correct.temp)
+            control("Tint", $model.look.correct.tint, -1...1,
+                    default: model.defaultLook.correct.tint)
+            wheel(.offset, "Lift")
+            wheel(.power, "Gamma")
+            wheel(.slope, "Gain")
+            control("Luminance", $model.look.correct.lumMix, 0...1,
+                    default: model.defaultLook.correct.lumMix)
+        }
+    }
+
+    private var halationStage: some View {
+        stage("Halation", mark: .editable,
+              help: "The warm glow film grows around bright things, where light reflects "
+                  + "off the film base and exposes the red layer a second time.\n\nIt is "
+                  + "added in linear light before the conversion, and only past edges: a "
+                  + "bright field does not glow onto itself. Threshold is in scene light, "
+                  + "where 1 is diffuse white. Radius is a fraction of the frame's height. "
+                  + "Strength 0 leaves the stage out entirely.") {
+            control("Strength", $model.look.halation.strength, 0...1.5,
+                    default: model.defaultLook.halation.strength)
+            control("Threshold", $model.look.halation.threshold, 0.25...6,
+                    format: "%.2f", default: model.defaultLook.halation.threshold)
+            control("Radius", $model.look.halation.radius, 0.001...0.03, format: "%.4f",
+                    default: model.defaultLook.halation.radius)
+            ForEach(Array(["R", "G", "B"].enumerated()), id: \.offset) { channel, name in
+                control("Tint \(name)", Binding(
+                    get: { model.look.halation.tint(channel) },
+                    set: { model.look.halation.setTint(channel, $0) }),
+                        0...1, format: "%.2f",
+                        default: model.defaultLook.halation.tint(channel))
+            }
+        }
+    }
+
+    private var filmLookStage: some View {
+        stage("Film look", mark: .editable,
+              help: "A film-emulation lookup, applied after the conversion.\n\nThe tone "
+                  + "curve below was set with this cube already in the chain, so changing "
+                  + "one without the other is a different grade rather than another "
+                  + "stock. Switch them together using a preset.") {
+            cubePicker($model.look.lookLUT, options: model.availableLooks)
+            control("Strength", $model.look.lookStrength, 0...1, format: "%.2f",
+                    default: model.defaultLook.lookStrength)
+        }
+    }
+
+    private var printStage: some View {
+        stage("Print", mark: .editable,
+              help: "A print-film emulation — Kodak 2383 is the cinema print stock — "
+                  + "applied after the film look, the way a negative is printed.\n\nIt "
+                  + "adds the print's contrast and colour, which at full strength over a "
+                  + "tuned tone curve is usually too much. Strength blends it back toward "
+                  + "the picture it was given.") {
+            cubePicker($model.look.printLUT, options: model.availablePrints)
+            control("Strength", $model.look.printStrength, 0...1, format: "%.2f",
+                    default: model.defaultLook.printStrength)
+        }
+    }
+
+    private var toneStage: some View {
+        stage("Tone", mark: .editable,
+              help: "Brightness and contrast, applied to the luma plane only so the "
+                  + "colour is untouched. Applying a curve per channel crushes a "
+                  + "saturated colour's two low channels harder than its high one, which "
+                  + "is what makes signage glow.\n\nMidtone is a gamma, so higher is "
+                  + "darker. The graph beside the picture is this curve.") {
+            control("Midtone", $model.look.tone.gamma, 1...2.6,
+                    default: model.defaultLook.tone.gamma)
+            appliedGammaNote
+            control("Contrast", $model.look.tone.contrast, 0.8...1.8,
+                    default: model.defaultLook.tone.contrast)
+            control("Pivot", $model.look.tone.pivot, 0.25...0.65,
+                    default: model.defaultLook.tone.pivot)
+            control("Shoulder", $model.look.tone.shoulder, 0...0.8,
+                    default: model.defaultLook.tone.shoulder)
+            control("Toe", $model.look.tone.toe, 0...0.8,
+                    default: model.defaultLook.tone.toe)
+            control("Black", $model.look.tone.black, -0.08...0.08, format: "%+.3f",
+                    default: model.defaultLook.tone.black)
+        }
+    }
+
+    private var trimsStage: some View {
+        stage("Trims", mark: .editable,
+              help: "The last small moves, after the curve. Warmth acts on the midtones "
+                  + "only, so it barely moves a bright sky or a deep shadow.") {
+            control("Saturation", $model.look.colour.saturation, 0.6...1.6,
+                    default: model.defaultLook.colour.saturation)
+            control("Warmth", $model.look.colour.warmth, -0.12...0.12, format: "%+.3f",
+                    default: model.defaultLook.colour.warmth)
+        }
+    }
+
+    private var deliveryStage: some View {
+        stage("Delivery", mark: .unpreviewed,
+              help: "Grain and stabilisation are applied to the video, never to the "
+                  + "preview. Both need moving footage to judge, so a still leaves them "
+                  + "out rather than showing a version that is not what renders.\n\n"
+                  + "Grain shadows and highlights set how much grain reaches black and "
+                  + "white, as film prints do: most in the midtones, less at either end. "
+                  + "Both at 1 is flat grain.",
+              last: true) {
+            control("Grain", $model.look.grainStrength, 0...20, format: "%.0f",
+                    default: model.defaultLook.grainStrength)
+            control("Grain shadows", $model.look.grainShadows, 0...1, format: "%.2f",
+                    default: model.defaultLook.grainShadows)
+            control("Grain highs", $model.look.grainHighlights, 0...1, format: "%.2f",
+                    default: model.defaultLook.grainHighlights)
+            control("Stabiliser", $model.look.stabilisationSmoothing, 0...60, format: "%.0f",
+                    default: model.defaultLook.stabilisationSmoothing)
+        }
     }
 
     /// One wheel, as three channel sliders.
@@ -173,7 +206,7 @@ struct InspectorView: View {
     /// that every clip in a shoot gets the same look instead of the same curve.
     @ViewBuilder private var appliedGammaNote: some View {
         if let applied = model.appliedGamma,
-           abs(applied - model.look.tone.gamma) > 0.005 {
+           abs(applied - model.look.tone.gamma) > Self.appliedGammaTolerance {
             Text(String(format: "This clip renders at %.3f. The slider sets the midtone for the "
                         + "shoot; each clip is solved from its own brightness so they match.",
                         applied))
@@ -181,10 +214,10 @@ struct InspectorView: View {
         }
     }
 
-    /// The preset: a look cube with its tone and trims, switched as one. Above the chain, because
-    /// it is what the chain starts from.
     @State private var newPresetName = ""
 
+    /// The preset: a look cube with its tone and trims, switched as one. Above the chain, because
+    /// it is what the chain starts from.
     private var presetRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
@@ -213,13 +246,13 @@ struct InspectorView: View {
                 .buttonStyle(.borderless).font(Type.label)
             }
         }
-        .padding(.leading, 37)
+        // Aligned with the stage titles: the rail's inset, its dot, and the gap `stage` leaves.
+        .padding(.leading, Rail.inset + Rail.dot + Space.m)
         .padding(.bottom, 18)
     }
 
-    /// One stage, with its dot on the rail. The rail continues through the row, so the chain reads
-    /// as one line from the conversion down to delivery.
-    /// One stage of the chain, collapsible, with its dot on the rail.
+    /// One stage of the chain, collapsible, with its dot on the rail. The rail continues through
+    /// the row, so the chain reads as one line from the conversion down to delivery.
     ///
     /// COLLAPSIBLE BECAUSE MOST OF IT IS NOT IN USE AT ONCE. Thirty-four controls in one column is
     /// a wall, and a grading session touches one stage at a time. Which ones are open is
@@ -245,7 +278,7 @@ struct InspectorView: View {
                         .foregroundColor(Palette.ink)
                     if mark == .locked {
                         Image(systemName: "lock.fill")
-                            .font(.system(size: 9))
+                            .font(Type.glyph)
                             .foregroundColor(Palette.inkTertiary)
                     }
                     if let help { HelpButton(text: help) }
@@ -253,7 +286,6 @@ struct InspectorView: View {
                 }
                 .contentShape(Rectangle())
             }
-            .disclosureGroupStyle(.automatic)
             .padding(.bottom, last ? 0 : Space.l)
         }
     }
@@ -299,7 +331,6 @@ struct InspectorView: View {
                 if editing {
                     model.beginDrag()
                 } else {
-                    model.endDrag()
                     model.refreshCurve()
                     model.renderPreview()   // on release: the exact render confirms the live one
                 }
@@ -363,8 +394,12 @@ struct InspectorView: View {
         // POSIX, because these values are written into look.json, which uses dots. A German
         // locale renders 2.02 as "2,02" and the readout then disagrees with the file it produces.
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.minimumFractionDigits = format.contains(".0f") ? 0 : 2
-        f.maximumFractionDigits = format.contains(".0f") ? 0 : 3
+        // FROM THE FORMAT'S OWN PRECISION, so typing into a field keeps as many digits as its
+        // readout shows. A fixed maximum of three rounded Radius ("%.4f") on every edit.
+        let precision = format.split(separator: ".").last
+            .flatMap { Int($0.prefix(while: \.isNumber)) } ?? 3
+        f.minimumFractionDigits = min(precision, 2)
+        f.maximumFractionDigits = precision
         f.positivePrefix = format.contains("+") ? "+" : ""
         return f
     }
@@ -372,22 +407,25 @@ struct InspectorView: View {
 
 /// The rail: a dot for this stage and the line to the next one.
 private struct Rail: View {
-    let mark: InspectorView.Mark2
+    let mark: InspectorView.Mark
     let last: Bool
+
+    static let inset: CGFloat = 18
+    static let dot: CGFloat = 7
 
     var body: some View {
         VStack(spacing: 0) {
             Group {
                 switch mark {
                 case .locked:
-                    Circle().fill(Palette.plate).frame(width: 7, height: 7)
+                    Circle().fill(Palette.plate).frame(width: Self.dot, height: Self.dot)
                 case .editable:
                     Circle().strokeBorder(Palette.inkSecondary, lineWidth: 1.2)
-                        .frame(width: 7, height: 7)
+                        .frame(width: Self.dot, height: Self.dot)
                 case .unpreviewed:
                     Circle().strokeBorder(Palette.inkTertiary, style: StrokeStyle(lineWidth: 1.2,
                                                                                   dash: [1.6, 1.6]))
-                        .frame(width: 7, height: 7)
+                        .frame(width: Self.dot, height: Self.dot)
                 }
             }
             // CENTRED ON THE TITLE'S LINE, not nudged down by a magic number. The dot used to
@@ -401,8 +439,8 @@ private struct Rail: View {
                     .frame(maxHeight: .infinity)   // the line IS the chain; it has to reach
             }
         }
-        .frame(width: 7)
-        .padding(.leading, 18)
+        .frame(width: Self.dot)
+        .padding(.leading, Self.inset)
     }
 }
 

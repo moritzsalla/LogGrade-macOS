@@ -1,13 +1,15 @@
 import Foundation
 
-/// The tone curve, from the engine's own generator or from an exact transcription of it.
+/// The tone curve, as the engine's generator defines it.
 ///
-/// The curve was first only subprocessed from `make-tone-lut.py --stdout`, so the interface drew
-/// the same bytes the render applied and a port had nothing to drift from. That cost about a tenth
-/// of a second per control change, which put the tone sliders a frame or two behind the pointer,
-/// so `generated(tone:size:)` and `solvedGamma(clipYAVG:...)` now compute it in process. They are
-/// licensed the way `CorrectionCube` is — `ToneCurvePortTests` holds every entry to the
-/// generator's output — and the subprocess path stays, because that test needs it.
+/// PORTED, AND HELD TO THE ORIGINAL. The app draws and previews with `generated(tone:)` and
+/// `solvedGamma(clipYAVG:referenceYAVG:referenceGamma:peak:)`, which are transcriptions of
+/// `make-tone-lut.py` and `solve-gamma.py`. The two functions that subprocess those scripts
+/// instead — `generate(using:tone:)` and `solvedGamma(using:…)` — are not called by the app at
+/// all: they are the oracles `ToneCurvePortTests` compares the transcriptions against, value for
+/// value, so the curve the interface draws cannot drift from the curve the render applies without
+/// a test naming which one moved. Subprocessing on every control change was the first design, and
+/// at about a tenth of a second a call it left the tone controls a frame or two behind the pointer.
 public struct ToneCurve: Equatable {
     /// Output value for each input, evenly spaced over 0...1. The generator writes 4096 of them.
     public let samples: [Double]
@@ -52,8 +54,8 @@ public struct ToneCurve: Equatable {
         let out = Pipe()
         process.standardOutput = out
         process.standardError = Pipe()
-        // A solver that will not run is not a reason to draw nothing; the reference gamma is what
-        // the engine itself falls back to when the probe says nothing usable.
+        // The reference gamma is what the engine itself falls back to when the probe says nothing
+        // usable.
         do { try process.run() } catch { return referenceGamma }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
@@ -116,8 +118,9 @@ public struct ToneCurve: Equatable {
         return min(3.2, max(1.2, referenceGamma * log(r) / log(y)))
     }
 
-    /// Runs the engine's generator and parses what it writes. Arguments are the same names the
-    /// engine passes, so there is one spelling of each parameter across the two languages.
+    /// Runs the engine's generator and parses what it writes: the oracle `generated(tone:)` is held
+    /// to. Arguments are the same names the engine passes, so there is one spelling of each
+    /// parameter across the two languages.
     public static func generate(using generator: URL, tone: Look.Tone) throws -> ToneCurve {
         let process = Process()
         process.executableURL = generator

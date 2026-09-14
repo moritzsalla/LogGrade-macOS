@@ -23,10 +23,10 @@ public struct Project: Equatable {
 
     /// What is decided per clip, and nowhere else.
     public struct ClipSettings: Equatable {
-        /// The 4:5 crop's vertical offset. Nil means undecided, which is not the same as zero:
-        /// the engine refuses a Feed render across several clips without one, because the offset
-        /// is a composition call and one clip's framing applied to eighteen others produces files
-        /// that all look done.
+        /// The vertical offset of the crop window, shared by every selected deliverable that crops.
+        /// Nil means undecided, which is not the same as zero: the engine refuses a cropping render
+        /// across several clips without one, because the offset is a composition call and one
+        /// clip's framing applied to eighteen others produces files that all look done.
         public var cropOffset: Int?
         /// Where the preview frame is taken from.
         public var previewSeconds: Double
@@ -227,6 +227,13 @@ extension Project.Delivery {
 }
 
 extension Project {
+    /// The first version whose looks carry the film stages. A file with no version reads as 1.
+    /// Kept apart from `fileVersion` so a later bump does not re-apply this upgrade to files that
+    /// already have the stages.
+    static let filmStagesVersion = 2
+    /// The format this build writes.
+    static let fileVersion = filmStagesVersion
+
     public func serialised() throws -> Data {
         var presetList: [[String: Any]] = []
         for preset in presets {
@@ -247,24 +254,21 @@ extension Project {
             }
             clipMap[name] = entry
         }
+        var deliveryBlock: [String: Any] = [
+            "targets": delivery.targets.map {
+                ["name": $0.name, "aspect_width": $0.aspectWidth,
+                 "aspect_height": $0.aspectHeight]
+            },
+            "height": delivery.height,
+        ]
+        if let fps = delivery.fps { deliveryBlock["fps"] = fps }
         var root: [String: Any] = [
-            "version": 2,
+            "version": Self.fileVersion,
             "presets": presetList,
             "active_preset": activePreset,
-            "delivery": [
-                "targets": delivery.targets.map {
-                    ["name": $0.name, "aspect_width": $0.aspectWidth,
-                     "aspect_height": $0.aspectHeight]
-                },
-                "height": delivery.height,
-            ],
+            "delivery": deliveryBlock,
             "clips": clipMap,
         ]
-        if let fps = delivery.fps {
-            var d = root["delivery"] as! [String: Any]
-            d["fps"] = fps
-            root["delivery"] = d
-        }
         if let out = outputDirectory { root["output_directory"] = out.path }
         return try JSONSerialization.data(withJSONObject: root,
                                           options: [.prettyPrinted, .sortedKeys])
@@ -280,7 +284,7 @@ extension Project {
     /// refused like any other.
     static func look(from object: Any, version: Int) throws -> Look {
         var upgraded = object
-        if version < 2, var look = object as? [String: Any] {
+        if version < filmStagesVersion, var look = object as? [String: Any] {
             if look["halation"] == nil {
                 let neutral = Look.Halation()
                 look["halation"] = ["strength": 0.0, "threshold": neutral.threshold,

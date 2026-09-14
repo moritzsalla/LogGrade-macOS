@@ -31,8 +31,8 @@ Purely technical, zero creative judgment:
   guard lives in the delivery stage. `docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md` carries
   why, what it cost to learn, and what the guard actually measures, and is the only copy of it.
 - **Apple Log → Rec.709.** Apple's own 65³ LUT (`luts/apple/AppleLogToRec709-v1.0.cube`), not a
-  hand-rolled curve — the log transfer function is proprietary and ffmpeg has no built-in support
-  for it. `interp=tetrahedral` (more accurate than trilinear, worth the extra render time on a
+  hand-rolled curve — Apple published the log transfer function, but the Rec.709 display rendering
+  the cube carries is unpublished, and ffmpeg has no built-in support for either. `interp=tetrahedral` (more accurate than trilinear, worth the extra render time on a
   one-shot baseline pass).
 - **Color tags.** `prores_ks` does NOT reliably stamp `-color_primaries`/`-color_trc`/`-colorspace`
   flags set at encode time — found by ffprobe still showing `bt2020`/`unknown` on a file whose
@@ -114,7 +114,7 @@ Instagram export.
 
 **Recipe at this point in the work** — superseded, kept for the measurements below. "Tone shaping"
 further down replaces the `curves` stage with a generated 1D LUT applied to luma only, and
-`scripts/02-grade.sh` is what actually ships. (See "Calibrating against standardised colours
+`grade_chain` in `scripts/lib.sh`, run by `scripts/grade.sh`, is what actually ships. (See "Calibrating against standardised colours
 in frame" for how this one was derived.)
 
 ```
@@ -329,9 +329,10 @@ It produced a better tone response — more density, and it used more of the ran
 - Per-channel tone mapping desaturates by construction, so a global saturation multiplier was
   added to compensate — which then overshot the standardised blue to B/G 2.45 against a 1.98 spec.
 
-**Apple's CST is better colour science than anything hand-rolled here**: it lands the blue at
-1.97 *and* keeps more brick separation. The script is kept because the architecture is right and
-it may be the better path with proper gamut mapping, but it is not what ships.
+**Apple's CST is better colour science than anything hand-rolled here**: it lands the blue at 1.99
+on its own, 1.97 under the Portra look and the recipe above, *and* keeps more brick separation. The
+script is kept because the architecture is right and it may be the better path with proper gamut
+mapping, but it is not what ships.
 
 ### Approach B — keep Apple's colour, shape the tone afterwards (`scripts/make-tone-lut.py`)
 

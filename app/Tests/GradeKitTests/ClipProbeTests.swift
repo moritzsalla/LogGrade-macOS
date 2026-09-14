@@ -120,8 +120,6 @@ final class ClipFieldsSummaryTests: XCTestCase {
                                  transfer: "unknown", width: 3840, height: 2160)
         XCTAssertEqual(f.summary, "prores yuv422p10le bt2020 3840x2160")
         XCTAssertFalse(f.summary.contains("3.840"))
-        XCTAssertTrue(f.containerLooksLandscape,
-                      "and the container really does say landscape for a vertical clip")
     }
 }
 

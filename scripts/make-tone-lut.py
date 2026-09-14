@@ -7,8 +7,8 @@ WHY THIS AND NOT THE OTHER ONE
 make-filmic-lut.py replaces Apple's CST entirely, doing log -> linear -> tonemap -> Rec.709. That
 is the textbook-correct architecture and it produces a better *tone* response, but it lost on
 *colour*: a naive BT.2020->709 matrix plus a global saturation multiplier could not match Apple's
-CST, which lands the standardised traffic-blue at B/G 1.97 against a 1.98 spec while keeping more
-brick separation. Apple's gamut handling is better than anything hand-rolled here.
+CST, which lands the standardised traffic-blue at B/G 1.99 against a 1.98 spec with nothing applied,
+while keeping more brick separation. Apple's gamut handling is better than anything hand-rolled here.
 
 So: keep Apple's CST for colour, and do the tone shaping afterwards with this. Display-space
 shaping cannot recover highlight detail the CST already compressed, but the CST does not clip
@@ -22,9 +22,13 @@ A 4096-entry 1D LUT is evaluated exactly, with no interpolation surprises.
 Apply with ffmpeg's `lut1d` filter.
 
 USAGE
-    ./make-tone-lut.py OUT.cube [--pivot 0.42] [--contrast 1.25]
-                                [--toe 0.30] [--shoulder 0.30] [--black 0.0]
-    ./make-tone-lut.py --stdout [--pivot ...]      same curve, written to stdout
+    ./make-tone-lut.py OUT.cube --gamma G --pivot P --contrast C
+                                --toe T --shoulder S --black B
+    ./make-tone-lut.py --stdout --gamma G ...      same curve, written to stdout
+
+    All six tone flags are required. They used to default to 0.42/1.25/0.30/0.30, which is a
+    different look from look.json's: a caller that forgot one got a plausible curve nobody chose.
+    Every production caller passes all six from look.json.
 
     --stdout exists for the preview, which regenerates this curve on every slider move and wants
     it in memory rather than through a temp file. It is also what keeps the curve in ONE
@@ -52,6 +56,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cubefile import is_current, number, title, write_staged  # noqa: E402
 
 SIZE = 4096
+TONE_FLAGS = ("gamma", "pivot", "contrast", "toe", "shoulder", "black")
 
 
 def soft(x, k):
@@ -80,20 +85,27 @@ def fingerprint(a):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out", nargs="?", help="file to write; omit it and pass --stdout instead")
     ap.add_argument("--stdout", action="store_true", help="write the cube to stdout")
-    ap.add_argument("--gamma", type=float, default=1.0)
-    ap.add_argument("--pivot", type=float, default=0.42)
-    ap.add_argument("--contrast", type=float, default=1.25)
-    ap.add_argument("--toe", type=float, default=0.30)
-    ap.add_argument("--shoulder", type=float, default=0.30)
-    ap.add_argument("--black", type=float, default=0.0)
+    ap.add_argument("--gamma", type=float, help="midtone level, applied first; >1 darkens (required)")
+    ap.add_argument("--pivot", type=float, help="level contrast pivots about (required)")
+    ap.add_argument("--contrast", type=float, help="slope at the pivot; >1 more contrast (required)")
+    ap.add_argument("--toe", type=float, help="shadow roll-off; 0 is hard into black (required)")
+    ap.add_argument("--shoulder", type=float, help="highlight roll-off (required)")
+    ap.add_argument("--black", type=float, help="black lift (>0) or crush (<0), last (required)")
     a = ap.parse_args()
     # Exactly one destination. Both together would be ambiguous about which one the caller reads,
     # and neither is the no-argument case that used to die on a bare positional.
     if a.stdout == bool(a.out):
         ap.error("pass exactly one of OUT or --stdout")
+    # Required by hand rather than with required=True, so the destination refusal above still
+    # fires first and says its own words: the suite asserts it with no tone flags passed.
+    missing = ["--" + k for k in TONE_FLAGS if getattr(a, k) is None]
+    if missing:
+        ap.error("missing %s: there is no default look, pass all six from look.json"
+                 % " ".join(missing))
 
     # Idempotent by design, so callers can invoke it unconditionally and drop their own staleness
     # logic. Generating the 4096-entry table costs ~0.1s, so there is nothing to save by guessing.

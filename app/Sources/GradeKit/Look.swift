@@ -20,8 +20,8 @@ func numbers(in text: String) -> [Double]? {
 /// NO FALLBACKS, INHERITED. The engine's `look()` stops the run on a missing key rather than
 /// substituting a default, deliberately: a silent substitution is a different look rendered under
 /// the same name. That makes the key set a contract, so this type carries every key it does not
-/// model in `preserved` and writes them back — the same arrangement the Bench uses, and for the
-/// same reason. A file this writes must be complete or the engine aborts on its first read.
+/// model in `preserved` and writes them back — the arrangement the retired Bench used, for the same
+/// reason. A file this writes must be complete or the engine aborts on its first read.
 public struct Look: Equatable {
     public struct Correct: Equatable {
         public var exposure: Double
@@ -85,16 +85,36 @@ public struct Look: Equatable {
             }
         }
 
+        /// One channel of a triple. Channel is 0, 1, 2 for red, green, blue; anything past green
+        /// reads blue, as it always has.
+        static func component(_ triple: (Double, Double, Double), _ channel: Int) -> Double {
+            switch channel {
+            case 0: return triple.0
+            case 1: return triple.1
+            default: return triple.2
+            }
+        }
+
+        static func replacing(_ triple: (Double, Double, Double), _ channel: Int,
+                              with value: Double) -> (Double, Double, Double) {
+            var changed = triple
+            switch channel {
+            case 0: changed.0 = value
+            case 1: changed.1 = value
+            default: changed.2 = value
+            }
+            return changed
+        }
+
         /// One channel of one wheel. Channel is 0, 1, 2 for red, green, blue.
         public func value(_ wheel: Wheel, _ channel: Int) -> Double {
             guard let t = Self.parse(text(for: wheel)) else { return wheel.neutral }
-            return channel == 0 ? t.0 : (channel == 1 ? t.1 : t.2)
+            return Self.component(t, channel)
         }
 
         public mutating func setValue(_ wheel: Wheel, _ channel: Int, _ value: Double) {
-            var t = Self.parse(text(for: wheel)) ?? (wheel.neutral, wheel.neutral, wheel.neutral)
-            if channel == 0 { t.0 = value } else if channel == 1 { t.1 = value } else { t.2 = value }
-            let written = Self.format(t)
+            let current = Self.parse(text(for: wheel)) ?? (wheel.neutral, wheel.neutral, wheel.neutral)
+            let written = Self.format(Self.replacing(current, channel, with: value))
             switch wheel {
             case .slope: slope = written
             case .offset: offset = written
@@ -137,8 +157,13 @@ public struct Look: Equatable {
         /// "r,g,b", the engine's wire format, for the reason `Correct` keeps its wheels as text.
         public var tint: String
 
+        /// The engine's default tint, and what a malformed one is rebuilt from when a channel is set.
+        static let defaultTintValues = (1.0, 0.3, 0.05)
+        // Public only because a public initialiser's default argument has to be.
+        public static let defaultTint = Correct.format(defaultTintValues)
+
         public init(strength: Double = 0, threshold: Double = 1, radius: Double = 0.006,
-                    tint: String = "1,0.3,0.05") {
+                    tint: String = Halation.defaultTint) {
             self.strength = strength; self.threshold = threshold
             self.radius = radius; self.tint = tint
         }
@@ -158,13 +183,12 @@ public struct Look: Equatable {
 
         public func tint(_ channel: Int) -> Double {
             guard let t = tintValues else { return 0 }
-            return channel == 0 ? t.0 : (channel == 1 ? t.1 : t.2)
+            return Correct.component(t, channel)
         }
 
         public mutating func setTint(_ channel: Int, _ value: Double) {
-            var t = tintValues ?? (1, 0.3, 0.05)
-            if channel == 0 { t.0 = value } else if channel == 1 { t.1 = value } else { t.2 = value }
-            tint = Correct.format(t)
+            let current = tintValues ?? Self.defaultTintValues
+            tint = Correct.format(Correct.replacing(current, channel, with: value))
         }
     }
 
@@ -242,40 +266,40 @@ public struct Look: Equatable {
             return s
         }
 
-        let c = try block("correct")
+        let correctBlock = try block("correct")
         correct = Correct(
-            exposure: try number(c, "exposure", "correct.exposure"),
-            temp: try number(c, "temp", "correct.temp"),
-            tint: try number(c, "tint", "correct.tint"),
-            slope: try text(c, "slope", "correct.slope"),
-            offset: try text(c, "offset", "correct.offset"),
-            power: try text(c, "power", "correct.power"),
-            lumMix: try number(c, "lum_mix", "correct.lum_mix"))
-        let h = try block("halation")
-        halation = Halation(strength: try number(h, "strength", "halation.strength"),
-                            threshold: try number(h, "threshold", "halation.threshold"),
-                            radius: try number(h, "radius", "halation.radius"),
-                            tint: try text(h, "tint", "halation.tint"))
-        let lk = try block("look")
-        lookLUT = try text(lk, "lut", "look.lut")
-        lookStrength = try number(lk, "strength", "look.strength")
-        let pr = try block("print")
-        printLUT = try text(pr, "lut", "print.lut")
-        printStrength = try number(pr, "strength", "print.strength")
-        let t = try block("tone")
-        tone = Tone(gamma: try number(t, "gamma", "tone.gamma"),
-                    pivot: try number(t, "pivot", "tone.pivot"),
-                    contrast: try number(t, "contrast", "tone.contrast"),
-                    toe: try number(t, "toe", "tone.toe"),
-                    shoulder: try number(t, "shoulder", "tone.shoulder"),
-                    black: try number(t, "black", "tone.black"))
-        let col = try block("colour")
-        colour = Colour(saturation: try number(col, "saturation", "colour.saturation"),
-                        warmth: try number(col, "warmth", "colour.warmth"))
-        let g = try block("grain")
-        grainStrength = try number(g, "strength", "grain.strength")
-        grainShadows = try number(g, "shadows", "grain.shadows")
-        grainHighlights = try number(g, "highlights", "grain.highlights")
+            exposure: try number(correctBlock, "exposure", "correct.exposure"),
+            temp: try number(correctBlock, "temp", "correct.temp"),
+            tint: try number(correctBlock, "tint", "correct.tint"),
+            slope: try text(correctBlock, "slope", "correct.slope"),
+            offset: try text(correctBlock, "offset", "correct.offset"),
+            power: try text(correctBlock, "power", "correct.power"),
+            lumMix: try number(correctBlock, "lum_mix", "correct.lum_mix"))
+        let halationBlock = try block("halation")
+        halation = Halation(strength: try number(halationBlock, "strength", "halation.strength"),
+                            threshold: try number(halationBlock, "threshold", "halation.threshold"),
+                            radius: try number(halationBlock, "radius", "halation.radius"),
+                            tint: try text(halationBlock, "tint", "halation.tint"))
+        let lookBlock = try block("look")
+        lookLUT = try text(lookBlock, "lut", "look.lut")
+        lookStrength = try number(lookBlock, "strength", "look.strength")
+        let printBlock = try block("print")
+        printLUT = try text(printBlock, "lut", "print.lut")
+        printStrength = try number(printBlock, "strength", "print.strength")
+        let toneBlock = try block("tone")
+        tone = Tone(gamma: try number(toneBlock, "gamma", "tone.gamma"),
+                    pivot: try number(toneBlock, "pivot", "tone.pivot"),
+                    contrast: try number(toneBlock, "contrast", "tone.contrast"),
+                    toe: try number(toneBlock, "toe", "tone.toe"),
+                    shoulder: try number(toneBlock, "shoulder", "tone.shoulder"),
+                    black: try number(toneBlock, "black", "tone.black"))
+        let colourBlock = try block("colour")
+        colour = Colour(saturation: try number(colourBlock, "saturation", "colour.saturation"),
+                        warmth: try number(colourBlock, "warmth", "colour.warmth"))
+        let grainBlock = try block("grain")
+        grainStrength = try number(grainBlock, "strength", "grain.strength")
+        grainShadows = try number(grainBlock, "shadows", "grain.shadows")
+        grainHighlights = try number(grainBlock, "highlights", "grain.highlights")
         stabilisationSmoothing = try number(try block("stabilisation"), "smoothing",
                                             "stabilisation.smoothing")
         matchReferenceYAVG = try number(try block("match"), "reference_yavg",

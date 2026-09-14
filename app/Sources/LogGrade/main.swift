@@ -2,22 +2,26 @@ import AppKit
 import GradeKit
 import SwiftUI
 
-// A bare executable rather than a bundle, so `swift run` works from a terminal and the build stays
-// scriptable. app/make-app.sh wraps this same binary into LogGrade.app with an Info.plist, which
-// is what makes it behave like an application — a dock icon, a menu bar, and the ability to be a
-// drop target in the Finder.
-//
-// NSApplication is driven by hand instead of using the @main App lifecycle, because that lifecycle
-// assumes a bundle: without one, the window opens behind everything and never takes focus.
+/// The window: the startup screen until there is a clip, then clips, picture and inspector.
 struct RootView: View {
     let engine: EngineLocation?
-    let problems: [EngineLocation.Problem]
+    /// Already in words. The engine's preflight and a look.json that would not parse are both
+    /// reasons nothing will render, and the person needs the reason rather than its type.
+    let problems: [String]
     @ObservedObject var clips: ClipList
     @ObservedObject var queue: RenderQueue
+    /// NOT OBSERVED HERE, which is why every read of its state sits in a subview that observes it.
+    /// An optional cannot be an @ObservedObject, and reading `selectedClip` or `projectURL` in this
+    /// body left the selection marker and the project name stale until something this view does
+    /// observe happened to change.
     var grade: GradeModel?
 
     @ObservedObject var toaster: Toaster
     let actions: AppActions
+
+    private static let thumbnailWidth: CGFloat = 40
+    /// The clips' portrait 9:16, derived rather than typed.
+    private static let thumbnailHeight = (thumbnailWidth * 16 / 9).rounded()
 
     var body: some View {
         content
@@ -38,8 +42,8 @@ struct RootView: View {
         if clips.entries.isEmpty {
             return AnyView(StartupView(
                 problems: problems,
-                recentProject: UserDefaults.standard.url(forKey: "lastProject"),
-                onOpenProject: { url in try? grade?.openProject(at: url) },
+                recentProject: UserDefaults.standard.url(forKey: DefaultsKey.lastProject),
+                onOpenProject: actions.openProject(at:),
                 onChooseFiles: actions.chooseClips))
         }
         return AnyView(columns)
@@ -53,9 +57,12 @@ struct RootView: View {
                 InspectorView(model: grade).frame(minWidth: 372, maxWidth: 420)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("no engine").font(Type.heading)
+                    Text(engine == nil ? "no engine" : "no look").font(Type.heading)
                         .foregroundColor(Palette.ink)
-                    Text("point LOGGRADE_ENGINE at a checkout, or rebuild the bundle.")
+                    Text(engine == nil
+                         ? "point LOGGRADE_ENGINE at a checkout, or rebuild the bundle."
+                         : "The engine’s look.json could not be read. The reason is listed above "
+                           + "the clips.")
                         .font(Type.label).foregroundColor(Palette.inkSecondary)
                     Spacer()
                 }
@@ -72,7 +79,7 @@ struct RootView: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("LogGrade")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(Type.title)
                     .foregroundColor(Palette.ink)
                 if let engine {
                     Text(engine.root.path)
@@ -81,7 +88,7 @@ struct RootView: View {
                         .lineLimit(2).truncationMode(.head)
                 }
                 ForEach(problems.indices, id: \.self) { i in
-                    Text(problems[i].description)
+                    Text(problems[i])
                         .font(Type.caption).foregroundColor(Palette.lamp)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -94,12 +101,7 @@ struct RootView: View {
                         .buttonStyle(.borderless).font(Type.label)
                     Button("save project") { actions.saveProject() }
                         .buttonStyle(.borderless).font(Type.label)
-                    if let url = grade.projectURL {
-                        Text(url.lastPathComponent)
-                            .font(Type.value)
-                            .foregroundColor(Palette.inkTertiary)
-                            .lineLimit(1).truncationMode(.head)
-                    }
+                    ProjectName(model: grade)
                 }
                 .padding(.horizontal, 16).padding(.bottom, 12)
             }
@@ -137,7 +139,6 @@ struct RootView: View {
                     .foregroundColor(Palette.inkTertiary))
     }
 
-
     /// Takes a drop of file URLs. Real paths, which is the reason this is an app and not a page: a
     /// browser drop hands over bytes, and the engine needs a location.
     private func accept(_ providers: [NSItemProvider]) -> Bool {
@@ -150,16 +151,16 @@ struct RootView: View {
         return true
     }
 
-
     /// A clip reads as its frame first: that is how a person recognises it. The selected one is
     /// marked on its leading edge in the colour this tool measures, rather than by a filled row,
     /// so nothing bright sits next to a photograph.
     private func clipRow(_ entry: ClipList.Entry) -> some View {
-        let selected = grade?.selectedClip?.stem == entry.stem
-        return HStack(alignment: .top, spacing: 10) {
-            Rectangle()
-                .fill(selected ? Palette.plate : Color.clear)
-                .frame(width: 2)
+        HStack(alignment: .top, spacing: 10) {
+            if let grade {
+                SelectionMark(model: grade, stem: entry.stem)
+            } else {
+                Color.clear.frame(width: SelectionMark.width)
+            }
             thumbnail(entry)
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.stem)
@@ -191,7 +192,6 @@ struct RootView: View {
         .overlay(Rectangle().fill(Palette.hairline).frame(height: 1), alignment: .bottom)
     }
 
-
     private func thumbnail(_ entry: ClipList.Entry) -> some View {
         Group {
             if let image = entry.thumbnail {
@@ -200,8 +200,36 @@ struct RootView: View {
                 Rectangle().fill(Palette.well)
             }
         }
-        .frame(width: 40, height: 71)
+        .frame(width: Self.thumbnailWidth, height: Self.thumbnailHeight)
         .clipped()
+    }
+}
+
+/// The selected clip's edge marker, observing the model itself — see `RootView.grade`.
+private struct SelectionMark: View {
+    @ObservedObject var model: GradeModel
+    let stem: String
+
+    static let width: CGFloat = 2
+
+    var body: some View {
+        Rectangle()
+            .fill(model.selectedClip?.stem == stem ? Palette.plate : Color.clear)
+            .frame(width: Self.width)
+    }
+}
+
+/// The open project's file name, observing the model itself — see `RootView.grade`.
+private struct ProjectName: View {
+    @ObservedObject var model: GradeModel
+
+    var body: some View {
+        if let url = model.projectURL {
+            Text(url.lastPathComponent)
+                .font(Type.value)
+                .foregroundColor(Palette.inkTertiary)
+                .lineLimit(1).truncationMode(.head)
+        }
     }
 }
 
@@ -217,12 +245,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { true }
 }
 
+/// The two virtual key codes the crop nudge answers to, as `Carbon.HIToolbox` numbers them.
+private enum KeyCode {
+    static let upArrow: UInt16 = 126
+    static let downArrow: UInt16 = 125
+}
+
+// A bare executable rather than a bundle, so `swift run` works from a terminal and the build stays
+// scriptable. app/make-app.sh wraps this same binary into LogGrade.app with an Info.plist, which
+// is what makes it behave like an application — a dock icon, a menu bar, and the ability to be a
+// drop target in the Finder.
+//
+// NSApplication is driven by hand instead of using the @main App lifecycle, because that lifecycle
+// assumes a bundle: without one, the window opens behind everything and never takes focus.
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 
 let engine = EngineLocation.locate()
-let problems = engine?.preflight() ?? []
 
+// The look the app opens on is the engine's own look.json: the shipped grade, which is a look
+// that works rather than a set of generic defaults. The Bench learned that lesson first.
+//
+// A LOOK THAT WILL NOT PARSE IS NAMED, not folded into "no engine". Swallowing the error sent
+// people to LOGGRADE_ENGINE when the checkout was found and only its look.json was broken.
+var lookProblem: String?
+let gradeModel: GradeModel? = engine.flatMap { e in
+    do {
+        return GradeModel(engine: e, look: try Look(data: Data(contentsOf: e.lookFile)))
+    } catch {
+        lookProblem = "look.json could not be read: \(error)"
+        return nil
+    }
+}
+let problems = (engine?.preflight() ?? []).map(\.description) + (lookProblem.map { [$0] } ?? [])
+
+// Sized for the startup screen, which is what a first launch shows; the three columns declare
+// their own minimum in `RootView.columns`.
 let window = NSWindow(
     contentRect: NSRect(x: 0, y: 0, width: 620, height: 380),
     styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -233,22 +291,17 @@ window.title = "LogGrade"
 // the field of view, which is the thing a grading suite is dark to avoid.
 window.appearance = NSAppearance(named: .darkAqua)
 window.titlebarAppearsTransparent = true
-window.backgroundColor = NSColor(red: 0.098, green: 0.098, blue: 0.098, alpha: 1)
+window.backgroundColor = NSColor(Palette.surround)
 // Remembered between launches: where the window was, and what was open. Setting the frame
 // autosave name makes macOS keep the size and position; the rest is a handful of defaults.
 window.setFrameAutosaveName("LogGradeMain")
 if window.frame.origin == .zero { window.center() }
 let clipList = ClipList(probe: EngineLocation.resolveTool("ffprobe").map(ClipProbe.init))
 
-// The look the app opens on is the engine's own look.json: the shipped grade, which is a look
-// that works rather than a set of generic defaults. The Bench learned that lesson first.
-let gradeModel: GradeModel? = engine.flatMap { e in
-    (try? Look(data: Data(contentsOf: e.lookFile))).map { GradeModel(engine: e, look: $0) }
-}
 // THE KEYBOARD. A grading tool lives under the fingers: you look, you nudge, you compare, you move
 // to the next clip, and reaching for a mouse between each of those is the difference between a tool
-// and a form. A local monitor rather than a menu because this app has no menu bar to hang
-// shortcuts on, and because C has to be held rather than pressed.
+// and a form. A local monitor rather than the menu bar for the two things a menu item cannot do:
+// C has to be held rather than pressed, and the arrows mean the crop only while something crops.
 NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
     guard let grade = gradeModel else { return event }
     // A key pressed while typing in a field belongs to the field.
@@ -263,8 +316,8 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
     // everywhere else on this platform.
     if grade.project.delivery.anyTargetCrops, grade.cropGeometry != nil {
         let step = event.modifierFlags.contains(.shift) ? 10 : 1
-        if event.keyCode == 126 { grade.nudgeCrop(by: -step); return nil }   // up
-        if event.keyCode == 125 { grade.nudgeCrop(by: step); return nil }    // down
+        if event.keyCode == KeyCode.upArrow { grade.nudgeCrop(by: -step); return nil }
+        if event.keyCode == KeyCode.downArrow { grade.nudgeCrop(by: step); return nil }
     }
     // ONLY WHAT A MENU CANNOT DO. Compare has to be HELD — pressed and released — and a menu item
     // fires once on selection, so it stays here. Everything else moved to the menu bar, where
@@ -277,21 +330,26 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
 }
 
 let renderQueue = RenderQueue(engine: engine ?? EngineLocation(root: URL(fileURLWithPath: "/")))
+// A stored zero means "never set", not "none at once": integer(forKey:) cannot tell those apart,
+// and taking it literally quietly halved the default.
+let defaultConcurrency = 2
+let storedConcurrency = UserDefaults.standard.integer(forKey: DefaultsKey.concurrency)
+renderQueue.concurrency = storedConcurrency > 0 ? storedConcurrency : defaultConcurrency
+
+gradeModel?.clips = clipList
+// The toaster before the actions, because a failed open or save is reported through it.
+let toaster = Toaster()
+gradeModel?.toaster = toaster
+let actions = AppActions(clips: clipList, grade: gradeModel, queue: renderQueue, toaster: toaster)
 
 // Reopen the last project, so a shoot in progress is still in progress tomorrow. Its crop offsets
 // are the part that cannot be recovered by guessing.
-if let grade = gradeModel,
-   let remembered = UserDefaults.standard.url(forKey: "lastProject"),
+if gradeModel != nil,
+   let remembered = UserDefaults.standard.url(forKey: DefaultsKey.lastProject),
    FileManager.default.fileExists(atPath: remembered.path) {
-    try? grade.openProject(at: remembered)
+    actions.openProject(at: remembered)
 }
-// A stored zero means "never set", not "none at once": integer(forKey:) cannot tell those apart,
-// and taking it literally quietly halved the default.
-let storedConcurrency = UserDefaults.standard.integer(forKey: "concurrency")
-renderQueue.concurrency = storedConcurrency > 0 ? storedConcurrency : 2
 
-gradeModel?.clips = clipList
-let actions = AppActions(clips: clipList, grade: gradeModel, queue: renderQueue)
 let delegate = AppDelegate(actions: actions)
 app.delegate = delegate
 // THE MENU BAR, which this app did not have. Without it ⌘Q does not quit and the standard
@@ -300,8 +358,6 @@ app.delegate = delegate
 let commands = MainMenu.Commands()
 MainMenu.install(commands: commands)
 
-let toaster = Toaster()
-gradeModel?.toaster = toaster
 renderQueue.onFinished = { delivered, failed in
     if failed == 0 {
         toaster.show("checkmark.circle.fill", "Export finished",

@@ -1,14 +1,22 @@
 import GradeKit
 import SwiftUI
 
-/// Waveform, parade and vectorscope, drawn from the frame the engine rendered.
+/// Levels, parade and vectorscope, drawn from whatever frame the picture is showing.
 ///
-/// They measure the render rather than an approximation of it, which is the one advantage of a
-/// preview that is a real render. The vectorscope carries the three calibration colours as
+/// That is the live tier's approximation while a control moves and the engine's render once it
+/// lands, so the scopes follow the pointer as the picture does and settle on the exact frame with
+/// it. The vectorscope carries the three calibration colours as
 /// targets: a place to measure from, not a place to arrive — the shipped grade sits off spec on
 /// purpose, and seeing by how much is the point.
 struct ScopesView: View {
     let scopes: Scopes?
+
+    /// A bin at a sixth of the peak already draws at full weight. Scaled linearly, the one hottest
+    /// colour in the frame would leave every other one too faint to see.
+    private static let vectorGain = 6.0
+    /// Any bin that is hit at all stays visible, however few pixels landed in it.
+    private static let vectorFloor = 0.15
+    private static let vectorSpan = 0.7
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -51,11 +59,11 @@ struct ScopesView: View {
                 let third = geo.size.width / 3
                 ZStack {
                     channel(scopes.red, peak: peak, width: third, height: geo.size.height,
-                            colour: Color(red: 0.90, green: 0.35, blue: 0.32), offset: 0)
+                            colour: Palette.scopeRed, offset: 0)
                     channel(scopes.green, peak: peak, width: third, height: geo.size.height,
-                            colour: Color(red: 0.45, green: 0.78, blue: 0.45), offset: third)
+                            colour: Palette.scopeGreen, offset: third)
                     channel(scopes.blue, peak: peak, width: third, height: geo.size.height,
-                            colour: Color(red: 0.42, green: 0.60, blue: 0.90), offset: third * 2)
+                            colour: Palette.scopeBlue, offset: third * 2)
                 }
             }
         }
@@ -92,12 +100,13 @@ struct ScopesView: View {
                         for y in 0..<n {
                             for x in 0..<n where scopes.vector[y * n + x] > 0 {
                                 let weight = min(1, Double(scopes.vector[y * n + x])
-                                                 / Double(peak) * 6)
+                                                 / Double(peak) * Self.vectorGain)
+                                let opacity = Self.vectorFloor + weight * Self.vectorSpan
                                 context.fill(
                                     Path(CGRect(x: Double(x) * cell.width,
                                                 y: Double(y) * cell.height,
                                                 width: cell.width, height: cell.height)),
-                                    with: .color(Palette.inkSecondary.opacity(0.15 + weight * 0.7)))
+                                    with: .color(Palette.inkSecondary.opacity(opacity)))
                             }
                         }
                     }

@@ -13,11 +13,13 @@ final class AppActions {
     private let clips: ClipList
     private let grade: GradeModel?
     private let queue: RenderQueue
+    private let toaster: Toaster
 
-    init(clips: ClipList, grade: GradeModel?, queue: RenderQueue) {
+    init(clips: ClipList, grade: GradeModel?, queue: RenderQueue, toaster: Toaster) {
         self.clips = clips
         self.grade = grade
         self.queue = queue
+        self.toaster = toaster
     }
 
     /// Every clip that enters the app enters here.
@@ -46,16 +48,35 @@ final class AppActions {
         panel.nameFieldStringValue = grade.projectURL?.lastPathComponent ?? "shoot.loggrade.json"
         panel.allowedContentTypes = [.json]
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try grade.saveProject(to: url) } catch { NSSound.beep() }
+        do {
+            try grade.saveProject(to: url)
+        } catch {
+            // SAID, not beeped. A beep is indistinguishable from a key the window refused, and a
+            // shoot's crop decisions that were not saved are the one loss this panel exists to stop.
+            toaster.show("exclamationmark.triangle.fill", "Project not saved",
+                         String(describing: error))
+        }
     }
 
     func openProject() {
-        guard let grade else { return }
+        guard grade != nil else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try grade.openProject(at: url) } catch { NSSound.beep() }
+        openProject(at: url)
+    }
+
+    /// The panel, the startup screen's Reopen and the reopen at launch all land here, so none of
+    /// them can fail without saying so.
+    func openProject(at url: URL) {
+        guard let grade else { return }
+        do {
+            try grade.openProject(at: url)
+        } catch {
+            toaster.show("exclamationmark.triangle.fill",
+                         "Couldn’t open \(url.lastPathComponent)", String(describing: error))
+        }
     }
 
     func convert() { grade?.convert(queue: queue) }
