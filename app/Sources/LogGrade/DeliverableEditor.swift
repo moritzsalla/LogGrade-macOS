@@ -26,7 +26,7 @@ struct DeliverableEditor: View {
                 .font(Type.heading)
                 .foregroundColor(Palette.ink)
             field("name") {
-                TextField("square", text: $draft.name)
+                TextField("", text: $draft.name)
                     .font(Type.value)
             }
             field("aspect") {

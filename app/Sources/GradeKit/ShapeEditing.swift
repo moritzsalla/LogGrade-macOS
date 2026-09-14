@@ -128,8 +128,9 @@ public enum ShapeRefusal: Equatable, CustomStringConvertible {
             return "'\(name)' is a preset's name. A shape called that writes a different file from "
                 + "the preset and would be listed as if it were the preset."
         case .duplicateName(let name):
-            return "A shape named '\(name)' already exists. Names are compared ignoring case, "
-                + "because the disk compares filenames that way."
+            // Ignoring case because a name is how a shape is told apart in the panel and the
+            // event stream; whether two shapes write one file is `sameOutputFile`'s question.
+            return "A shape named '\(name)' already exists. Names are compared ignoring case."
         case .sameOutputFile(let other, let suffix):
             return "This writes <clip>_\(suffix).mp4, which '\(other)' already writes."
         case .notAsWritten(let term):
@@ -192,7 +193,7 @@ extension Project.Delivery {
     }
 
     /// How the disk tells two names apart. APFS is case-insensitive and normalisation-insensitive
-    /// by default, so `Square` and `square` — or a composed and a decomposed é — are one file.
+    /// by default, so `Square_1x1` and `square_1x1`, or a composed and a decomposed é, are one file.
     static func filenameKey(_ name: String) -> String {
         name.precomposedStringWithCanonicalMapping.lowercased()
     }
