@@ -118,8 +118,7 @@ width and two deliverables that differed in it would be re-encoded differently f
 shape that is a crop of the master gets one, computed from the frame that is actually on disk; a
 shape that is already the master's own gets no crop filter at all.
 
-Sharpening and grain were tuned at 1080×1920 and are merely scaled away from it, so other sizes
-render but are not yet judged.
+Sharpening and grain were tuned at 1080×1920. Both scale with height: radius formula 5×h÷1920 quantises to kernel sizes 3–7 px, and grain plate is half-res before upscale. Measured in [`docs/PIPELINE.md`](docs/PIPELINE.md) § Sharpen and grain at other heights: the quantisation means some heights sharpen identically despite different real-world detail sizes.
 
 → [`adr/0010`](docs/adr/0010_A_DELIVERABLE_IS_DATA_NOT_A_CASE_BRANCH.md)
 

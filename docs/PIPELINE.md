@@ -172,6 +172,37 @@ expense of another.
   to hold that. Both weights at 1 leave the mask out of the graph.
 - **Sharpen AFTER downscale** — mild, corrective (compensating for the softening the resize
   itself causes), not a stylistic push. Luma only.
+
+## Sharpen and grain at other heights
+
+The delivery chain scales to different frame heights via the `HEIGHT` environment variable. Both
+sharpening (unsharp kernel) and grain (half-resolution plate) are **assumed** to scale with height,
+but the scaling is quantised and untested at sizes other than 1080×1920.
+
+**Sharpening radius formula and quantisation:**
+
+Formula: `r = 5 × h / 1920`, clamped to minimum 3, rounded up to odd.
+
+| Height | Width | Kernel (px) | % of height | Detail equiv @ 1920p |
+|--------|-------|-------------|-------------|----------------------|
+| 960    | 540   | 3           | 0.31 %      | ~6.0 px              |
+| 1280   | 720   | 3           | 0.23 %      | ~4.5 px              |
+| 1920   | 1080  | 5           | 0.26 %      | ~5.0 px (reference)  |
+| 2560   | 1440  | 7           | 0.27 %      | ~5.2 px              |
+
+The quantisation creates a flat step at the bottom: heights 960 and 1280 both compute to kernel
+size 3, which is 0.31 % and 0.23 % of frame height respectively. Both sizes therefore sharpen
+the same pixel kernel size through different real-world proportions of the frame. Whether this
+clamping effect (for small heights) is wanted is unjudged.
+
+Measurement method: Formula analysis only; no visual comparison across heights yet.
+
+**Grain:** Generated on a `gray` plate at half output resolution (w/2 × h/2), then bilinear-scaled
+back to full size. No explicit height scaling in the measurement formula (`noise=c0s=STRENGTH`),
+but spatial correlation changes with the upscale factor: at 960p, half-res correlation is ~0.5px
+(1:2 upscale), at 1920p it's ~1.0px (1:2 upscale), at 2560p it's ~1.3px (1:2 upscale). Visual
+difference across heights has not been measured.
+
 - **Encode**: H.264 High Profile, yuv420p (dithered down from the master's 10-bit, not
   truncated), CRF 18, AAC 192k, `+faststart`. Instagram recompresses everything it receives
   regardless — feeding it high quality just means less of what it does have to throw away.

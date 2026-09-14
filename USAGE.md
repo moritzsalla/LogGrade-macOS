@@ -201,8 +201,7 @@ A shape that is a crop of the master gets one, computed from the frame actually 
 that is already the master's own shape gets no crop filter at all. A shape taller than the source
 is refused — there is no window to take.
 
-**Sharpening and grain were tuned at 1080×1920** and are merely scaled away from it, so other sizes
-render but are not yet judged.
+**Sharpening and grain were tuned at 1080×1920.** Both scale with height — radius formula r=5×h÷1920 with min 3 and odd constraint, and grain from a half-resolution plate. Measured in [`docs/PIPELINE.md`](docs/PIPELINE.md) § Sharpen and grain at other heights: kernel values quantise to 3 px (at 960 and 1280), 5 px (at 1920), and 7 px (at 2560), meaning smaller heights put different real-world detail sizes through the same kernel.
 
 ---
 
