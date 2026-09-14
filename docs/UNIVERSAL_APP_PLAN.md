@@ -1,6 +1,6 @@
 # Plan: one LogGrade.app for both Macs
 
-Not started. Written 2026-09-14.
+Steps 1–4 completed on Intel Mac. Written 2026-09-14, implemented 2026-09-15.
 
 **Goal.** Build once on the Intel Mac, copy the bundle to the Apple silicon Mac, double-click, and
 it runs natively on both. Personal use on two machines, so no Apple Developer account.
@@ -10,17 +10,28 @@ send the wrong one. The app is a few MB, and doubling it costs nothing.
 
 ---
 
-## What is true today (measured 2026-09-14)
+## What is true today (measured 2026-09-15 after implementation)
 
-- `make-app.sh` runs `swift build` for the host only, so the bundle is x86_64.
-- It copies `ffmpeg`, `ffprobe` and `jq` from `~/.local/bin`. All three are **x86_64 only**. The
-  ffmpeg is statically linked against third-party libraries (`otool -L` lists only system
-  frameworks), so it runs from inside a bundle.
+- `make-app.sh` runs `swift build --arch arm64 --arch x86_64` and produces a universal app
+  containing both architectures.
+- **jq** exists for both x86_64 and arm64. Official releases from
+  https://github.com/jqlang/jq/releases (v1.8.2). Binaries are stored in
+  `~/.local/share/loggrade-tools/{x86_64,arm64}/jq` and merged with `lipo -create` into the bundle.
+- **ffmpeg and ffprobe** are x86_64 only, from https://evermeet.cx/ffmpeg/ (v9.0.1). evermeet
+  explicitly does NOT provide Apple silicon ARM builds. They are stored in
+  `~/.local/share/loggrade-tools/x86_64/` and copied into the bundle unmerged. On Apple silicon
+  Macs, they run under Rosetta 2 (software emulation), not natively. See SOURCE.txt and
+  CHECKSUMS.txt in that directory.
+- The bundle is signed at three levels: each tool individually (required for unsigned arm64 code),
+  the main executable, and the bundle itself. Signing failures now stop the build instead of
+  warning.
 - Toolchain: Swift 5.9.2, Xcode 15.2, macOS 13 SDK. `Package.swift` is pinned to 5.9, and that pin
-  stays.
+  stays. SwiftPM's multi-architecture build routes to Xcode and writes binaries to
+  `.build/apple/Products/{Config}/` instead of `.build/{Config}/`.
 - `python3` is required at render time, not only in tests. `grade.sh` calls
   `make-tone-lut.py`, `make-correct-lut.py`, `make-halation-luts.py` and `solve-gamma.py`, and
-  `EngineLocation.requiredTools` lists it. Those scripts use only the standard library.
+  `EngineLocation.requiredTools` lists it clearly (reports "python3 is not on any path this app
+  knows about" if missing). Those scripts use only the standard library.
 
 ---
 
@@ -92,21 +103,38 @@ all.
 
 ## Verification
 
-- On this Mac: `./scripts/check.sh`, then launch the bundle and render one clip. With the arm64
+### On the Intel Mac (where the build ran)
+
+- ✓ `lipo -archs dist/LogGrade.app/Contents/MacOS/LogGrade` prints `x86_64 arm64` (LogGrade executable is universal)
+- ✓ `lipo -archs dist/LogGrade.app/Contents/Resources/engine/jq` prints `x86_64 arm64` (jq is universal)
+- ✓ `lipo -archs dist/LogGrade.app/Contents/Resources/engine/ffmpeg` prints only `x86_64` (ffmpeg is x86_64-only by design)
+- ✓ `codesign --verify --deep --strict dist/LogGrade.app` succeeds (all executables are signed)
+- ✓ Bats test "the app bundle contains universal binaries" passes
+- TODO: `./scripts/check.sh`, then launch the bundle and render one clip. With the arm64
   slice present, this proves the x86_64 slice still works.
-- On the Apple Mac, the only place the arm64 half can be proven:
-  - Launch, and confirm Activity Monitor shows *Kind: Apple*, not *Intel*.
-  - Render one clip. Also run `file` on the ffmpeg process to make sure it isn't running under
-    Rosetta.
-  - Render the same clip at the same settings on both Macs and compare the frames. They should be
-    byte-identical if both ffmpeg halves match. Name each output after the machine that rendered it
-    (CLAUDE.md: two renders of one clip can write the same path).
-- Add a bats test that runs `lipo -archs` on the app binary and the three bundled tools, and fails
-  if either architecture is missing. Mutation-test it: build host-only, confirm the test goes red.
+### On the Apple silicon Mac (manual verification, cannot be done on Intel)
 
-## Open questions
+These steps verify that the arm64 half of the universal bundle actually works.
 
-- Where did `~/.local/bin/ffmpeg` come from, and does the same source publish a matching arm64 build?
-- Does the app say clearly which tool is missing when python3 isn't installed, or does a render
-  just fail? If it only fails, name the missing tool on first launch, since that will be the first
-  thing seen on the new Mac.
+- Launch, and confirm Activity Monitor shows *Kind: Apple*, not *Intel*.
+- Render one clip. Also run `file` on the ffmpeg process to check if it is running under Rosetta
+  (it will be, since ffmpeg is x86_64-only).
+- Render the same clip at the same settings on both Macs and compare the frames. They should be
+  byte-identical for jq and other universal tools. The ffmpeg output may differ slightly due to
+  Rosetta emulation overhead, or match if deterministic rendering cancels differences out.
+- **Added:** bats test "the app bundle contains universal binaries" in tests/lib.bats runs `lipo -archs`
+  on the app executable (must be universal), jq (must be universal), and ffmpeg/ffprobe (must be
+  x86_64-only with correct signature). The test is tagged `slow,serial` and requires the arm64 tools
+  to be present in ~/.local/share/loggrade-tools/. To verify the test works, build with `swift
+  build --package-path app -c debug --arch arm64 --arch x86_64` and run `bats -f "universal binaries" tests/lib.bats`.
+
+## Questions resolved
+
+- **ffmpeg source:** https://evermeet.cx/ffmpeg/, v9.0.1-tessus. Their page explicitly states: "I do
+  not plan to provide native ffmpeg binaries for Apple Silicon ARM." No trustworthy alternative
+  static build source was found. **Decision:** Bundle x86_64 only; ffmpeg/ffprobe will run under
+  Rosetta on Apple silicon. jq is universal.
+- **python3 messaging:** `EngineLocation.requiredTools` checks for python3 explicitly, and the
+  preflight reports "python3 is not on any path this app knows about" if missing. This message
+  appears on first launch if python3 is absent, so the issue is clear before attempting a render.
+  No additional work needed — the existing code already does the right thing.

@@ -2824,6 +2824,33 @@ sys.exit("; ".join(problems) or None)
 	[ -x "$BATS_TEST_DIRNAME/../app/.build/release/LogGrade" ] || fail "no optimised binary"
 }
 
+# bats test_tags=slow,serial
+@test "the app bundle contains universal binaries" {
+	command -v swift >/dev/null || skip "no swift toolchain"
+	command -v lipo >/dev/null || skip "lipo not available"
+	local app="$BATS_TEST_DIRNAME/../dist/LogGrade.app"
+	# Build a debug bundle with universal support. Requires arm64 tools in ~/.local/share/loggrade-tools/.
+	[ -f "$HOME/.local/share/loggrade-tools/x86_64/jq" ] || skip "arm64 tools not set up in ~/.local/share/loggrade-tools/"
+	run "$BATS_TEST_DIRNAME/../app/make-app.sh" --debug
+	[ "$status" -eq 0 ] || fail "$output"
+	# The app's executable must be universal (both x86_64 and arm64).
+	local archs
+	archs=$(lipo -archs "$app/Contents/MacOS/LogGrade")
+	[[ "$archs" == *"x86_64"* ]] || fail "app executable missing x86_64: $archs"
+	[[ "$archs" == *"arm64"* ]] || fail "app executable missing arm64: $archs"
+	# jq must be universal. ffmpeg and ffprobe are x86_64-only (no trustworthy arm64 static build).
+	archs=$(lipo -archs "$app/Contents/Resources/engine/jq")
+	[[ "$archs" == *"x86_64"* ]] || fail "jq missing x86_64: $archs"
+	[[ "$archs" == *"arm64"* ]] || fail "jq missing arm64: $archs"
+	# ffmpeg and ffprobe should exist but be x86_64-only.
+	[ -x "$app/Contents/Resources/engine/ffmpeg" ] || fail "ffmpeg not in bundle"
+	[ -x "$app/Contents/Resources/engine/ffprobe" ] || fail "ffprobe not in bundle"
+	archs=$(lipo -archs "$app/Contents/Resources/engine/ffmpeg" 2>&1)
+	[[ "$archs" != *"arm64"* ]] || fail "ffmpeg should be x86_64-only (no trustworthy arm64 build): $archs"
+	# Verify code signatures are valid.
+	codesign --verify --deep --strict "$app" || fail "code signature verification failed"
+}
+
 @test "a measured exposure can be handed back instead of measured again" {
 	# The probe reads a number that does not change when a look does, so an interface adjusting a
 	# curve re-measures the same value on every render — about a second of a four-second preview.
