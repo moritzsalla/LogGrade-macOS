@@ -22,7 +22,8 @@ per-clip answer, and each has already been got wrong by assuming the previous cl
 5. **Pick the crop offset** for any deliverable that crops — pull one or two candidates from the
    graded master at different vertical offsets, look at them, pick one. Don't reuse IMG_0609's
    offset (750) blindly; composition differs per clip, and `grade.sh` refuses a cropped deliverable
-   across several clips unless you pass `CROP_Y` explicitly.
+   outright unless you pass `CROP_Y` — there is no default. `CROP_Y=centre` is how you say this
+   clip does not need a considered one.
 6. **On sign-off, run the real finals**. A deliverable is a preset name or `name:aspect-w:aspect-h`:
    - `./scripts/03-final.sh IMG_XXXX reels`
    - `./scripts/03-final.sh IMG_XXXX feed <crop_y>`

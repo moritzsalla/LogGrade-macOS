@@ -50,6 +50,17 @@ same rounding in silence is this project's oldest failure class.
   camera's own 2160x3840 is exactly 9:16, so nothing about real footage moves. It surfaced because
   the suite's synthetic fixtures were 64x128, i.e. 1:2, and had been silently stretched for as long
   as they had existed; they are 72x128 now, which is the shape they always claimed to be.
+- **The crop offset has no default, and centre was refused as one.** It was 750 — IMG_0609's
+  composition, correct for exactly one clip in the world — and opening the deliverable set up
+  pointed it at every shape rather than at one. Centre is the obvious replacement and is the wrong
+  one: the README's own list of what took longest says a batch centred by default gives files that
+  all look finished and are all framed wrong. So the default is gone rather than substituted, a
+  cropping deliverable is refused without an offset for one clip as readily as for twenty, and
+  `CROP_Y=centre` reaches the same picture as a decision somebody made. It is resolved per clip
+  against the measured frame, which is the thing a fixed pixel offset cannot be, and the row it
+  lands on is printed. The app never depended on the default: it already blocks a render whose
+  cropping deliverable has no per-clip offset, so this makes the engine agree with it rather than
+  the reverse.
 - **Deliverable names reach a filename and an ffmpeg argument**, so they go through
   `require_clip_name` rather than a weaker guard written beside them.
 - **What is NOT built:** two-dimensional crop geometry. The window is still as wide as the source,

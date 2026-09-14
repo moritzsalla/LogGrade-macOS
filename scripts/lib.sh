@@ -442,7 +442,7 @@ fps_filter() {  # fps_filter <source-rate> <target-rate>  -> ",fps=N" or "" or r
 # with a filter error, after the graph has already been built. An offset past the frame edge was
 # unvalidated and 03-final.sh claimed the portrait guard covered it; it does not, it only compares
 # width against height.
-crop_prefix() {  # crop_prefix <src-w> <src-h> <aspect-w> <aspect-h> <offset>  -> "crop=...," or ""
+crop_prefix() {  # crop_prefix <src-w> <src-h> <aspect-w> <aspect-h> <offset|centre>  -> "crop=...,"
 	local sw="$1" sh="$2" aw="$3" ah="$4" y="$5" ch max
 	ch=$(( sw * ah / aw ))
 	# Even dimensions: libx264 cannot encode an odd one, and the failure arrives at encode time.
@@ -460,6 +460,26 @@ crop_prefix() {  # crop_prefix <src-w> <src-h> <aspect-w> <aspect-h> <offset>  -
 		return 0
 	fi
 	max=$(( sh - ch ))
+	# NO DEFAULT. This used to fall back to 750, which is one clip's composition and nobody else's;
+	# a caller that has not decided must be told, not guessed for. Reachable even when the run's
+	# up-front check passed, because that check reads the first renderable clip and a later one can
+	# be a different shape.
+	if [ -z "$y" ]; then
+		echo "REFUSING: a ${aw}:${ah} window on ${sw}x${sh} needs a vertical offset, and none was given." >&2
+		echo "  Where the window sits is a composition call. Pass CROP_Y=<0..$max>, or CROP_Y=centre" >&2
+		echo "  to say explicitly that this clip does not need one." >&2
+		return 1
+	fi
+	# `centre` is resolved PER CLIP, against the frame that was actually measured — which is the
+	# thing a fixed pixel offset cannot be. It is spelled out by the caller rather than assumed:
+	# defaulting to centre gives a batch of files that all look finished and are all framed wrong,
+	# and saying "centre" is a decision someone made.
+	case "$y" in
+		centre|center)
+			y=$(( max / 2 ))
+			# Even, because an odd vertical crop offset shifts the chroma siting on 4:2:0.
+			y=$(( y - y % 2 ));;
+	esac
 	if [ "$y" -lt 0 ] || [ "$y" -gt "$max" ]; then
 		echo "REFUSING: crop offset $y is outside 0..$max for a ${sw}x${ch} window on ${sw}x${sh}." >&2
 		echo "  Past the edge ffmpeg fails mid-render, seconds in, with a filter error." >&2
@@ -530,7 +550,10 @@ deliverable_spec() {  # deliverable_spec <spec>  -> "<name> <aw> <ah> <offset|->
 		return 1
 	fi
 	if [ -n "$off" ]; then
-		off="$(require_number "deliverable $name offset" "$off")" || return 1
+		case "$off" in
+			centre|center) off="centre";;
+			*) off="$(require_number "deliverable $name offset" "$off")" || return 1;;
+		esac
 	else
 		off="-"
 	fi
