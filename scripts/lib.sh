@@ -991,8 +991,8 @@ DELIVERY_ENCODE=(-map "[o]" -map "0:a:0?" -shortest
 	-color_primaries bt709 -color_trc bt709 -colorspace bt709
 	-c:a aac -b:a 192k -movflags +faststart)
 
-# Delivery only; the master keeps its audio. 60, not 80: the 2-pole filter is -3 dB at its cutoff,
-# and 80 cost 1.8 dB at 80-120 Hz for little more. Measured in docs/PIPELINE.md, "Encode".
+# Delivery only; the master keeps its audio. 60, not 80: the filter is -3 dB at its cutoff, and 80
+# cut the peak less (1.3 dB against 1.8) and cost 1.8 dB at 80-120 Hz. docs/PIPELINE.md, "Encode".
 DELIVERY_AUDIO_HIGHPASS_HZ=60
 
 # The graded master's encode, shared by the two staged stages that write one. Audio mapping is the

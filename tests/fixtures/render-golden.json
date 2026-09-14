@@ -24,7 +24,7 @@
     "scripts/applelog.py": "6c3b58994be4bfe04eb31c066dfa6ffbe55810a55c3b5828be3da79d3c6e0696",
     "scripts/cubefile.py": "b87f276f8579484d43c61683a2ca943acf9af59f7e750a1cc8ed0d53aecec13e",
     "scripts/grade.sh": "28aa2870568d128a5f9d72c01ac765f72dc7623ae5d046701f12b2e2bf5b1f92",
-    "scripts/lib.sh": "bac89876056596473e4cb82e1de381bc6afb90675eb17e08dd756e390dceb73c",
+    "scripts/lib.sh": "4e2e5d454288ccb5347cca301d0e08494b6c01f0047cd1fa470b9926e61bce8f",
     "scripts/make-correct-lut.py": "93d79ee78266071ca6ca9195126bc67006cb2b7c66ce7eee44f73b8fec81e521",
     "scripts/make-filmic-lut.py": "221837d2612451d8f491bc1abdd75997c9d55611dd523644f2e06417a20ff1de",
     "scripts/make-halation-luts.py": "574e21ef03435c9b6ee8f1d81cde19e06dafdd1bd38a6c54157767f911d3351a",
