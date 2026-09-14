@@ -177,6 +177,26 @@ expense of another.
   regardless — feeding it high quality just means less of what it does have to throw away.
   Same color-tag verification as every other stage.
 
+## Sharpen and grain at other heights
+
+IMG_0607 frame 12, luma; code values. Grain = default − `GRAIN_STRENGTH=0` in flat sky; sharpen =
+that − the same with the delivery `unsharp` amount at 0; edge = top 5% gradient; corr and hw = lag
+where horizontal autocorrelation falls below 0.5. Not yet judged by eye.
+
+| Height | r | Grain RMS | Grain corr px | Corr %h | Sharpen RMS | Edge residual | Sharpen hw %h |
+|--------|---|-----------|---------------|---------|-------------|---------------|---------------|
+| 960    | 3 | 3.14      | 1.03          | 0.108   | 3.17        | 5.56          | 0.070         |
+| 1280   | 3 | 3.06      | 1.10          | 0.086   | 2.92        | 4.97          | 0.053         |
+| 1920   | 5 | 3.00      | 1.21          | 0.063   | 3.04        | 5.52          | 0.043         |
+| 2560   | 7 | 2.94      | 1.26          | 0.049   | 2.95        | 5.44          | 0.038         |
+
+Renders: `GRADE_WORK_DIR=<one per render> PROOF=1 STAB=0 HEIGHT=<h> [GRAIN_STRENGTH=0] grade.sh`.
+
+Grain keeps its strength and stays about one output pixel wide, so it is 1.7× coarser relative to
+the picture at 960 than at 1920. Sharpening keeps its strength too, but its residual widens less
+than the kernel, so it acts on relatively finer detail as the frame gets taller. About 1.6 of each
+sharpen RMS is sharpened sky noise and encode disagreement, which these renders cannot separate.
+
 ## The tone stage is not literally luma-only
 
 `lut1d` cannot process a YUV plane: ffmpeg converts to `gbrp10le` around it and the curve is

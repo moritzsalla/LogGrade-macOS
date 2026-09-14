@@ -1229,6 +1229,9 @@ delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-pre
 	# only 1920 has been looked at. It is stated here so the next reader knows which of the two
 	# numbers has evidence behind it.
 	#
+	# Measured at 960-2560 in PIPELINE.md (unjudged by eye): strength holds, but the residual widens
+	# less than the radius, and grain stays ~1px, so both change relative to the picture.
+	#
 	# unsharp needs odd sizes and rejects anything below 3.
 	local r
 	r=$(( 5 * $2 / 1920 ))
