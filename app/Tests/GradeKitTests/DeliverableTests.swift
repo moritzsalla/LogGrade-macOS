@@ -11,9 +11,10 @@ final class DeliverableTests: XCTestCase {
     private func aProject(targets: [Deliverable], height: Int = 1920) throws -> Project {
         let json = #"""
         {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
-         "power":"1,1,1","lum_mix":1},"look":{"lut":"kodak_portra_400_nc"},
+         "power":"1,1,1","lum_mix":1},
+         "halation":{"strength":0,"threshold":1,"radius":0.006,"tint":"1,0.3,0.05"},"look":{"lut":"kodak_portra_400_nc","strength":1},"print":{"lut":"none","strength":1},
          "tone":{"gamma":2.02,"pivot":0.39,"contrast":1.09,"toe":0,"shoulder":0.1,"black":0.025},
-         "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8},
+         "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8,"shadows":1,"highlights":1},
          "stabilisation":{"smoothing":30},"match":{"reference_yavg":609}}
         """#
         let look = try Look(data: Data(json.utf8))

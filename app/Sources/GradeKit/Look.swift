@@ -113,6 +113,48 @@ public struct Look: Equatable {
         }
     }
 
+    /// The glow bright things spill into their surroundings, computed in linear light before
+    /// Apple's conversion. `scripts/make-halation-luts.py` carries what each number means and
+    /// `docs/adr/0012` why it sits where it does. A strength of zero leaves the stage out.
+    public struct Halation: Equatable {
+        public var strength: Double
+        public var threshold: Double
+        public var radius: Double
+        /// "r,g,b", the engine's wire format, for the reason `Correct` keeps its wheels as text.
+        public var tint: String
+
+        public init(strength: Double = 0, threshold: Double = 1, radius: Double = 0.006,
+                    tint: String = "1,0.3,0.05") {
+            self.strength = strength; self.threshold = threshold
+            self.radius = radius; self.tint = tint
+        }
+
+        public var isNeutral: Bool { strength == 0 }
+
+        /// The tint as numbers, or nil when the text is not three of them — which the engine
+        /// refuses, so the live picture refuses it too.
+        public var tintValues: (Double, Double, Double)? {
+            let parts = tint.split(separator: ",").map {
+                Double($0.trimmingCharacters(in: .whitespaces))
+            }
+            guard parts.count == 3, let r = parts[0], let g = parts[1], let b = parts[2] else {
+                return nil
+            }
+            return (r, g, b)
+        }
+
+        public func tint(_ channel: Int) -> Double {
+            guard let t = tintValues else { return 0 }
+            return channel == 0 ? t.0 : (channel == 1 ? t.1 : t.2)
+        }
+
+        public mutating func setTint(_ channel: Int, _ value: Double) {
+            var t = tintValues ?? (1, 0.3, 0.05)
+            if channel == 0 { t.0 = value } else if channel == 1 { t.1 = value } else { t.2 = value }
+            tint = Correct.format(t)
+        }
+    }
+
     public struct Tone: Equatable {
         public var gamma: Double
         public var pivot: Double
@@ -128,19 +170,32 @@ public struct Look: Equatable {
     }
 
     public var correct: Correct
+    public var halation: Halation
     /// The film-emulation cube's stem in `luts/looks/`, or "none".
     public var lookLUT: String
+    /// How far the look's cube moves the picture, 0 to 1. At 1 there is no blend in the render.
+    public var lookStrength: Double
+    /// The print-film cube's stem in `luts/print/`, or "none". It follows the look.
+    public var printLUT: String
+    public var printStrength: Double
     public var tone: Tone
     public var colour: Colour
     public var grainStrength: Double
+    /// The grain's weight at black and at white, 1 at the midtones. Both at 1 is flat grain, and
+    /// leaves the weighting out of the render. `grain.shadows` and `grain.highlights` in the file.
+    public var grainShadows: Double
+    public var grainHighlights: Double
     public var stabilisationSmoothing: Double
     public var matchReferenceYAVG: Double
     /// Everything this type does not model, kept verbatim so a written file is complete.
     public var preserved: [String: Any]
 
     public static func == (a: Look, b: Look) -> Bool {
-        a.correct == b.correct && a.lookLUT == b.lookLUT && a.tone == b.tone
+        a.correct == b.correct && a.halation == b.halation && a.lookLUT == b.lookLUT
+            && a.lookStrength == b.lookStrength && a.printLUT == b.printLUT
+            && a.printStrength == b.printStrength && a.tone == b.tone
             && a.colour == b.colour && a.grainStrength == b.grainStrength
+            && a.grainShadows == b.grainShadows && a.grainHighlights == b.grainHighlights
             && a.stabilisationSmoothing == b.stabilisationSmoothing
             && a.matchReferenceYAVG == b.matchReferenceYAVG
     }
@@ -183,7 +238,17 @@ public struct Look: Equatable {
             offset: try text(c, "offset", "correct.offset"),
             power: try text(c, "power", "correct.power"),
             lumMix: try number(c, "lum_mix", "correct.lum_mix"))
-        lookLUT = try text(try block("look"), "lut", "look.lut")
+        let h = try block("halation")
+        halation = Halation(strength: try number(h, "strength", "halation.strength"),
+                            threshold: try number(h, "threshold", "halation.threshold"),
+                            radius: try number(h, "radius", "halation.radius"),
+                            tint: try text(h, "tint", "halation.tint"))
+        let lk = try block("look")
+        lookLUT = try text(lk, "lut", "look.lut")
+        lookStrength = try number(lk, "strength", "look.strength")
+        let pr = try block("print")
+        printLUT = try text(pr, "lut", "print.lut")
+        printStrength = try number(pr, "strength", "print.strength")
         let t = try block("tone")
         tone = Tone(gamma: try number(t, "gamma", "tone.gamma"),
                     pivot: try number(t, "pivot", "tone.pivot"),
@@ -194,14 +259,17 @@ public struct Look: Equatable {
         let col = try block("colour")
         colour = Colour(saturation: try number(col, "saturation", "colour.saturation"),
                         warmth: try number(col, "warmth", "colour.warmth"))
-        grainStrength = try number(try block("grain"), "strength", "grain.strength")
+        let g = try block("grain")
+        grainStrength = try number(g, "strength", "grain.strength")
+        grainShadows = try number(g, "shadows", "grain.shadows")
+        grainHighlights = try number(g, "highlights", "grain.highlights")
         stabilisationSmoothing = try number(try block("stabilisation"), "smoothing",
                                             "stabilisation.smoothing")
         matchReferenceYAVG = try number(try block("match"), "reference_yavg",
                                         "match.reference_yavg")
 
         var extra = root
-        for known in ["correct", "look", "tone", "colour", "grain", "stabilisation", "match"] {
+        for known in ["correct", "halation", "look", "print", "tone", "colour", "grain", "stabilisation", "match"] {
             extra.removeValue(forKey: known)
         }
         preserved = extra
@@ -214,13 +282,19 @@ public struct Look: Equatable {
             "slope": correct.slope, "offset": correct.offset, "power": correct.power,
             "lum_mix": correct.lumMix,
         ]
-        root["look"] = ["lut": lookLUT]
+        root["halation"] = [
+            "strength": halation.strength, "threshold": halation.threshold,
+            "radius": halation.radius, "tint": halation.tint,
+        ]
+        root["look"] = ["lut": lookLUT, "strength": lookStrength]
+        root["print"] = ["lut": printLUT, "strength": printStrength]
         root["tone"] = [
             "gamma": tone.gamma, "pivot": tone.pivot, "contrast": tone.contrast,
             "toe": tone.toe, "shoulder": tone.shoulder, "black": tone.black,
         ]
         root["colour"] = ["saturation": colour.saturation, "warmth": colour.warmth]
-        root["grain"] = ["strength": grainStrength]
+        root["grain"] = ["strength": grainStrength, "shadows": grainShadows,
+                         "highlights": grainHighlights]
         root["stabilisation"] = ["smoothing": stabilisationSmoothing]
         root["match"] = ["reference_yavg": matchReferenceYAVG]
         return try JSONSerialization.data(withJSONObject: root,

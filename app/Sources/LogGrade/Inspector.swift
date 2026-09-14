@@ -56,6 +56,27 @@ struct InspectorView: View {
                     control("Luminance", $model.look.correct.lumMix, 0...1,
                             default: model.defaultLook.correct.lumMix)
                 }
+                stage("Halation", mark: .editable,
+                      help: "The warm glow film grows around bright things, where light reflects "
+                          + "off the film base and exposes the red layer a second time.\n\nIt is "
+                          + "added in linear light before the conversion, and only past edges: a "
+                          + "bright field does not glow onto itself. Threshold is in scene light, "
+                          + "where 1 is diffuse white. Radius is a fraction of the frame's height. "
+                          + "Strength 0 leaves the stage out entirely.") {
+                    control("Strength", $model.look.halation.strength, 0...1.5,
+                            default: model.defaultLook.halation.strength)
+                    control("Threshold", $model.look.halation.threshold, 0.25...6,
+                            format: "%.2f", default: model.defaultLook.halation.threshold)
+                    control("Radius", $model.look.halation.radius, 0.001...0.03, format: "%.4f",
+                            default: model.defaultLook.halation.radius)
+                    ForEach(Array(["R", "G", "B"].enumerated()), id: \.offset) { channel, name in
+                        control("Tint \(name)", Binding(
+                            get: { model.look.halation.tint(channel) },
+                            set: { model.look.halation.setTint(channel, $0) }),
+                                0...1, format: "%.2f",
+                                default: model.defaultLook.halation.tint(channel))
+                    }
+                }
                 stage("Film look", mark: .editable,
                       help: "A film-emulation lookup, applied after the conversion.\n\nThe tone "
                           + "curve below was set with this cube already in the chain, so changing "
@@ -70,6 +91,26 @@ struct InspectorView: View {
                         model.liveUpdate()      // instantly, from the cubes already in memory
                         model.renderPreview()   // then the exact frame, as with every control
                     }
+                    control("Strength", $model.look.lookStrength, 0...1, format: "%.2f",
+                            default: model.defaultLook.lookStrength)
+                }
+                stage("Print", mark: .editable,
+                      help: "A print-film emulation — Kodak 2383 is the cinema print stock — "
+                          + "applied after the film look, the way a negative is printed.\n\nIt "
+                          + "adds the print's contrast and colour, which at full strength over a "
+                          + "tuned tone curve is usually too much. Strength blends it back toward "
+                          + "the picture it was given.") {
+                    Picker("", selection: $model.look.printLUT) {
+                        Text("None").tag("none")
+                        ForEach(model.availablePrints, id: \.self) { Text($0).tag($0) }
+                    }
+                    .labelsHidden()
+                    .onChange(of: model.look.printLUT) { _ in
+                        model.liveUpdate()
+                        model.renderPreview()
+                    }
+                    control("Strength", $model.look.printStrength, 0...1, format: "%.2f",
+                            default: model.defaultLook.printStrength)
                 }
                 stage("Tone", mark: .editable,
                       help: "Brightness and contrast, applied to the luma plane only so the "
@@ -102,10 +143,17 @@ struct InspectorView: View {
                 stage("Delivery", mark: .unpreviewed,
                       help: "Grain and stabilisation are applied to the video, never to the "
                           + "preview. Both need moving footage to judge, so a still leaves them "
-                          + "out rather than showing a version that is not what renders.",
+                          + "out rather than showing a version that is not what renders.\n\n"
+                          + "Grain shadows and highlights set how much grain reaches black and "
+                          + "white, as film prints do: most in the midtones, less at either end. "
+                          + "Both at 1 is flat grain.",
                       last: true) {
                     control("Grain", $model.look.grainStrength, 0...20, format: "%.0f",
                             default: model.defaultLook.grainStrength)
+                    control("Grain shadows", $model.look.grainShadows, 0...1, format: "%.2f",
+                            default: model.defaultLook.grainShadows)
+                    control("Grain highs", $model.look.grainHighlights, 0...1, format: "%.2f",
+                            default: model.defaultLook.grainHighlights)
                     control("Stabiliser", $model.look.stabilisationSmoothing, 0...60, format: "%.0f",
                             default: model.defaultLook.stabilisationSmoothing)
                 }

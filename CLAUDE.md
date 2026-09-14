@@ -49,6 +49,9 @@ you don't trip it; the measurement is in `docs/PIPELINE.md`, which is the only p
 - **Grain goes after the sharpener, at half resolution.** Before it, the sharpener rings it.
 - **`blend` needs `shortest=1`;** `-shortest` is not a substitute under `filter_complex`. The
   reasoning is in `lib.sh`, above `DELIVERY_BLEND`.
+- **In float, `blend` addition, `avgblur` and `boxblur` clamp at 1.0,** and `lut1d` ignores a
+  negative `DOMAIN_MIN`. The halation stage runs in linear light above 1.0 and is built around all
+  four; `gblur`'s default single step is also not a Gaussian. Measured in `docs/PIPELINE.md`.
 - **Verify colour tags after every encode.** `prores_ks` and `libx264` both ignored the flags here,
   and a wrongly tagged file is double-transformed by any player that trusts it. `safe_retag`.
 

@@ -34,6 +34,8 @@
 #                     the measured cost and error at 17, 33 and 65)
 #   LOOK=<name|none>  which film-emulation cube to use, by stem from luts/looks/, or none for a
 #                     neutral grade. Overrides look.json's .look.lut for this run.
+#   PRINT=<name|none> which print-film cube follows the look, by stem from luts/print/, or none.
+#                     Overrides look.json's .print.lut for this run.
 #   FRAME=<seconds>   render ONE frame at that timecode through the grade chain to a PNG and
 #                     stop — the app's exact preview. No delivery stage, no stabilisation.
 #   FRAME_HEIGHT=<px> height of that frame (default 1440, the Bench's working height)
@@ -80,6 +82,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="$(resolve_work_dir "$ROOT")"
+# Taken before anything else runs, so the report's wall time includes argument checks and the crop
+# probe's decode rather than starting where the report file happens to be created.
+RUN_T0="$(now_ms)"
 
 CST="$ROOT/luts/apple/AppleLogToRec709-v1.0.cube"
 PROOF="${PROOF:-}"        # PROOF=<seconds> renders a short proof; see the note below
@@ -163,6 +168,9 @@ CACHE="$WORK/dist/.grade-work"
 # The look LUT is a look value like any other, so it comes from look.json. LOOK=<name|none|path>
 # overrides it for one run; the app sets it per render.
 LOOK_LUT="$(resolve_look_lut "${LOOK:-$(look .look.lut)}" "$ROOT")"
+PRINT_LUT="$(resolve_look_lut "${PRINT:-$(look .print.lut)}" "$ROOT" print)"
+LOOK_STRENGTH="$(require_unit look.strength "$(look .look.strength)")"
+PRINT_STRENGTH="$(require_unit print.strength "$(look .print.strength)")"
 
 # --- the input correction ---------------------------------------------------------------
 # Exposure, white balance and the CDL wheels, generated into one cube that runs BEFORE Apple's
@@ -190,6 +198,25 @@ correct_args() {
 	printf '%s' " --lum-mix $CORRECT_LUM_MIX --size $CORRECT_SIZE"
 }
 CORRECT_PREFIX=""
+
+# --- halation ------------------------------------------------------------------------------
+# A warm glow spilling from bright things into what surrounds them, computed in linear light between
+# the correction and the conversion. lib.sh's halation_prefix carries the graph and its traps, and
+# docs/adr/0012 carries why it sits here. A strength of 0 leaves the whole stage out of the graph,
+# which is what keeps a default render identical to the precursor's — the generator owns that rule.
+#
+# The tint is three numbers spliced into a filter graph, so each is validated where it is read.
+HAL_STRENGTH="$(require_number halation.strength "$(look .halation.strength)")"
+HAL_THRESHOLD="$(require_number halation.threshold "$(look .halation.threshold)")"
+HAL_RADIUS="$(require_number halation.radius "$(look .halation.radius)")"
+HAL_TINT="$(look .halation.tint)"
+IFS=, read -r _tr _tg _tb _extra <<< "$HAL_TINT"
+if [ -n "${_extra:-}" ] || [ -z "${_tb:-}" ]; then
+	echo "halation.tint must be three numbers, r,g,b: got '$HAL_TINT'" >&2
+	exit 1
+fi
+HAL_TINT="$(require_number halation.tint "$_tr"),$(require_number halation.tint "$_tg"),$(require_number halation.tint "$_tb")"
+HAL_DIR=""
 SAT="$(require_number SAT "$(look .colour.saturation)")"
 WARM="$(require_number WARM "$(look .colour.warmth)")"
 G_PIVOT="$(require_number pivot "$(look .tone.pivot)")"
@@ -200,6 +227,8 @@ G_BLACK="$(require_number black "$(look .tone.black)")"
 G_GAMMA_REF="$(require_number gamma "$(look .tone.gamma)")"   # gamma the look was tuned at...
 Y_REF="$(require_number reference_yavg "$(look .match.reference_yavg)")"  # ...against this mean
 GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain.strength)}")"
+GRAIN_SHADOWS="$(require_unit grain.shadows "$(look .grain.shadows)")"
+GRAIN_HIGHLIGHTS="$(require_unit grain.highlights "$(look .grain.highlights)")"
 SMOOTHING="$(require_number SMOOTHING "${SMOOTHING:-$(look .stabilisation.smoothing)}")"
 STAB="${STAB:-1}"; MATCH="${MATCH:-1}"; DRY="${DRY:-0}"
 # Empty means NOT GIVEN, which is a different thing from 0 — 0 is the top of the frame and a real
@@ -362,6 +391,13 @@ if [ "$("$SCRIPT_DIR/make-correct-lut.py" --check-neutral $(correct_args))" = "a
 	"$SCRIPT_DIR/make-correct-lut.py" "$CORRECT_LUT" $(correct_args) >/dev/null
 	CORRECT_PREFIX="lut3d=file='${CORRECT_LUT}':interp=tetrahedral,"
 fi
+# The cubes depend only on the threshold, so they are made once per run. The prefix itself is built
+# per clip below, because its radius is a fraction of each clip's own frame.
+if [ "$("$SCRIPT_DIR/make-halation-luts.py" --check-neutral --strength "$HAL_STRENGTH")" = "active" ]; then
+	HAL_DIR="$CACHE/halation"
+	# Not on a dry run, which renders nothing — the same rule the per-clip tone cube follows.
+	[ "$DRY" = "1" ] || "$SCRIPT_DIR/make-halation-luts.py" "$HAL_DIR" --threshold "$HAL_THRESHOLD" >/dev/null
+fi
 
 # --- MATCH=batch: the exposure reference comes from this run's own clips -----------------
 # One probe per clip, up front, so the median is known before the first render. The results are
@@ -370,14 +406,21 @@ fi
 #
 # A clip whose probe comes back empty is left out of the MEDIAN but still rendered — it falls back
 # to the reference gamma below, exactly as it does under MATCH=1.
+# Phase totals for the report's summary, in integer milliseconds (see now_ms). Everything from the
+# first line of this script to here — argument checks, the crop probe, the correction cube — is
+# "preflight".
+T_PREFLIGHT=$(( $(now_ms) - RUN_T0 )); T_ORIENT=0; T_PROBE=0; T_STAB=0; T_TONE=0; T_ENCODE=0; T_FRAME=0
 BATCH_YAVGS=()
 if [ "$MATCH" = "batch" ]; then
 	say "measuring ${#CLIPS[@]} clip(s) for a batch exposure reference"
+	_t=$(now_ms)
 	for SRC in "${CLIPS[@]}"; do
 		_y="$(probe_yavg "$SRC" "$CST")"
 		[ -n "$_y" ] || _y="-"
 		BATCH_YAVGS+=("$_y")
 	done
+	T_PROBE=$(( $(now_ms) - _t ))
+	report_line "      batch exposure probe took $(fmt_ms "$T_PROBE") for ${#CLIPS[@]} clip(s)"
 	# `|| true` would hide an all-empty run behind look.json's reference, which is the silent
 	# substitution this whole file refuses to make. Stop instead.
 	if ! Y_REF="$(printf '%s\n' "${BATCH_YAVGS[@]}" | grep -v '^-$' | median)"; then
@@ -393,7 +436,17 @@ fi
 
 say "grade run $(date '+%Y-%m-%d %H:%M:%S')  —  ${#CLIPS[@]} clip(s)"
 say "look: sat=$SAT warm=$WARM grain=$GRAIN_STRENGTH stab=$STAB exposure-match=$MATCH"
+say "film: look=${LOOK_LUT:-none}@$LOOK_STRENGTH print=${PRINT_LUT:-none}@$PRINT_STRENGTH"
 [ -z "$CORRECT_PREFIX" ] || say "correction: exposure=$CORRECT_EXPOSURE temp=$CORRECT_TEMP tint=$CORRECT_TINT slope=$CORRECT_SLOPE offset=$CORRECT_OFFSET power=$CORRECT_POWER lum_mix=$CORRECT_LUM_MIX (${CORRECT_SIZE}-point cube)"
+[ -z "$HAL_DIR" ] || say "halation: strength=$HAL_STRENGTH threshold=$HAL_THRESHOLD radius=$HAL_RADIUS tint=$HAL_TINT"
+# Not for FRAME: the app runs one per preview, and on a 2017 Intel MacBook these six process spawns
+# measured ~150ms of a ~3s frame — for a line that is identical in every preview report.
+[ -n "$FRAME" ] || report_environment "$ROOT"
+# The EFFECTIVE values, after defaults and look.json, which is what a report read weeks later needs:
+# the environment that launched the run is gone by then.
+report_line "knobs:   deliverables=$(IFS=,; printf '%s' "${D_NAME[*]}") width=$WIDTH height=$HEIGHT crop_y=${CROP_Y_OK:--} match=$MATCH reference_yavg=$Y_REF stab=$STAB smoothing=$SMOOTHING grain=$GRAIN_STRENGTH fps_out=${FPS_OUT:--} proof=${PROOF:--} frame=${FRAME:--} frame_height=$FRAME_HEIGHT frame_stage=$FRAME_STAGE look_lut=${LOOK_LUT:-none}@$LOOK_STRENGTH print_lut=${PRINT_LUT:-none}@$PRINT_STRENGTH halation=${HAL_STRENGTH}/${HAL_THRESHOLD}/${HAL_RADIUS}/${HAL_TINT} grain_weights=${GRAIN_SHADOWS}/${GRAIN_HIGHLIGHTS} correct_size=$CORRECT_SIZE dry=$DRY json=$JSON"
+report_line "work:    $WORK"
+report_line "preflight took $(fmt_ms "$T_PREFLIGHT")"
 say ""
 emit run_start clips "${#CLIPS[@]}" saturation "$SAT" warmth "$WARM" \
 	grain "$GRAIN_STRENGTH" stabilisation "$STAB" exposure_match "$MATCH" \
@@ -409,6 +462,7 @@ for SRC in "${CLIPS[@]}"; do
 	# clip, including the ones about to be skipped. Advancing it further down would silently hand
 	# clip n+1 the measurement of clip n as soon as anything ahead of it skipped.
 	BI="$CLIP_I"; CLIP_I=$(( CLIP_I + 1 ))
+	CLIP_T0=$(now_ms)
 
 	# The clip name becomes a path component AND reaches the filter graph, through the per-clip
 	# tone LUT and the transform path. It is the one input nobody types.
@@ -423,6 +477,11 @@ for SRC in "${CLIPS[@]}"; do
 		SKIPPED=$((SKIPPED+1)); continue
 	fi
 	SRC_W="${SRC_SIZE% *}"; SRC_H="${SRC_SIZE#* }"
+	HALATION_PREFIX=""
+	[ -z "$HAL_DIR" ] || HALATION_PREFIX="$(halation_prefix "$HAL_DIR" \
+		"$(halation_sigma "$SRC_H" "$HAL_RADIUS")" "$HAL_STRENGTH" "$HAL_TINT")"
+	_t=$(( $(now_ms) - CLIP_T0 )); T_ORIENT=$(( T_ORIENT + _t ))
+	report_line "      orientation check took $(fmt_ms "$_t")"
 
 	# --- exposure match: one cheap probe, not a full pass --------------------------------
 	# The solve lives in scripts/solve-gamma.py, not in a python3 -c string here: a degenerate
@@ -440,8 +499,11 @@ for SRC in "${CLIPS[@]}"; do
 			# Measured in the pre-pass that produced Y_REF; "-" means that probe came back empty.
 			YAVG="${BATCH_YAVGS[$BI]}"
 		else
+			_t=$(now_ms)
 			YAVG="$(probe_yavg "$SRC" "$CST")"
 			[ -n "$YAVG" ] || YAVG="-"
+			_t=$(( $(now_ms) - _t )); T_PROBE=$(( T_PROBE + _t ))
+			report_line "      exposure probe took $(fmt_ms "$_t")"
 		fi
 		if [ "$YAVG" != "-" ]; then
 			GAMMA=$("$SCRIPT_DIR/solve-gamma.py" "$YAVG" "$Y_REF" "$G_GAMMA_REF")
@@ -457,7 +519,10 @@ for SRC in "${CLIPS[@]}"; do
 		if ! transform_is_fresh "$TRF" "$SRC" && [ "$DRY" != "1" ]; then
 			mkdir -p "$(dirname "$TRF")"
 			trap 'rm -f "${TRF}.partial"' EXIT
+			_t=$(now_ms)
 			ffmpeg -v error -y -i "$SRC" -vf "lut3d=file='${CST}':interp=tetrahedral,vidstabdetect=shakiness=5:accuracy=15:stepsize=6:result=${TRF}.partial" -f null -
+			_t=$(( $(now_ms) - _t )); T_STAB=$(( T_STAB + _t ))
+			report_line "      stabilisation detect took $(fmt_ms "$_t")"
 			require_nonempty "${TRF}.partial" "stabilisation analysis"
 			mv "${TRF}.partial" "$TRF"
 			trap - EXIT
@@ -509,13 +574,21 @@ for SRC in "${CLIPS[@]}"; do
 	# JSON boolean would need a third case for one field.
 	emit clip_planned clip "$CLIP" source "$SRC" yavg "$YAVG" gamma "$GAMMA" \
 		matched "$MATCHED" fps "$FPS"
+	# Frame count and duration are what tell a slow run on a long clip from a slow machine. Not for
+	# FRAME: the app runs that once per preview, where two ffprobes (~120ms) buy nothing it uses.
+	if [ -z "$FRAME" ]; then
+		report_line "      source: ${SRC_W}x${SRC_H} at ${FPS} fps, $(probe_number "$SRC" format=duration)s, $(probe_number "$SRC" stream=nb_frames) frames, $(( $(stat -f%z "$SRC" 2>/dev/null || echo 0) / 1048576 ))MB  ($SRC)"
+	fi
 	[ "$DRY" = "1" ] && continue
 
 	# Generated AFTER the dry-run exit, not before: DRY=1 is documented as "plan only, render
 	# nothing", and this was writing a 4096-entry cube per clip on a run that renders nothing. The
 	# probe and the solve still happen above, because the solved gamma IS the plan.
+	_t=$(now_ms)
 	"$SCRIPT_DIR/make-tone-lut.py" "$TONE" --gamma "$GAMMA" --pivot "$G_PIVOT" \
 		--contrast "$G_CONTRAST" --toe "$G_TOE" --shoulder "$G_SHOULDER" --black "$G_BLACK" >/dev/null
+	_t=$(( $(now_ms) - _t )); T_TONE=$(( T_TONE + _t ))
+	report_line "      tone cube took $(fmt_ms "$_t")"
 
 	# The preview stops here: same chain head, same tone cube, no delivery stage. It goes through
 	# grade_chain like everything else, so it cannot drift from what the render does — the suite's
@@ -537,11 +610,17 @@ for SRC in "${CLIPS[@]}"; do
 			frame_graph="format=gbrp16le,scale=-2:${FRAME_HEIGHT}:flags=lanczos"
 		else
 			frame_graph="$(grade_chain "$TONE" "$SAT" "$WARM" \
-  "${CORRECT_PREFIX}lut3d=file='${CST}':interp=tetrahedral,"),scale=-2:${FRAME_HEIGHT}:flags=lanczos"
+  "${CORRECT_PREFIX}${HALATION_PREFIX}lut3d=file='${CST}':interp=tetrahedral,"),scale=-2:${FRAME_HEIGHT}:flags=lanczos"
 		fi
-		if ffmpeg -v error -y -ss "$FRAME" -i "$SRC" -frames:v 1 -filter_complex \
-"[0:v]${frame_graph}[o]" \
-			-map "[o]" -pix_fmt rgb48be "$frame_out"; then
+		# One argument list for both the report and ffmpeg, so what is recorded cannot drift from what
+		# ran. Never empty, so bash 3.2's empty-array trap under `set -u` does not apply.
+		frame_args=(-ss "$FRAME" -i "$SRC" -frames:v 1 -filter_complex "[0:v]${frame_graph}[o]" \
+			-map "[o]" -pix_fmt rgb48be "$frame_out")
+		report_command "frame" "${frame_args[@]}"
+		_t=$(now_ms)
+		if ffmpeg -v error -y "${frame_args[@]}"; then
+			_t=$(( $(now_ms) - _t )); T_FRAME=$(( T_FRAME + _t ))
+			report_line "      frame render took $(fmt_ms "$_t"), clip $(fmt_ms $(( $(now_ms) - CLIP_T0 )))"
 			say "      -> $(basename "$frame_out")  (${FRAME_STAGE}, no delivery stage)"
 			emit frame clip "$CLIP" path "$frame_out" at "$FRAME" height "$FRAME_HEIGHT" \
 				stage "$FRAME_STAGE"
@@ -574,14 +653,15 @@ for SRC in "${CLIPS[@]}"; do
 		local out="$OUT_DIR/${CLIP}_${suffix}.mp4"
 		# A proof is named so it can never be mistaken for a deliverable in a folder listing.
 		[ -n "$PROOF" ] && out="$OUT_DIR/${CLIP}_${suffix}_proof-${PROOF}s.mp4"
+		local t0; t0=$(now_ms)
 		# shellcheck disable=SC2086  # $LIMIT is a deliberate split: a numeric flag pair or nothing
 		render_delivery "$out" "$suffix encode" \
 			-y -i "$SRC" -f lavfi -i "$(grain_plate "$w" "$h" "$FPS")" -filter_complex \
 "[0:v]$(grade_chain "$TONE" "$SAT" "$WARM" \
-  "${CORRECT_PREFIX}lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},"),\
+  "${CORRECT_PREFIX}${HALATION_PREFIX}lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},"),\
 $(delivery_image_chain "$w" "$h" "$SFX" "$crop")${FPS_FILTER}[b];\
 [1:v]$(delivery_grain_branch "$w" "$h" "$GRAIN_STRENGTH")[g];\
-[b][g]${DELIVERY_BLEND}[o]" \
+$(delivery_grain_merge b g o "$GRAIN_SHADOWS" "$GRAIN_HIGHLIGHTS")" \
 			-map "[o]" -map "0:a:0?" -shortest \
 			-c:v libx264 -profile:v high -preset slow -crf 18 \
 			-color_primaries bt709 -color_trc bt709 -colorspace bt709 \
@@ -590,6 +670,8 @@ $(delivery_image_chain "$w" "$h" "$SFX" "$crop")${FPS_FILTER}[b];\
 		# `|| return 1` above is load-bearing now that the caller invokes render() inside an `if`:
 		# that suppresses `set -e` for this whole body, so without it a failed render would fall
 		# through to `stat` on a file that was never written.
+		local ms=$(( $(now_ms) - t0 )); T_ENCODE=$(( T_ENCODE + ms ))
+		report_encode "$suffix encode" "$out" "$ms"
 		local bytes; bytes=$(stat -f%z "$out")
 		say "      -> $(basename "$out")  $(( bytes / 1048576 ))MB"
 		emit output clip "$CLIP" deliverable "$suffix" path "$out" bytes "$bytes"
@@ -632,6 +714,7 @@ $(delivery_image_chain "$w" "$h" "$SFX" "$crop")${FPS_FILTER}[b];\
 		render "$WIDTH" "$_h" "${D_SUFFIX[$_i]}" "$_crop" || { CLIP_OK=0; break; }
 		_i=$(( _i + 1 ))
 	done
+	report_line "      clip took $(fmt_ms $(( $(now_ms) - CLIP_T0 )))"
 	if [ "$CLIP_OK" = "1" ]; then
 		OK=$((OK+1))
 	else
@@ -644,6 +727,18 @@ done
 
 say ""
 say "done: $OK rendered, $SKIPPED skipped, $FAILED failed"
+# "other" is whatever no phase claims — mostly ffprobe calls and the report's own bookkeeping. It
+# is printed so the phases visibly add up, and a large one says a phase is missing its timer.
+RUN_MS=$(( $(now_ms) - RUN_T0 ))
+report_line "finished $(date '+%Y-%m-%d %H:%M:%S'), wall time $(fmt_ms "$RUN_MS")"
+report_line "  preflight       $(fmt_ms "$T_PREFLIGHT")"
+report_line "  orientation     $(fmt_ms "$T_ORIENT")"
+report_line "  exposure probe  $(fmt_ms "$T_PROBE")"
+report_line "  stabilisation   $(fmt_ms "$T_STAB")"
+report_line "  tone cube       $(fmt_ms "$T_TONE")"
+report_line "  encode          $(fmt_ms "$T_ENCODE")"
+report_line "  frame render    $(fmt_ms "$T_FRAME")"
+report_line "  other           $(fmt_ms $(( RUN_MS - T_PREFLIGHT - T_ORIENT - T_PROBE - T_STAB - T_TONE - T_ENCODE - T_FRAME )))"
 say "report: $REPORT"
 emit run_done rendered "$OK" skipped "$SKIPPED" failed "$FAILED" report "$REPORT"
 [ "$FAILED" -eq 0 ] || exit 1

@@ -247,7 +247,9 @@ def chain_string(tone, sat, warm, look="real"):
     """The production chain, out of lib.sh.
 
     `look` is "real" for look.json's own choice, or anything resolve_look_lut accepts — "none"
-    being the one the floor run uses. It has to be resolved the way the entry scripts resolve it,
+    being the one the floor run uses. Any look other than "real" also means no print: the floor
+    run measures the round trip with no cube in it, and a print named in look.json would otherwise
+    arrive through grade_chain's own unset-means-ask rule. It has to be resolved the way the entry scripts resolve it,
     because lib.sh stopped setting LOOK_LUT when the look stopped being a constant: sourcing it and
     calling grade_chain therefore emits a chain with NO look filter at all. The fingerprint guard
     is what caught that, which is the whole reason it hashes the chain rather than trusting it."""
@@ -255,7 +257,7 @@ def chain_string(tone, sat, warm, look="real"):
                         'set -euo pipefail; source "$1"; '
                         'if [ "$5" = "real" ]; then '
                         '  LOOK_LUT="$(resolve_look_lut "$(look .look.lut)" "$6")"; '
-                        'else LOOK_LUT="$(resolve_look_lut "$5" "$6")"; fi; '
+                        'else LOOK_LUT="$(resolve_look_lut "$5" "$6")"; PRINT_LUT=""; fi; '
                         'grade_chain "$2" "$3" "$4"',
                         "_", LIB, tone, sat, warm, look, ROOT],
                        capture_output=True, text=True)

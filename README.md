@@ -80,6 +80,25 @@ not need a considered one.
 
 ---
 
+## Film is more than a cube
+
+A Portra LUT supplies colour and almost nothing else. What reads as film sits outside it, so it is
+built as stages of its own, each measured against the render and absent from it until turned on:
+
+- **Halation** — the warm glow bright things spill past their edges, added in linear light before
+  Apple's conversion, where a sky and a white car are still different amounts of light.
+- **A print** — Kodak 2383 and kin after the negative, as film is printed, at a strength.
+- **Grain that follows the picture** — most in the midtones, receding into shadow and highlight.
+
+![Film ladder](docs/grade-ladder-film.jpg)
+
+Five clips, four rows: the shipped look, then halation, then a softer tone curve, then a 2383 print
+at 40%. None of it is the default yet — the look is still a decision for an eye, not a test.
+
+→ [`adr/0012`](docs/adr/0012_HALATION_IN_LINEAR_BEFORE_THE_CONVERSION.md)
+
+---
+
 ## Deliver in any shape
 
 A deliverable is a name, an aspect and a crop offset — not a size written into the pipeline. Two
@@ -144,5 +163,5 @@ Apple's conversion LUT is not in the repo — its licence forbids redistribution
 macOS on Intel, bash 3.2. Built for my footage and my deliverables.
 
 [PolyForm Noncommercial 1.0.0](LICENSE). Run it, change it, share it, keep the attribution.
-Commercial use needs permission. The film-emulation cubes in `luts/looks/` are MIT-licensed work by
-someone else and keep their own terms.
+Commercial use needs permission. The film-emulation cubes in `luts/looks/` and `luts/print/` are
+MIT-licensed work by someone else and keep their own terms.

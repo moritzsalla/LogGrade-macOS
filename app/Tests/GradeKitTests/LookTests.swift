@@ -118,9 +118,10 @@ final class ProjectTests: XCTestCase {
     private func aLook() throws -> Look {
         let json = #"""
         {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
-         "power":"1,1,1","lum_mix":1},"look":{"lut":"kodak_portra_400_nc"},
+         "power":"1,1,1","lum_mix":1},
+         "halation":{"strength":0,"threshold":1,"radius":0.006,"tint":"1,0.3,0.05"},"look":{"lut":"kodak_portra_400_nc","strength":1},"print":{"lut":"none","strength":1},
          "tone":{"gamma":2.02,"pivot":0.39,"contrast":1.09,"toe":0,"shoulder":0.1,"black":0.025},
-         "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8},
+         "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8,"shadows":1,"highlights":1},
          "stabilisation":{"smoothing":30},"match":{"reference_yavg":609}}
         """#
         return try Look(data: Data(json.utf8))
@@ -140,6 +141,40 @@ final class ProjectTests: XCTestCase {
         // Undecided is not zero, and it has to survive as undecided.
         XCTAssertNil(reread.clips["IMG_0610"]?.cropOffset)
         XCTAssertEqual(reread.clips["IMG_0610"]?.stabilise, false)
+    }
+
+    /// A project saved before the film stages existed still opens, and means what it meant: no
+    /// halation. A current project missing the block is damaged and is refused, because that is
+    /// the rule `Look` enforces everywhere else.
+    func testAProjectFromBeforeTheFilmStagesOpensWithoutThem() throws {
+        var preset = try JSONSerialization.jsonObject(with: try aLook().serialised())
+            as? [String: Any] ?? [:]
+        preset.removeValue(forKey: "halation")
+        preset["grain"] = ["strength": 8]
+        preset.removeValue(forKey: "print")
+        preset["look"] = ["lut": "kodak_portra_400_nc"]
+        func project(version: Int) throws -> Data {
+            try JSONSerialization.data(withJSONObject: [
+                "version": version, "active_preset": "old",
+                "presets": [["name": "old", "look": preset]],
+                "clips": ["IMG_0609": ["look_override": preset]],
+            ])
+        }
+        let opened = try Project(data: try project(version: 1))
+        XCTAssertEqual(opened.presets.first?.look.halation.isNeutral, true,
+                       "a look from before halation existed came back with some")
+        XCTAssertEqual(opened.clips["IMG_0609"]?.lookOverride?.halation.isNeutral, true,
+                       "a per-clip look was not upgraded like the preset it sits beside")
+        XCTAssertEqual(opened.presets.first?.look.grainShadows, 1, "old grain came back weighted")
+        XCTAssertEqual(opened.presets.first?.look.printLUT, "none", "an old look came back printed")
+        XCTAssertEqual(opened.presets.first?.look.lookStrength, 1, "an old look came back weakened")
+        XCTAssertEqual(opened.presets.first?.look.grainHighlights, 1, "old grain came back weighted")
+        XCTAssertThrowsError(try Project(data: try project(version: 2)),
+                             "a current project missing a block was quietly repaired")
+        // And what this writes is the current version, so it is never upgraded twice.
+        let written = try JSONSerialization.jsonObject(with: try opened.serialised())
+            as? [String: Any]
+        XCTAssertEqual(written?["version"] as? Int, 2)
     }
 
     func testACroppedRenderIsBlockedUntilEveryClipHasAnOffset() throws {
@@ -236,9 +271,10 @@ final class PresetTests: XCTestCase {
     private func aLook(gamma: Double = 2.02) throws -> Look {
         let json = #"""
         {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
-         "power":"1,1,1","lum_mix":1},"look":{"lut":"kodak_portra_400_nc"},
+         "power":"1,1,1","lum_mix":1},
+         "halation":{"strength":0,"threshold":1,"radius":0.006,"tint":"1,0.3,0.05"},"look":{"lut":"kodak_portra_400_nc","strength":1},"print":{"lut":"none","strength":1},
          "tone":{"gamma":GAMMA,"pivot":0.39,"contrast":1.09,"toe":0,"shoulder":0.1,"black":0.025},
-         "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8},
+         "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8,"shadows":1,"highlights":1},
          "stabilisation":{"smoothing":30},"match":{"reference_yavg":609}}
         """#.replacingOccurrences(of: "GAMMA", with: String(gamma))
         return try Look(data: Data(json.utf8))
@@ -306,9 +342,10 @@ final class OutputDestinationTests: XCTestCase {
     func testAProjectRemembersWhereToDeliver() throws {
         let json = #"""
         {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
-         "power":"1,1,1","lum_mix":1},"look":{"lut":"none"},
+         "power":"1,1,1","lum_mix":1},
+         "halation":{"strength":0,"threshold":1,"radius":0.006,"tint":"1,0.3,0.05"},"look":{"lut":"none","strength":1},"print":{"lut":"none","strength":1},
          "tone":{"gamma":1,"pivot":0.5,"contrast":1,"toe":0,"shoulder":0,"black":0},
-         "colour":{"saturation":1,"warmth":0},"grain":{"strength":8},
+         "colour":{"saturation":1,"warmth":0},"grain":{"strength":8,"shadows":1,"highlights":1},
          "stabilisation":{"smoothing":30},"match":{"reference_yavg":609}}
         """#
         var project = Project(presets: [.init(name: "p", look: try Look(data: Data(json.utf8)))],

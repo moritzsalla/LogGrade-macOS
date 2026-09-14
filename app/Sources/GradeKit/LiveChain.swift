@@ -16,27 +16,72 @@ import Foundation
 /// in `LiveGrade` — both of which the parity golden and `LiveAgainstTheRenderTests` hold to the
 /// render. Nothing here decides anything about the image.
 public struct LiveChain {
-    /// The colour stages in the order the chain applies them: the correction, then Apple's
-    /// conversion, then the film look. Absent stages are simply not in the list, which is the same
-    /// thing the engine does — it leaves a neutral correction and a look of "none" out of the
-    /// filter graph rather than passing an identity cube.
+    /// The colour stages in the order the chain applies them: the correction, halation, Apple's
+    /// conversion, then the film look. Absent stages are simply absent, which is the same thing
+    /// the engine does — it leaves a neutral correction, a neutral halation and a look of "none"
+    /// out of the filter graph rather than passing an identity.
     ///
     /// SAMPLED IN SEQUENCE, NOT COMPOSED INTO ONE. Flattening them into a single lookup was tried
     /// and it cost accuracy: the composite has to be resampled on one grid, and the film look's is
     /// only 13 points, so a steep region of Apple's conversion landed 55 code values out on the
     /// worst pixel against 48 for the sequence. Three lookups per pixel is 6ms on a preview frame,
     /// which is not worth an approximation the render does not make.
-    public let stages: [Cube3D]
+    public let stages: ColourStages
     public let grade: LiveGrade
 
-    public init(stages: [Cube3D], grade: LiveGrade) {
+    public init(stages: ColourStages, grade: LiveGrade) {
         self.stages = stages
         self.grade = grade
     }
 
-    public static func colourStages(correction: Cube3D?, conversion: Cube3D,
-                                    look: Cube3D?) -> [Cube3D] {
-        [correction, conversion, look].compactMap { $0 }
+    /// HALATION SPLITS THE CUBES IN TWO. It is spatial — it needs the whole frame, not one pixel —
+    /// so the frame is taken through the correction, then halation, then the rest, rather than
+    /// through every cube in one pass per pixel.
+    public struct ColourStages {
+        public let correction: Cube3D?
+        public let halation: LiveHalation?
+        public let conversion: Cube3D
+        public let look: Cube3D?
+        public let lookStrength: Float
+        /// The print follows the look, as it does in the engine's `grade_chain`.
+        public let print: Cube3D?
+        public let printStrength: Float
+
+        var cubes: [StageCube] { (correction.map { [StageCube($0)] } ?? []) + afterHalation }
+        var afterHalation: [StageCube] {
+            [StageCube(conversion), StageCube(look, lookStrength), StageCube(print, printStrength)]
+                .compactMap { $0 }
+        }
+    }
+
+    /// A cube at a strength. The engine blends a film cube back toward its input with `mix`; this
+    /// is the same weighted sum, and at full strength it is the cube alone, as the engine's graph is.
+    struct StageCube {
+        let cube: Cube3D
+        let strength: Float
+
+        init(_ cube: Cube3D) { self.cube = cube; strength = 1 }
+
+        /// Nil for an absent cube or a strength of zero, which the engine leaves out of the graph.
+        init?(_ cube: Cube3D?, _ strength: Float) {
+            guard let cube, strength > 0 else { return nil }
+            self.cube = cube
+            self.strength = strength
+        }
+
+        @inline(__always)
+        func sample(_ c: SIMD3<Float>) -> SIMD3<Float> {
+            let full = cube.sample(c)
+            return strength == 1 ? full : c + (full - c) * strength
+        }
+    }
+
+    public static func colourStages(correction: Cube3D?, halation: LiveHalation? = nil,
+                                    conversion: Cube3D, look: Cube3D?, lookStrength: Double = 1,
+                                    print: Cube3D? = nil, printStrength: Double = 1) -> ColourStages {
+        ColourStages(correction: correction, halation: halation, conversion: conversion, look: look,
+                     lookStrength: Float(lookStrength), print: print,
+                     printStrength: Float(printStrength))
     }
 
     /// The source through the colour stages only: correction, conversion, look. The result is
@@ -51,7 +96,7 @@ public struct LiveChain {
     /// renderer applying its 1D LUT per RGB channel, and the model's own table is 256 entries.
     /// Sixteen bits IN because the source is log — its shadows carry most of the information, and
     /// quantising them before the conversion stretches them is where a preview would visibly band.
-    public static func converted(_ image: CGImage, through stages: [Cube3D]) -> Converted? {
+    public static func converted(_ image: CGImage, through stages: ColourStages) -> Converted? {
         let width = image.width, height = image.height
         guard width > 0, height > 0 else { return nil }
 
@@ -66,6 +111,39 @@ public struct LiveChain {
 
         var rgb = [UInt8](repeating: 255, count: width * height * 4)
         let scale = Float(1.0 / 65535.0)
+        if let halation = stages.halation {
+            var log = [Float](repeating: 0, count: width * height * 3)
+            let correction = stages.correction
+            source.withUnsafeBufferPointer { src in
+                log.withUnsafeMutableBufferPointer { out in
+                    Self.inBands(height: height) { rows in
+                        for i in (rows.lowerBound * width)..<(rows.upperBound * width) {
+                            var c = SIMD3(Float(src[i * 4]) * scale, Float(src[i * 4 + 1]) * scale,
+                                          Float(src[i * 4 + 2]) * scale)
+                            if let correction { c = correction.sample(c) }
+                            out[i * 3] = c.x; out[i * 3 + 1] = c.y; out[i * 3 + 2] = c.z
+                        }
+                    }
+                }
+            }
+            halation.apply(to: &log, width: width, height: height)
+            let after = stages.afterHalation
+            log.withUnsafeBufferPointer { src in
+                rgb.withUnsafeMutableBufferPointer { out in
+                    Self.inBands(height: height) { rows in
+                        for i in (rows.lowerBound * width)..<(rows.upperBound * width) {
+                            var c = SIMD3(src[i * 3], src[i * 3 + 1], src[i * 3 + 2])
+                            for stage in after { c = stage.sample(c) }
+                            out[i * 4] = UInt8(min(255, max(0, c.x * 255)))
+                            out[i * 4 + 1] = UInt8(min(255, max(0, c.y * 255)))
+                            out[i * 4 + 2] = UInt8(min(255, max(0, c.z * 255)))
+                        }
+                    }
+                }
+            }
+            return Converted(width: width, height: height, pixels: rgb)
+        }
+        let cubes = stages.cubes
         // ACROSS CORES. Each pixel is independent of every other, so this is the one place in the
         // app where the machine's other cores are free money: rows are handed out in bands and no
         // two bands touch the same bytes. Measured at about four times faster on this machine, and
@@ -78,7 +156,7 @@ public struct LiveChain {
                             let s = (y * width + x) * 4
                             var c = SIMD3(Float(src[s]) * scale, Float(src[s + 1]) * scale,
                                           Float(src[s + 2]) * scale)
-                            for stage in stages { c = stage.sample(c) }
+                            for stage in cubes { c = stage.sample(c) }
                             out[s] = UInt8(min(255, max(0, c.x * 255)))
                             out[s + 1] = UInt8(min(255, max(0, c.y * 255)))
                             out[s + 2] = UInt8(min(255, max(0, c.z * 255)))

@@ -48,6 +48,12 @@ The interface decisions are in [`docs/APP_DESIGN.md`](docs/APP_DESIGN.md).
 A folder expands to its `.mov` files. Output lands in `dist/03-final/`, and a per-run report in
 `dist/reports/`. Roughly three minutes a clip.
 
+The report is what to read when a render is slow or wrong. Beyond what the terminal shows, it
+records the machine, the ffmpeg version, the engine commit, a hash of the look file and every
+effective knob; per clip, the source's length and frame count, the time each phase took, and each
+encode's speed and bitrate; the exact ffmpeg command and filter graph of every render; and a
+summary of where the run's wall time went.
+
 This is the production path: source to deliverable in a single ffmpeg invocation. The staged
 scripts below do the same work in three passes and exist for a different reason.
 
@@ -70,11 +76,17 @@ judders, and 24 to 30 is the case that tempts people.
 | | |
 |---|---|
 | `LOOK=<name\|none>` | which film-emulation cube, by stem from `luts/looks/`. `none` for a neutral grade. |
+| `PRINT=<name\|none>` | which print-film cube follows the look, by stem from `luts/print/`. |
 | `GRAIN_STRENGTH=<n>` | override `look.json`'s grain strength. |
 | `CORRECT_SIZE=<n>` | points per axis in the input-correction cube, default 33. |
 | `LOOK_FILE=<path>` | read the look from somewhere other than `look.json`. |
 
 Everything else about the look lives in `look.json`, which is the single source every stage reads.
+That includes `halation` — the glow bright things spill past their edges, added before the
+conversion — whose `strength` of 0 leaves the stage out of the graph entirely — the `print` block,
+and a `strength` on both `look` and `print` that blends each cube back toward its input, and
+`grain.shadows` / `grain.highlights`, the grain's weight at black and at white, where 1 for both is
+flat grain.
 `look()` has no fallbacks on purpose: a missing key stops the run rather than quietly substituting
 a different look.
 
@@ -236,6 +248,10 @@ two full decodes and roughly 5GB of disk per clip.
 Use the staged path when you want to re-tune a look without redoing the conversion — the master is
 the only file a re-export is allowed to start from. For production runs, use `grade.sh`.
 
+It cannot carry a stage that runs before the conversion, because its baseline has already been
+converted. `02-grade.sh` therefore refuses a look with an active input correction or halation,
+rather than rendering a master without them.
+
 `00-stabilise-detect.sh` is numbered 00 but run last in practice: it needs the master, and it is
 only worth running on a clip shot handheld. The finals skip stabilisation silently when no `.trf`
 exists, so it is opt-in per clip.
@@ -285,6 +301,7 @@ the contract.
 | `REFUSE_FPS_RETIME` | `FPS_OUT` is not an integer relation to the source |
 | `REFUSE_PROOF_AND_FRAME` | both were set; they answer different questions |
 | `REFUSE_FRAME_STAGE` | `FRAME_STAGE` is neither `graded` nor `source` |
+| `REFUSE_STAGED_PRE_CONVERSION` | `02-grade.sh` was given a look with a correction or halation, which a converted baseline cannot carry |
 | `RENDER_FAILED` | a clip's render failed; the previous output was left as it was |
 | `FRAME_FAILED` | a preview frame failed to render |
 | `STALE_TRANSFORM` | the stabilisation transform is older than its source |

@@ -66,13 +66,23 @@ _Avoid_: colour conversion, colour management, "the Apple LUT" (there are two)
 The film-emulation LUT. It supplies colour character and almost no contrast.
 _Avoid_: film LUT, creative LUT, preset, style, grade
 
+**Halation**:
+The warm glow a bright thing spills into the dark around it, added in linear light before the CST
+and only past edges — a bright field does not glow onto itself. Its own stage, not part of the look.
+_Avoid_: bloom, glow (as the stage's name), diffusion, highlight rolloff
+
+**Print**:
+The print-film emulation LUT (Kodak 2383 and kin) applied after the look and before the tone, the
+way a negative is printed. Like the look it has a strength, which blends it back toward its input.
+_Avoid_: calling it a second look, output LUT, film LUT
+
 **Tone**:
 The generated luma curve that gives the image density and separation. The half of the grade that
 actually makes it read as graded.
 _Avoid_: contrast curve, S-curve, tone map (reserved for the filmic route), grade
 
 **Grade**:
-Look plus tone plus the saturation and warmth trims — the whole creative transform, and what a
+Halation plus look plus print plus tone plus the saturation and warmth trims — the whole creative transform, and what a
 grading session decides.
 _Avoid_: look, edit, post, colour correction
 

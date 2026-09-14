@@ -161,6 +161,15 @@ expense of another.
   which rings it. What ships is a half-resolution grey plate blended in, which keeps its structure
   through the re-encode and costs ~22% less bitrate. The measurements are in `scripts/lib.sh`
   above `grain_plate`, which is where the filter is now built.
+
+  **Weighted by the picture's brightness** when `grain.shadows` or `grain.highlights` is below 1:
+  a print shows grain most in the midtones, and a flat plate put as much into a black coat as into
+  a grey wall. The delivered image's luma becomes a mask for `maskedmerge`, which fades the noisy
+  plate toward a flat grey copy of itself, so the chroma stays untouched and `grainmerge` remains a
+  no-op on it. Measured on a `geq` ramp at 0.35 and 0.5: grain sd 1.2 in the darkest ninth, 3.2 at
+  the midtones and 1.8 in the brightest, against a flat 3.2. `maskedmerge` has no `shortest`
+  option; the render still ends, because the mask comes from the image, and a test renders a proof
+  to hold that. Both weights at 1 leave the mask out of the graph.
 - **Sharpen AFTER downscale** — mild, corrective (compensating for the softening the resize
   itself causes), not a stylistic push. Luma only.
 - **Encode**: H.264 High Profile, yuv420p (dithered down from the master's 10-bit, not
@@ -539,6 +548,52 @@ Verified safe (10-bit preserved, measured):
 
 Rule: before using any *new* filter here, check `-v debug` for an auto-inserted 8-bit conversion
 and measure the result. Two of the first three filters reached for turned out to be unusable.
+
+### The print, and a film cube's strength
+
+The print-film cubes in `luts/print/` take display-referred Rec.709, not Cineon log; the
+measurement is in `luts/print/SOURCE.txt`. A strength below 1 is a `mix` of the cube's input and
+output in the chain's own 10-bit format, within 0.18 code values on average of the same blend in
+float.
+
+A print widens the gap between the live preview and the render, and the cause is the pipeline's
+resampling order, not the preview's model. The preview resamples then grades; the render grades
+then resamples. Measured with ffmpeg alone on IMG_0607: those two orders differ by 19 code values
+at the 99.9th percentile with Portra and no print, and by 49 with the 2383 print added, because
+the print roughly doubles the contrast every edge is graded through.
+
+### In float, for the halation stage
+
+Halation works in linear light, where highlights sit far above 1.0, so every filter in it was
+measured on a `gbrpf32le` frame holding 5.0 rather than assumed to pass it through
+(`docs/adr/0012_HALATION_IN_LINEAR_BEFORE_THE_CONVERSION.md`):
+
+| filter | returns | |
+|---|---|---|
+| `mix=weights=1 1` | 5.0 | used for every sum and difference |
+| `gblur` | 5.0 | used |
+| `colorchannelmixer` | unclamped | used |
+| `blend=all_expr=A+B` | 5.0 | correct, but evaluates an expression per pixel |
+| `blend=all_mode=addition` | **1.0** | clamps |
+| `avgblur` | **1.0** | clamps |
+| `boxblur` | **0.99998** | clamps |
+
+- **`lut1d` ignores a negative `DOMAIN_MIN`.** It indexes the table as though the domain started at
+  zero. A linear-to-Apple-Log cube declared over −0.056..16 came back from a round trip 20 code
+  values out on average; the same cube over 0..16 with the linear values offset by +0.056 comes back
+  within 0.02 of the float path at worst. Apple Log decodes to −0.056 at black, so the offset is
+  not optional.
+- **`gblur` with the default `steps=1` is not a Gaussian.** On an impulse at sigma 10 it peaks 77%
+  above the true Gaussian and its tail at four sigma is twenty times too heavy. Three steps: 15%.
+  Six: 7%.
+- **This camera's rotation reinitialises the graph mid-stream**, at 3840x2160 and then at
+  2160x3840. A branch scaled to a fixed size fails `mix` on the second configuration; `scale=rw:rh`
+  against a reference input follows it.
+- **Cost, single-threaded CPU time on 0.25s of IMG_0607:** the conversion alone 2.9s, plus the
+  float round trip 3.4s, halation with the glow at full resolution 7.9s, at quarter resolution
+  4.5s. The quarter-resolution glow differs from the full one by 0.05 code values on average and 5
+  at the 99.9th percentile. Wall-clock timings on this laptop were not usable for this: thermal
+  throttling moved one identical run between 9 and 19 seconds.
 
 ## The locked white balance neutralised golden hour
 

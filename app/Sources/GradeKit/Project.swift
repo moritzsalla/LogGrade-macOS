@@ -215,7 +215,7 @@ extension Project {
             clipMap[name] = entry
         }
         var root: [String: Any] = [
-            "version": 1,
+            "version": 2,
             "presets": presetList,
             "active_preset": activePreset,
             "delivery": [
@@ -237,14 +237,46 @@ extension Project {
                                           options: [.prettyPrinted, .sortedKeys])
     }
 
+    /// A look out of a project file, upgraded from the version that wrote it.
+    ///
+    /// NOT A FALLBACK, and the difference is the whole point. `Look` refuses a missing key because
+    /// substituting a value renders a different look under the same name. A version-1 project was
+    /// written before the film stages existed, so its looks carry no `halation` or `print` block, no
+    /// look strength and no grain weights, for a reason that is known exactly: that look had none. Adding the neutral
+    /// values says the same thing the file meant. A version-2 file missing them is damaged, and is
+    /// refused like any other.
+    static func look(from object: Any, version: Int) throws -> Look {
+        var upgraded = object
+        if version < 2, var look = object as? [String: Any] {
+            if look["halation"] == nil {
+                let neutral = Look.Halation()
+                look["halation"] = ["strength": 0.0, "threshold": neutral.threshold,
+                                    "radius": neutral.radius, "tint": neutral.tint]
+            }
+            if var film = look["look"] as? [String: Any], film["strength"] == nil {
+                film["strength"] = 1.0
+                look["look"] = film
+            }
+            if look["print"] == nil { look["print"] = ["lut": "none", "strength": 1.0] }
+            if var grain = look["grain"] as? [String: Any] {
+                if grain["shadows"] == nil { grain["shadows"] = 1.0 }
+                if grain["highlights"] == nil { grain["highlights"] = 1.0 }
+                look["grain"] = grain
+            }
+            upgraded = look
+        }
+        return try Look(data: try JSONSerialization.data(withJSONObject: upgraded))
+    }
+
     public init(data: Data) throws {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw Look.Invalid.notAnObject
         }
+        let version = (root["version"] as? NSNumber)?.intValue ?? 1
         var loaded: [Preset] = []
         for raw in (root["presets"] as? [[String: Any]] ?? []) {
             guard let name = raw["name"] as? String, let lookObject = raw["look"] else { continue }
-            let look = try Look(data: try JSONSerialization.data(withJSONObject: lookObject))
+            let look = try Self.look(from: lookObject, version: version)
             loaded.append(Preset(name: name, look: look))
         }
         let d = root["delivery"] as? [String: Any] ?? [:]
@@ -253,7 +285,7 @@ extension Project {
         for (name, raw) in (root["clips"] as? [String: [String: Any]] ?? [:]) {
             var override: Look?
             if let o = raw["look_override"] {
-                override = try Look(data: try JSONSerialization.data(withJSONObject: o))
+                override = try Self.look(from: o, version: version)
             }
             clipMap[name] = ClipSettings(
                 cropOffset: (raw["crop_offset"] as? NSNumber)?.intValue,

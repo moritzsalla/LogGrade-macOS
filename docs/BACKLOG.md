@@ -82,8 +82,8 @@ composition only. The engine now refuses rather than inheriting it.
 The measurements behind clustered-vs-per-pixel grain are settled (see `docs/PIPELINE.md`); the
 amplitude is the one number that wants an eye. Override with `GRAIN_STRENGTH=n ./scripts/…`.
 
-**Tonal weighting for grain.** Real film grain peaks in the midtones and falls off in deep shadow;
-the current grain is flat across the tonal range. Needs a luma-derived mask via `geq`. Untested.
+~~**Tonal weighting for grain.**~~ Built as `grain.shadows` and `grain.highlights`, with `lutyuv` and
+`maskedmerge` rather than `geq`, which evaluates an expression per pixel. See `docs/PIPELINE.md`.
 
 **Audio.** Measured and clean — PCM stereo, unclipped, 24 dB crest, genuine L/R decorrelation
 (0.54), no lossy codec ever applied. Two things available: a high-pass around 60–80 Hz removes
@@ -105,9 +105,9 @@ The item said "a fifth" when six already existed, which is what a count in prose
 
 Kept here so they are not re-litigated from scratch.
 
-- **A better Portra LUT.** Every freely reachable one is the same coarse 13³ G'MIC grid. A real
-  improvement means a print-film emulation (Kodak 2383 class), which expects log or Cineon input —
-  a different pipeline shape, not a drop-in swap.
+- **A better Portra LUT.** Every freely reachable one is the same coarse 13³ G'MIC grid. The
+  improvement this entry said was out of reach — a print-film emulation — was not: the same source
+  has Kodak 2383 and it takes Rec.709. It is the `print` stage now; see `luts/print/SOURCE.txt`.
 - **The scene-linear filmic route.** Architecturally correct and it lost on colour; kept in
   `luts/filmic/` with its measurements. See ADR-0002.
 - **Collapsing the tone curve and the trims into the shared cube.** The OpenColorIO shape: one

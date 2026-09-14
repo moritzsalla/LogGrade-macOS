@@ -17,7 +17,8 @@ final class EngineRunTests: XCTestCase {
                        encoding: .utf8)
         try "".write(to: root.appendingPathComponent("luts/apple/AppleLogToRec709-v1.0.cube"),
                      atomically: true, encoding: .utf8)
-        for name in ["grade.sh", "make-tone-lut.py", "make-correct-lut.py", "solve-gamma.py"] {
+        for name in ["grade.sh", "make-tone-lut.py", "make-correct-lut.py", "make-halation-luts.py",
+                     "solve-gamma.py"] {
             let url = scripts.appendingPathComponent(name)
             try (name == "grade.sh" ? script : "#!/bin/bash\n").write(to: url, atomically: true,
                                                                       encoding: .utf8)

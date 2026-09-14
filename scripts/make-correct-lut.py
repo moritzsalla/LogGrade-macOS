@@ -25,9 +25,8 @@ a wheel expects.
 
 THE TRANSFER FUNCTION IS PUBLISHED, WHICH IS WHY THIS IS EXACT RATHER THAN FITTED
 --------------------------------------------------------------------------------
-Apple's Log Profile white paper gives the encoding and its inverse: a parabolic toe below a small
-threshold, which is what lets the format hold negative scene values, and a log curve above it.
-luts/apple/SOURCE.txt carries the correction to this repo's earlier claim that it was proprietary.
+Apple's Log Profile white paper gives the encoding and its inverse. It lives in scripts/applelog.py,
+because the halation stage needs the same function and a second copy is one that drifts.
 Note what is still NOT published: the Rec.709 conversion cube contains a display rendering, so
 nothing here attempts to replace it.
 
@@ -78,40 +77,19 @@ luma is not something trilinear interpolation approximates well at any practical
 knowing before blaming the cube.
 """
 import argparse
-import math
 import os
 import sys
 
-# Apple Log, from the Apple Log Profile white paper.
-R0 = -0.05641088
-RT = 0.01
-C = 47.28711236
-BETA = 0.00964052
-GAMMA = 0.08550479
-DELTA = 0.69336945
-PT = C * (RT - R0) ** 2
+# The app vendors scripts/ inside a signed bundle, and a byte-cache written there would change it.
+sys.dont_write_bytecode = True
+# By this file's own location, not the working directory: the suite loads this module by path from
+# elsewhere, where a bare import finds nothing.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from applelog import decode, encode  # noqa: E402
 
 # Rec.709 luma weights. The luminance mix needs a luma, and this cube's output is fed to Apple's
 # Rec.709 conversion, so 709 weights are the ones that match what happens next.
 LW = (0.2126, 0.7152, 0.0722)
-
-
-def decode(p):
-    """Apple Log code value -> linear scene reflectance."""
-    if p < 0.0:
-        return R0
-    if p < PT:
-        return math.sqrt(p / C) + R0
-    return 2.0 ** ((p - DELTA) / GAMMA) - BETA
-
-
-def encode(r):
-    """Linear scene reflectance -> Apple Log code value."""
-    if r < R0:
-        return 0.0
-    if r < RT:
-        return C * (r - R0) ** 2
-    return GAMMA * math.log2(r + BETA) + DELTA
 
 
 def triple(s, name):

@@ -56,6 +56,7 @@ final class GradeModel: ObservableObject {
 
     /// The cubes on disk, read once: the interface offers what is there.
     let availableLooks: [String]
+    let availablePrints: [String]
 
     // MARK: - the live tier
 
@@ -95,7 +96,23 @@ final class GradeModel: ObservableObject {
     /// Dragging midtone does not move the correction, the conversion or the look, and those three
     /// are most of the work.
     private var convertedFrame: LiveChain.Converted?
-    private var convertedFor: (Look.Correct, String)?
+    private var convertedFor: ColourKey?
+
+    /// Everything the colour stages depend on, so a tone drag reuses them and nothing else does.
+    private struct ColourKey: Equatable {
+        let correct: Look.Correct
+        let halation: Look.Halation
+        let lookLUT: String
+        let lookStrength: Double
+        let printLUT: String
+        let printStrength: Double
+
+        init(_ look: Look) {
+            correct = look.correct; halation = look.halation
+            lookLUT = look.lookLUT; lookStrength = look.lookStrength
+            printLUT = look.printLUT; printStrength = look.printStrength
+        }
+    }
 
     private func lookCube(for stem: String) -> Cube3D? {
         if let cached = lookCubeCache[stem] { return cached }
@@ -103,6 +120,19 @@ final class GradeModel: ObservableObject {
             return nil
         }
         lookCubeCache[stem] = cube
+        return cube
+    }
+
+    /// Prints are cached apart from looks: a stem names a file within its own folder, and nothing
+    /// stops a look and a print sharing one.
+    private var printCubeCache: [String: Cube3D] = [:]
+
+    private func printCube(for stem: String) -> Cube3D? {
+        if let cached = printCubeCache[stem] { return cached }
+        guard let url = engine.printCube(named: stem), let cube = try? Cube3D(contentsOf: url) else {
+            return nil
+        }
+        printCubeCache[stem] = cube
         return cube
     }
 
@@ -190,10 +220,22 @@ final class GradeModel: ObservableObject {
             preview.say("That correction isn’t a value the engine accepts.", failure: true)
             return
         }
-        let stages = LiveChain.colourStages(correction: correctionCube, conversion: conversion,
-                                            look: lookCube(for: wanted.lookLUT))
-        let reuse = convertedFor?.0 == wanted.correct && convertedFor?.1 == wanted.lookLUT
-            ? convertedFrame : nil
+        // Built against the SOURCE frame's height, because the look stores the glow's radius as a
+        // fraction of the frame and the frame this grades is the preview-sized one.
+        let halation = LiveHalation(wanted.halation, frameHeight: source.height)
+        if !wanted.halation.isNeutral && halation == nil {
+            gradeInFlight = false
+            preview.isLive = false
+            preview.say("That halation tint isn’t a value the engine accepts.", failure: true)
+            return
+        }
+        let stages = LiveChain.colourStages(correction: correctionCube, halation: halation,
+                                            conversion: conversion,
+                                            look: lookCube(for: wanted.lookLUT),
+                                            lookStrength: wanted.lookStrength,
+                                            print: printCube(for: wanted.printLUT),
+                                            printStrength: wanted.printStrength)
+        let reuse = convertedFor == ColourKey(wanted) ? convertedFrame : nil
         let grade = LiveGrade(curve: curve, saturation: wanted.colour.saturation,
                               warmth: wanted.colour.warmth)
 
@@ -209,7 +251,7 @@ final class GradeModel: ObservableObject {
                 self.gradeInFlight = false
                 if let converted {
                     self.convertedFrame = converted
-                    self.convertedFor = (wanted.correct, wanted.lookLUT)
+                    self.convertedFor = ColourKey(wanted)
                 }
                 if let graded {
                     self.preview.image = NSImage(cgImage: graded,
@@ -287,6 +329,7 @@ final class GradeModel: ObservableObject {
         self.engine = engine
         self.look = look
         self.availableLooks = engine.availableLooks()
+        self.availablePrints = engine.availablePrints()
         self.project = Project(presets: [.init(name: "shipped", look: look)],
                                activePreset: "shipped")
         let work = FileManager.default.temporaryDirectory

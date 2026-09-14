@@ -37,8 +37,19 @@
     "power": "1,1,1",
     "lum_mix": 1.0
   },
+  "halation": {
+    "strength": 0.0,
+    "threshold": 1.0,
+    "radius": 0.006,
+    "tint": "1,0.3,0.05"
+  },
   "look": {
-    "lut": "kodak_portra_400_nc"
+    "lut": "kodak_portra_400_nc",
+    "strength": 1.0
+  },
+  "print": {
+    "lut": "none",
+    "strength": 1.0
   },
   "tone": {
     "gamma": 2.02,
@@ -53,7 +64,9 @@
     "warmth": 0.005
   },
   "grain": {
-    "strength": 8
+    "strength": 8,
+    "shadows": 1.0,
+    "highlights": 1.0
   },
   "stabilisation": {
     "smoothing": 30

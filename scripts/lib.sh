@@ -34,12 +34,15 @@ LOOK_FILE="${LOOK_FILE:-$LIB_ROOT/look.json}"
 #   - the tone curve was tuned WITH this look in the chain, so a look and a tone belong to each
 #     other. Changing one without the other is a different grade, not the same grade in a
 #     different film stock. A preset is the pair.
-resolve_look_lut() {  # resolve_look_lut <name|none|path> <repo-root>   -> a path, or nothing
-	local name="$1" root="$2" path
+#
+# The print cube is resolved the same way from luts/print/, which is the third argument: a print is
+# a look in every respect this function cares about, and a second copy of it is what drifts.
+resolve_look_lut() {  # resolve_look_lut <name|none|path> <repo-root> [looks|print]  -> a path, or nothing
+	local name="$1" root="$2" folder="${3:-looks}" path
 	case "$name" in
 		none|None|NONE|"") printf '' ; return 0;;
 		*/*|*.cube) path="$name";;
-		*) path="$root/luts/looks/${name}.cube";;
+		*) path="$root/luts/$folder/${name}.cube";;
 	esac
 	# The path is spliced into `lut3d=file='...'` so a quote or a filter separator in it closes
 	# ffmpeg's quoting from the inside — the same reason require_clip_name exists one level up.
@@ -49,12 +52,12 @@ resolve_look_lut() {  # resolve_look_lut <name|none|path> <repo-root>   -> a pat
 			return 1;;
 	esac
 	if [ ! -f "$path" ]; then
-		echo "look LUT not found: $path" >&2
-		echo "  look.json's .look.lut names a cube in luts/looks/ (without the extension)," >&2
-		echo "  or \"none\" for no look at all. Available:" >&2
+		echo "$folder LUT not found: $path" >&2
+		echo "  look.json names a cube in luts/$folder/ (without the extension)," >&2
+		echo "  or \"none\" for no cube at all. Available:" >&2
 		# A glob loop rather than `ls`: shellcheck rejects parsing ls output, and this also
 		# prints nothing at all when the folder is empty instead of an unmatched pattern.
-		for c in "$root/luts/looks/"*.cube; do
+		for c in "$root/luts/$folder/"*.cube; do
 			[ -f "$c" ] || continue
 			c="${c##*/}"
 			echo "    ${c%.cube}" >&2
@@ -197,6 +200,18 @@ require_number() {  # require_number <label> <value>  -> echoes the value, or fa
 	printf '%s\n' "$2"
 }
 
+# A number from 0 to 1. The grain weights are spliced into an expression where a value above 1 would
+# push the mask past full scale and clip, which renders as a hard edge in the grain rather than as
+# an error; refusing is cheaper than finding that on a delivered file.
+require_unit() {  # require_unit <label> <value>  -> echoes the value, or fails
+	require_number "$1" "$2" >/dev/null || return 1
+	if [ "$(awk -v v="$2" 'BEGIN { print (v >= 0 && v <= 1) ? "ok" : "no" }')" != "ok" ]; then
+		echo "$1 must be between 0 and 1: got '$2'" >&2
+		return 1
+	fi
+	printf '%s\n' "$2"
+}
+
 # Clip names become path components AND reach the filter graph, via the per-clip tone LUT
 # (`lut1d=file='<cache>/<clip>_tone.cube'`) and the transform (`vidstabtransform=input='...'`).
 #
@@ -301,6 +316,114 @@ progress_events() {  # progress_events <label>   reads -progress output on stdin
 			                  frame "${frame:-0}" fps "${fps:-0}" out_time_ms "${out_time:-0}";;
 		esac
 	done
+}
+
+# --- the run report: timing, environment, what was actually run ----------------------------
+# The report is read LATER, by someone debugging a render with nothing else to go on — so it has to
+# carry what is otherwise lost: how long each phase took, on what machine and ffmpeg, and the filter
+# graph itself, which shellcheck cannot see into and which is never printed anywhere else.
+#
+# None of it goes through `emit`. The event stream is a contract the app parses and
+# tests/fixtures/events.jsonl pins; a debugging aid has no business changing it.
+#
+# Every helper here FAILS SOFT. A missing sysctl or a perl that will not start must not abort a
+# render under `set -e` for the sake of a line in a text file.
+
+# Milliseconds, as an integer. macOS's `date` has no %N, and bash 3.2 has no float arithmetic, so
+# integer milliseconds are what lets phases be summed with `$(( ))` rather than an awk per addition.
+# perl's Time::HiRes ships with stock macOS; whole seconds is the fallback, not an abort.
+now_ms() {
+	perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000' 2>/dev/null \
+		|| printf '%s000\n' "$(date +%s)"
+}
+
+fmt_ms() {  # fmt_ms <ms>  -> "4.217s" or "3m12.004s"
+	local ms="$1"
+	if [ "$ms" -ge 60000 ]; then
+		printf '%dm%02d.%03ds' $(( ms / 60000 )) $(( ms % 60000 / 1000 )) $(( ms % 1000 ))
+	else
+		printf '%d.%03ds' $(( ms / 1000 )) $(( ms % 1000 ))
+	fi
+}
+
+# Writes to the run report and nowhere else. `say` prints to the terminal as well; these lines are
+# too long and too many for that — a filter graph is thousands of characters. Scripts that keep no
+# report (the staged ones) leave REPORT unset, and then this does nothing.
+report_line() {
+	[ -n "${REPORT:-}" ] || return 0
+	printf '%s\n' "$*" >> "$REPORT"
+}
+
+# One field of a file, the way CLAUDE.md requires for this camera: bare value, first non-empty line
+# (the video stream prints twice), validated so a stray line cannot pass for a number.
+probe_number() {  # probe_number <file> <stream=key|format=key>  -> the number, or "?"
+	local v
+	v=$(ffprobe -v error -select_streams v:0 -show_entries "$2" -of default=nw=1:nk=1 "$1" \
+		2>/dev/null | sed -n '/[^[:space:]]/{p;q;}') || v=""
+	case "$v" in
+		''|*[!0-9./]*) v="?";;
+	esac
+	printf '%s\n' "$v"
+}
+
+# What the run ran ON. Half the performance questions asked of a report later are really "was this
+# the slow machine" or "was that before the ffmpeg upgrade", and neither is recoverable afterwards.
+report_environment() {  # report_environment <repo-root>
+	local root="$1" rev cpu cores mem os
+	rev=$(git -C "$root" rev-parse --short HEAD 2>/dev/null) || rev="unknown"
+	if [ "$rev" != unknown ] && [ -n "$(git -C "$root" status --porcelain --untracked-files=no 2>/dev/null || true)" ]; then
+		rev="$rev (uncommitted changes)"
+	fi
+	cpu=$(sysctl -n machdep.cpu.brand_string 2>/dev/null) || cpu="unknown cpu"
+	cores=$(sysctl -n hw.ncpu 2>/dev/null) || cores="?"
+	mem=$(sysctl -n hw.memsize 2>/dev/null) || mem=0
+	os=$(sw_vers -productVersion 2>/dev/null) || os="?"
+	report_line "engine:  $root @ $rev"
+	# `sed -n 1p`, not `head -1`: under pipefail, head closing the pipe early can kill the writer
+	# with SIGPIPE and fail the whole assignment.
+	report_line "ffmpeg:  $(ffmpeg -version 2>/dev/null | sed -n 1p || true)"
+	report_line "machine: $cpu, $cores cores, $(( mem / 1073741824 ))GB, macOS $os, bash $BASH_VERSION"
+	report_line "look:    $LOOK_FILE sha256:$(shasum -a 256 "$LOOK_FILE" 2>/dev/null | cut -c1-16 || true)"
+}
+
+# The command exactly as ffmpeg received it, graph first and on its own, delimited. The graph is the
+# part a render goes wrong in and the part `%q` would bury under escapes, so it is printed raw — it
+# can be pasted back into a shell in single quotes.
+report_command() {  # report_command <label> <ffmpeg-arg>...
+	[ -n "${REPORT:-}" ] || return 0
+	local label="$1" a prev="" prev2="" args="" n=0
+	shift
+	for a in "$@"; do
+		# A lavfi INPUT is a graph too — the grain plate is one — so it is printed the same way.
+		if [ "$prev" = "-filter_complex" ] || [ "$prev" = "-vf" ] \
+			|| { [ "$prev" = "-i" ] && [ "$prev2" = "lavfi" ]; }; then
+			n=$(( n + 1 ))
+			report_line "      --- graph $n ($label, $prev) ---"
+			report_line "$a"
+			report_line "      --- end graph $n ---"
+			args="$args <graph $n>"
+		else
+			args="$args $(printf '%q' "$a")"
+		fi
+		prev2="$prev"; prev="$a"
+	done
+	report_line "      command: ffmpeg$args"
+}
+
+# Encode throughput from the file that landed, not from ffmpeg's progress lines: the output's own
+# frame count and duration are what a PROOF actually rendered, whatever the source's length.
+report_encode() {  # report_encode <label> <file> <elapsed-ms>
+	local label="$1" file="$2" ms="$3" frames dur bytes
+	frames=$(probe_number "$file" stream=nb_frames)
+	dur=$(probe_number "$file" format=duration)
+	bytes=$(stat -f%z "$file" 2>/dev/null) || bytes=0
+	report_line "$(awk -v l="$label" -v ms="$ms" -v f="$frames" -v d="$dur" -v b="$bytes" 'BEGIN {
+		s = ms / 1000; if (s <= 0) s = 0.001
+		line = sprintf("      %s took %.3fs", l, s)
+		if (f != "?") line = line sprintf(", %d frames at %.2f fps", f, f / s)
+		if (d != "?" && d > 0) line = line sprintf(", %.3fx realtime, %.2f Mbit/s", d / s, b * 8 / d / 1000000)
+		printf "%s, %.2fMB\n", line, b / 1048576
+	}')"
 }
 
 # --- the look -----------------------------------------------------------------
@@ -733,14 +856,122 @@ grade_chain() {  # grade_chain <tone-lut> <sat> <warm> [head-prefix] [tag-prefix
 	# source time: the parity harness and the test that pins the golden to the chain both sourced
 	# lib.sh, called this function, and received a chain with no look filter in it. Both looked
 	# correct. The golden's freshness guard is what caught it.
+	#
+	# The print and both strengths follow the same rule, for the same reason.
 	if [ -z "${LOOK_LUT+set}" ]; then
 		LOOK_LUT="$(resolve_look_lut "$(look .look.lut)" "$LIB_ROOT")"
 	fi
-	local look=""
-	[ -z "${LOOK_LUT:-}" ] || look="lut3d=file='${LOOK_LUT}':interp=tetrahedral,"
-	printf "%s%sformat=yuv444p10le,split=2[gc_y][gc_c];[gc_y]lut1d=file='%s':interp=linear,format=yuv444p10le[gc_t];[gc_t][gc_c]mergeplanes=0x001112:yuv444p10le,%shue=s=%s,colorbalance=rm=%s:bm=-%s" \
-		"${4:-}" "$look" "$1" "${5:-}" "$2" "$3" "$3"
+	if [ -z "${PRINT_LUT+set}" ]; then
+		PRINT_LUT="$(resolve_look_lut "$(look .print.lut)" "$LIB_ROOT" print)"
+	fi
+	if [ -z "${LOOK_STRENGTH+set}" ]; then
+		LOOK_STRENGTH="$(require_unit look.strength "$(look .look.strength)")"
+	fi
+	if [ -z "${PRINT_STRENGTH+set}" ]; then
+		PRINT_STRENGTH="$(require_unit print.strength "$(look .print.strength)")"
+	fi
+	printf "%s%s%sformat=yuv444p10le,split=2[gc_y][gc_c];[gc_y]lut1d=file='%s':interp=linear,format=yuv444p10le[gc_t];[gc_t][gc_c]mergeplanes=0x001112:yuv444p10le,%shue=s=%s,colorbalance=rm=%s:bm=-%s" \
+		"${4:-}" "$(film_lut_stage "${LOOK_LUT:-}" "$LOOK_STRENGTH" gc_look)" \
+		"$(film_lut_stage "${PRINT_LUT:-}" "$PRINT_STRENGTH" gc_print)" \
+		"$1" "${5:-}" "$2" "$3" "$3"
 }
+
+# One film cube — the look or the print — at a strength, as a prefix with its own trailing comma.
+#
+# THE PRINT COMES AFTER THE LOOK AND BEFORE THE TONE CURVE. That is a negative printed and then
+# exposure-shaped, and it keeps the print's per-channel contrast ahead of the luma-only tone stage,
+# which is the stage that stops saturated signage going neon (ADR 0003). Placing the look itself
+# after the tone curve instead was measured on IMG_0607 and moved the frame by 3 code values on
+# average, which is not worth a different chain.
+#
+# A STRENGTH BELOW 1 blends the cube's output back toward its input with `mix`, in the chain's own
+# 10-bit format — within 0.18 code values on average of doing the same blend in float, so there is
+# no reason to leave 10-bit for it. At 1 there is no blend in the graph and at 0 there is no cube:
+# absent rather than idle, so a look at full strength and no print renders the chain it always did.
+film_lut_stage() {  # film_lut_stage <cube-path|empty> <strength> <label-prefix>
+	[ -n "$1" ] || return 0
+	case "$(awk -v k="$2" 'BEGIN { print (k == 0) ? "off" : (k == 1) ? "full" : "blend" }')" in
+		off) return 0;;
+		full) printf "lut3d=file='%s':interp=tetrahedral," "$1";;
+		blend)
+			printf "split=2[%s_in][%s_src];[%s_src]lut3d=file='%s':interp=tetrahedral[%s_out];" \
+				"$3" "$3" "$3" "$1" "$3"
+			printf "[%s_in][%s_out]mix=inputs=2:weights=%s %s:scale=1," "$3" "$3" \
+				"$(awk -v k="$2" 'BEGIN { printf "%.6f", 1 - k }')" "$2";;
+	esac
+}
+
+# HALATION, as a spliceable prefix that runs between the correction and Apple's conversion: in
+# linear light, where a glow adds the way light does. scripts/make-halation-luts.py generates the
+# four cubes named here and its header carries the reasoning for each, including the lut1d domain
+# trap they are shaped around; docs/adr/0012 carries why this sits before the conversion at all.
+#
+# The graph, in order:
+#   base  -> linear (offset by -R0, so never negative)
+#   src   -> quarter resolution -> per-channel max(0, linear - threshold) -> luma into G only
+#         -> split: gblur ONE plane, subtract the unblurred one, clamp at zero  (the edge-only glow)
+#         -> route G into R, G and B at tint x strength -> back up to the base's size
+#   base + glow -> Apple Log again
+#
+# THE GLOW IS COMPUTED AT QUARTER RESOLUTION, because it is a blur 23 pixels wide and paying for it
+# at 4K bought nothing visible. Measured single-threaded on 0.25s of IMG_0607 in CPU time: the
+# conversion alone 2.9s, this stage at full resolution 7.9s, at quarter resolution 4.5s. Against
+# the full-resolution glow on a frame: 0.05 code values mean, 5 at the 99.9th percentile, confined to
+# the glow's own edges. Wall-clock numbers on this laptop were useless for that comparison — thermal
+# throttling moved the same run between 9 and 19 seconds.
+#
+# The upscale takes its size FROM THE BASE (`scale=rw:rh` against a reference input), not from
+# numbers. This camera's rotation is applied as a mid-stream reinitialisation, so the graph first
+# configures at 3840x2160 and then at 2160x3840; a fixed size fails `mix` on the second. BILINEAR,
+# because bicubic overshoots below zero beside a steep glow and would subtract light.
+#
+# FLOAT THROUGHOUT, and three of the obvious filters would silently break that. Measured on a
+# gbrpf32le frame holding 5.0: `blend=all_mode=addition` returns 1.0, `avgblur` 1.0, `boxblur`
+# 0.99998. `mix` and `gblur` return 5.0, which is why they are the ones used. A clamp at 1.0 here
+# would cut every highlight Apple Log holds, and the picture would still look plausible.
+#
+# ONE PLANE IS BLURRED, not three identical ones: gbrp's plane 0 is G, so the luma is written there,
+# `gblur=planes=1` touches only it, and the R and B planes stay zero through the subtraction until
+# the tint reads them back out of G. Blurring three copies of the same plane cost three times as
+# much for the same answer.
+#
+# `steps=3`, because gblur's default is not a Gaussian. Measured on an impulse at sigma 10: one step
+# peaks 77% above the true Gaussian with a tail twenty times too heavy at four sigma; three steps are
+# within 15% of its peak, six within 7%. The app's preview uses a true Gaussian and is held to this
+# render by LiveChainTests with a tolerance.
+#
+# Labels are prefixed for the same reason grade_chain's are: callers splice this into a bigger graph.
+HALATION_SCALE=4
+
+halation_prefix() {  # halation_prefix <lut-dir> <sigma-px at full resolution> <strength> <tint r,g,b>
+	local dir="$1" sigma strength="$3" tr tg tb
+	sigma=$(awk -v s="$2" -v f="$HALATION_SCALE" 'BEGIN { printf "%.3f", s / f }')
+	IFS=, read -r tr tg tb <<< "$4"
+	local kr kg kb
+	kr=$(awk -v a="$strength" -v b="$tr" 'BEGIN { printf "%.6f", a * b }')
+	kg=$(awk -v a="$strength" -v b="$tg" 'BEGIN { printf "%.6f", a * b }')
+	kb=$(awk -v a="$strength" -v b="$tb" 'BEGIN { printf "%.6f", a * b }')
+	printf "format=gbrpf32le,split=3[hal_base][hal_src][hal_ref];"
+	printf "[hal_base]lut1d=file='%s/applelog-to-linear.cube':interp=linear[hal_lin];" "$dir"
+	printf "[hal_src]scale=w=iw/%s:h=ih/%s:flags=area," "$HALATION_SCALE" "$HALATION_SCALE"
+	printf "lut1d=file='%s/halation-threshold.cube':interp=linear," "$dir"
+	printf "colorchannelmixer=rr=0:rg=0:rb=0:gr=0.2627:gg=0.6780:gb=0.0593:br=0:bg=0:bb=0,"
+	printf "split=2[hal_sharp][hal_wide];[hal_wide]gblur=sigma=%s:steps=3:planes=1[hal_blur];" "$sigma"
+	printf "[hal_blur][hal_sharp]mix=inputs=2:weights=1 -1:scale=1,"
+	printf "lut1d=file='%s/nonnegative.cube':interp=linear," "$dir"
+	printf "colorchannelmixer=rr=0:rg=%s:rb=0:gr=0:gg=%s:gb=0:br=0:bg=%s:bb=0[hal_small];" "$kr" "$kg" "$kb"
+	printf "[hal_small][hal_ref]scale=w=rw:h=rh:flags=bilinear[hal_glow];"
+	printf "[hal_lin][hal_glow]mix=inputs=2:weights=1 1:scale=1,"
+	printf "lut1d=file='%s/linear-to-applelog.cube':interp=linear," "$dir"
+}
+
+# The glow's radius is a fraction of the frame's height, so it covers the same part of the picture
+# at any source resolution. BT.2020 luma weights in the builder above because Apple Log's primaries
+# are BT.2020; this camera's frame is 3840 tall, where 0.006 is 23 pixels.
+halation_sigma() {  # halation_sigma <frame-height> <radius>  -> sigma in pixels
+	awk -v h="$1" -v r="$2" 'BEGIN { printf "%.2f", h * r }'
+}
+
 # The warp resamples BEFORE the downscale, so it happens at master resolution rather than at
 # delivery size. The trailing comma belongs to the prefix: callers splice the result directly into
 # a filter chain, and an absent transform must leave no trace.
@@ -806,6 +1037,37 @@ delivery_grain_branch() {  # delivery_grain_branch <w> <h> <strength>
 		"$3" "$1" "$2" "$DELIVERY_SETPARAMS"
 }
 
+# The grain merge, WEIGHTED BY THE PICTURE'S OWN BRIGHTNESS. On a print, grain is most visible in
+# the midtones and recedes into deep shadow and bright highlight; a uniform plate puts as much into a
+# black coat as into a grey wall, which reads as noise laid over the picture rather than as part of
+# it. `grain.shadows` and `grain.highlights` are the weight at black and at white, 1 at the midtones
+# between 0.45 and 0.55 of the range, with a smoothstep either side.
+#
+# How: the delivered image's luma becomes a mask (`lutyuv`, so the table is built once per frame
+# format rather than evaluated per pixel), and `maskedmerge` fades the noisy plate toward a flat grey
+# one by it. The flat plate is the noisy one with its luma set to 128, so the two stay in step and
+# carry identical chroma — `grainmerge` then remains a no-op on the chroma planes, which is the
+# property the plate was built grey for. Measured on a ramp at 0.35 and 0.5: grain sd 1.2 in the
+# darkest ninth, 3.2 at the midtones, 1.8 in the brightest, against a flat 3.2 unweighted.
+#
+# Both weights at 1 leave the mask out of the graph and return the plain blend, which is what keeps a
+# default render byte-identical to the precursor's. `maskedmerge` has no `shortest` option, and does
+# not need one: its mask comes from the image, which ends, and the blend after it keeps its own
+# `shortest=1` for the plate.
+delivery_grain_merge() {  # delivery_grain_merge <image-label> <grain-label> <out-label> <shadows> <highlights>
+	if [ "$(awk -v s="$4" -v h="$5" 'BEGIN { print (s == 1 && h == 1) ? "flat" : "weighted" }')" = "flat" ]; then
+		printf '[%s][%s]%s[%s]' "$1" "$2" "$DELIVERY_BLEND" "$3"
+		return
+	fi
+	local expr
+	# Quoted, because the expression holds both of the graph's own separators, `,` and `;`.
+	expr="st(0,clip((val-16)/219,0,1));st(1,clip(ld(0)/0.45,0,1));st(2,clip((ld(0)-0.55)/0.45,0,1));255*(($4+(1-$4)*ld(1)*ld(1)*(3-2*ld(1)))+($5-1)*ld(2)*ld(2)*(3-2*ld(2)))"
+	printf "[%s]split=2[gw_image][gw_luma];[gw_luma]lutyuv=y='%s':u=128:v=128[gw_mask];" "$1" "$expr"
+	printf '[%s]split=2[gw_noise][gw_level];[gw_level]lutyuv=y=128[gw_flat];' "$2"
+	printf '[gw_flat][gw_noise][gw_mask]maskedmerge=planes=1[gw_grain];'
+	printf '[gw_image][gw_grain]%s[%s]' "$DELIVERY_BLEND" "$3"
+}
+
 # Renders to a staging file and installs it only once the render has succeeded, been checked for
 # content, and had its colour tags verified. Takes the FINAL path, a label for messages, then every
 # ffmpeg argument except the output path.
@@ -828,6 +1090,7 @@ render_delivery() {  # render_delivery <final-out> <label> <ffmpeg-arg>...
 	# has to come out of PIPESTATUS rather than $?, so the default path is left exactly as it was
 	# rather than carrying that for a consumer that is not listening. `-nostats` because the
 	# human-facing stats line is what -progress replaces.
+	report_command "$label" "$@" "$tmp"
 	local rc=0
 	if [ "$JSON" = "1" ]; then
 		# errexit is suspended for exactly one pipeline: this file sets `pipefail`, so a failing

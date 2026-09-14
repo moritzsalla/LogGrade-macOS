@@ -108,12 +108,20 @@ final class LiveChainTests: XCTestCase {
         if let gamma = exact.gamma { tone.gamma = gamma }
         let correction = look.correct.isNeutral ? nil
             : CorrectionCube.cube(for: look.correct, size: 33)
+        let sourceImage = try source(rig)
         let chain = LiveChain(
-            stages: LiveChain.colourStages(correction: correction, conversion: rig.conversion,
-                                           look: rig.lookCube),
+            stages: LiveChain.colourStages(correction: correction,
+                                           halation: LiveHalation(look.halation,
+                                                                  frameHeight: sourceImage.height),
+                                           conversion: rig.conversion,
+                                           look: look.lookLUT == "none" ? nil : rig.lookCube,
+                                           lookStrength: look.lookStrength,
+                                           print: rig.engine.printCube(named: look.printLUT)
+                                               .flatMap { try? Cube3D(contentsOf: $0) },
+                                           printStrength: look.printStrength),
             grade: LiveGrade(curve: ToneCurve.generated(tone: tone),
                              saturation: look.colour.saturation, warmth: look.colour.warmth))
-        guard let live = chain.apply(to: try source(rig)) else {
+        guard let live = chain.apply(to: sourceImage) else {
             throw XCTSkip("the live chain produced no image")
         }
         return try difference(live, exactImage)
@@ -121,8 +129,21 @@ final class LiveChainTests: XCTestCase {
 
     /// Every case in one test, because each one costs an engine render and they share a rig.
     ///
-    /// Measured on IMG_0607: mean 1.28, 99.9th percentile 13, worst 56 at the shipped look. The
+    /// Measured on IMG_0607: mean 1.29, 99.9th percentile 18, worst 56 at the shipped look. The
     /// bounds carry headroom over those, because they are one clip's numbers.
+    ///
+    /// Halation at strength 0.8 measured mean 1.52, 99.9th percentile 19, worst 83 — the worst
+    /// pixel nearest its bound, on the rim of a glow, where the two blurs differ most. With the
+    /// live glow removed entirely the same case reads 46 at the percentile and 179 at the worst,
+    /// so the percentile bound is what catches a preview that has lost the stage.
+    ///
+    /// A PRINT GETS A WIDER PERCENTILE, and the reason is measured, not assumed. The live tier
+    /// resamples and then grades, the render grades and then resamples, and those disagree at hard
+    /// edges; a print roughly doubles the contrast those edges are graded through. Measured with
+    /// ffmpeg alone, no Swift at all, on this frame: grading before or after the resample differs by
+    /// 19 at the 99.9th percentile without the 2383 print and by 49 with it. The case below read mean
+    /// 1.98, percentile 33, worst 57. What catches a wrong print is the mean: dropping the print from
+    /// the live chain read 25.4, and ignoring both strengths read 25.4 as well.
     func testTheLivePictureMatchesTheRender() throws {
         let rig = try rig()
         var withCorrection = rig.look
@@ -130,21 +151,38 @@ final class LiveChainTests: XCTestCase {
         withCorrection.correct.temp = 0.25
         var withoutLook = rig.look
         withoutLook.lookLUT = "none"
+        // A print over a weakened look, so both blends are exercised against ffmpeg's own `mix`.
+        var withPrint = rig.look
+        withPrint.lookStrength = 0.7
+        withPrint.printLUT = "kodak_2383_constlmap"
+        withPrint.printStrength = 0.6
+        // Strong enough to see, so the tolerance below is spent on the glow rather than on nothing.
+        var withHalation = rig.look
+        withHalation.halation = Look.Halation(strength: 0.8, threshold: 1, radius: 0.006,
+                                              tint: "1,0.3,0.05")
 
-        let cases: [(String, Look, Rig)] = [
-            ("the shipped look", rig.look, rig),
+        // The percentile each case is held to; see above for why a print needs more.
+        let edgeBound = 24.0, printedEdgeBound = 42.0
+        let cases: [(String, Look, Rig, Double)] = [
+            ("the shipped look", rig.look, rig, edgeBound),
             // THE ONE THE OLD TIER COULD NOT DO AT ALL. A correction runs before Apple's
             // conversion, so a live preview built on a converted frame showed nothing while this
             // slider moved.
-            ("a live correction", withCorrection, rig),
+            ("a live correction", withCorrection, rig, edgeBound),
+            // SPATIAL, so the one stage that cannot be a transcription. The render blurs a quarter-
+            // resolution copy of the 4K frame with ffmpeg's recursive approximation; this blurs the
+            // 480-line frame with a true Gaussian.
+            ("halation", withHalation, rig, edgeBound),
+            ("a print over a weakened look", withPrint, rig, printedEdgeBound),
             ("no film look", withoutLook, Rig(engine: rig.engine, renderer: rig.renderer,
                                               clip: rig.clip, look: withoutLook,
-                                              conversion: rig.conversion, lookCube: nil)),
+                                              conversion: rig.conversion, lookCube: nil), edgeBound),
         ]
-        for (name, look, useRig) in cases {
+        for (name, look, useRig, percentileBound) in cases {
             let (mean, p999, worst) = try compare(useRig, look: look)
             XCTAssertLessThan(mean, 3, "\(name): \(mean) code values from the render on average")
-            XCTAssertLessThan(p999, 24, "\(name): a thousandth of it is more than \(p999) out")
+            XCTAssertLessThan(p999, percentileBound,
+                              "\(name): a thousandth of it is more than \(p999) out")
             XCTAssertLessThan(worst, 90, "\(name): the worst pixel is \(worst), beyond the edge "
                               + "effect the percentile allows for")
         }

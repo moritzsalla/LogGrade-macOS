@@ -436,7 +436,7 @@ fail() {
 
 	# And every helper a stage script calls must actually exist in lib.sh — the direction that
 	# catches a rename on one side only.
-	for fn in $(grep -hoE '\b(probe_tags|verify_bt709|safe_retag|check_disk_space|require_nonempty|require_portrait|resolve_work_dir|look|ensure_tone_lut|transform_is_fresh|source_fps|stab_prefix|grain_plate|delivery_image_chain|delivery_grain_branch|render_delivery)\b' \
+	for fn in $(grep -hoE '\b(probe_tags|verify_bt709|safe_retag|check_disk_space|require_nonempty|require_portrait|resolve_work_dir|look|ensure_tone_lut|transform_is_fresh|source_fps|stab_prefix|grain_plate|delivery_image_chain|delivery_grain_branch|delivery_grain_merge|halation_prefix|halation_sigma|require_unit|render_delivery)\b' \
 	         "$BATS_TEST_DIRNAME"/../scripts/0*.sh "$BATS_TEST_DIRNAME"/../scripts/grade.sh | sort -u); do
 		[ "$(type -t "$fn")" = "function" ] || missing="$missing $fn"
 	done
@@ -1257,6 +1257,58 @@ for i, line in enumerate(sys.stdin.read().splitlines(), 1):
 	grep -q "gamma=" "$report" || fail "the report lost the per-clip plan"
 }
 
+# The report is what a slow or broken render is debugged from afterwards, so what it records has to
+# come out of a REAL render: a DRY run never times an encode and never builds the graph. HEIGHT=128
+# is what lets a 72x128 fixture finish the delivery chain; at 1080x1920 it fails reinitialising.
+@test "the run report records the machine, the knobs, the graph and the timing of a real render" {
+	local work="$BATS_TEST_TMPDIR/report-proof"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/probe_mid.mov" "$work/src/CLIP.mov"
+	# JSON=1 so the same run also proves none of it leaks onto the event stream.
+	JSON=1 HEIGHT=128 PROOF=0.5 STAB=0 GRADE_WORK_DIR="$work" \
+		run --separate-stderr "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || fail "render failed: $output $stderr"
+	[[ "$output" != *"took"* ]] || fail "a report line reached the event stream: $output"
+	local report
+	report=$(ls "$work"/dist/reports/run-*.txt | head -1)
+	grep -qE '^ffmpeg: +ffmpeg version' "$report" || fail "no ffmpeg version: $(cat "$report")"
+	grep -qE '^machine: .*[0-9]+ cores' "$report" || fail "no machine line: $(cat "$report")"
+	grep -qE '^look: +.*look\.json sha256:[0-9a-f]{16}$' "$report" || fail "no look hash: $(cat "$report")"
+	grep -qE '^knobs: .*deliverables=reels .*height=128 .*proof=0\.5 ' "$report" || fail "no knobs: $(cat "$report")"
+	grep -qE 'source: 72x128 at 24/1 fps, 2\.0+s, 48 frames' "$report" || fail "no source facts: $(cat "$report")"
+	grep -qE 'exposure probe took [0-9]+\.[0-9]{3}s$' "$report" || fail "probe untimed: $(cat "$report")"
+	grep -qE 'tone cube took [0-9]+\.[0-9]{3}s$' "$report" || fail "tone cube untimed: $(cat "$report")"
+	# 0.5s at 24fps is 12 frames: counted from the file that landed, not assumed from the source.
+	grep -qE 'reels-stories_9x16 encode took [0-9]+\.[0-9]{3}s, 12 frames at [0-9.]+ fps, [0-9.]+x realtime, [0-9.]+ Mbit/s' \
+		"$report" || fail "no encode speed: $(cat "$report")"
+	grep -qE -- '--- graph [0-9]+ \(reels-stories_9x16 encode, -filter_complex\) ---' "$report" \
+		|| fail "no delimited filter graph: $(cat "$report")"
+	grep -qE '^\[0:v\]lut3d=.*blend=all_mode=grainmerge:shortest=1\[o\]$' "$report" \
+		|| fail "the graph was not recorded whole: $(cat "$report")"
+	grep -qE '^finished .*, wall time [0-9]+\.[0-9]{3}s$' "$report" || fail "no wall time: $(cat "$report")"
+	grep -qE '^  encode +[0-9]+\.[0-9]{3}s$' "$report" || fail "no phase summary: $(cat "$report")"
+}
+
+@test "the run report times a preview frame and records its graph" {
+	local work="$BATS_TEST_TMPDIR/report-frame"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || fail "frame failed: $output"
+	local report
+	report=$(ls "$work"/dist/reports/run-*.txt | head -1)
+	grep -qE 'frame render took [0-9]+\.[0-9]{3}s' "$report" || fail "frame untimed: $(cat "$report")"
+	grep -qE -- '--- graph [0-9]+ \(frame, -filter_complex\) ---' "$report" || fail "no frame graph: $(cat "$report")"
+	grep -qE '^  frame render +[0-9]+\.[0-9]{3}s$' "$report" || fail "no phase summary: $(cat "$report")"
+}
+
+@test "fmt_ms formats whole minutes without losing the milliseconds" {
+	[ "$(fmt_ms 4217)" = "4.217s" ] || fail "got $(fmt_ms 4217)"
+	[ "$(fmt_ms 7)" = "0.007s" ] || fail "got $(fmt_ms 7)"
+	[ "$(fmt_ms 192004)" = "3m12.004s" ] || fail "got $(fmt_ms 192004)"
+}
+
 @test "the YAVG placeholder does not produce invalid JSON" {
 	# MATCH=0 leaves YAVG as a literal "-", which a laxer numeric test emits bare as `"yavg":-`.
 	# One path, invalid on that path only, and nothing else in the suite would have run it.
@@ -2045,11 +2097,14 @@ PY
 	# not printed anywhere, and a render test can only show that the correction did something, not
 	# where it sat. Both the delivery graph and the preview must have it ahead of the conversion.
 	local n
-	n=$(grep -c "CORRECT_PREFIX}lut3d=file='\${CST}'" "$SCRIPTS/grade.sh" || true)
-	[ "$n" -eq 2 ] || fail "expected the correction ahead of the CST in both graphs, found $n"
+	#
+	# Halation sits between the two: it acts on light, so it follows the exposure the correction set
+	# and precedes the conversion that would land every highlight on the same display ceiling.
+	n=$(grep -c "CORRECT_PREFIX}\${HALATION_PREFIX}lut3d=file='\${CST}'" "$SCRIPTS/grade.sh" || true)
+	[ "$n" -eq 2 ] || fail "expected correction, halation, CST in that order in both graphs, found $n"
 	# And nowhere after it.
-	! grep -q "CST}':interp=tetrahedral,\${CORRECT_PREFIX}" "$SCRIPTS/grade.sh" \
-		|| fail "a correction was placed after the conversion"
+	! grep -qE "CST\}':interp=tetrahedral,\\\$\{(CORRECT|HALATION)_PREFIX\}" "$SCRIPTS/grade.sh" \
+		|| fail "a pre-conversion stage was placed after the conversion"
 }
 
 @test "the correction cube is regenerated by content, never by timestamp" {
@@ -2072,6 +2127,345 @@ PY
 	[ "$status" -ne 0 ] || fail "accepted a zero power, which is a division by zero"
 	run "$SCRIPTS/make-correct-lut.py" --stdout --size 200
 	[ "$status" -ne 0 ] || fail "accepted an absurd cube size"
+}
+
+# --- halation -----------------------------------------------------------------
+# A glow computed in linear light between the correction and the conversion. The graph is
+# halation_prefix in lib.sh and the cubes come from make-halation-luts.py; the traps both are shaped
+# around are in their headers. These tests drive the builder on FLOAT frames written byte for byte,
+# because what is under test is what ffmpeg does to exact values, and a YUV fixture would bury that
+# under a conversion's own rounding.
+
+# Runs a gbrpf32le frame through a filter chain and prints every sample of the result, one per line,
+# planes in ffmpeg's order: G, then B, then R.
+_float_through() {  # _float_through <in.raw> <w> <h> <chain>
+	ffmpeg -v error -f rawvideo -pix_fmt gbrpf32le -s "${2}x${3}" -i "$1" \
+		-filter_complex "[0:v]${4}null[o]" -map "[o]" -f rawvideo -pix_fmt gbrpf32le - \
+		| python3 -c 'import sys, struct; d = sys.stdin.buffer.read(); print("\n".join("%.6f" % v for v in struct.unpack("%df" % (len(d) // 4), d)))'
+}
+
+@test "an idle halation stage hands back the frame it was given, highlights included" {
+	# The stage decodes to linear and encodes back, and two ffmpeg behaviours can quietly wreck
+	# that while every picture still looks plausible:
+	#   - lut1d ignores a negative DOMAIN_MIN, so the inverse cube reads shifted by 0.056 unless the
+	#     linear values are offset to stay positive (measured 20 code values out before the offset);
+	#   - `blend` addition, avgblur and boxblur clamp float at 1.0, which cuts every highlight above
+	#     diffuse white — most of what Apple Log holds.
+	# A near-zero strength keeps the whole graph in place while adding nothing, so the output must be
+	# the input across the full code range.
+	local dir="$BATS_TEST_TMPDIR/hal" raw="$BATS_TEST_TMPDIR/ramp.raw"
+	"$SCRIPTS/make-halation-luts.py" "$dir" --threshold 1.0 >/dev/null
+	python3 -c '
+import struct, sys
+w, h = 256, 4
+ramp = [i / (w - 1) for i in range(w)] * h
+open(sys.argv[1], "wb").write(struct.pack("%df" % (w * h * 3), *(ramp * 3)))
+' "$raw"
+	run _float_through "$raw" 256 4 "$(halation_prefix "$dir" 4 0.000001 1,1,1)"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	local worst
+	worst=$(printf '%s\n' "$output" | python3 -c '
+import sys
+out = [float(l) for l in sys.stdin]
+ramp = [i / 255 for i in range(256)] * 4 * 3
+assert len(out) == len(ramp), (len(out), len(ramp))
+print("%.6f" % max(abs(a - b) for a, b in zip(out, ramp)))
+')
+	python3 -c "import sys; sys.exit(0 if $worst < 0.001 else 1)" \
+		|| fail "the idle stage moved a sample by $worst of full scale (a 10-bit code value is 0.001)"
+}
+
+@test "halation glows past an edge, not across a bright field" {
+	# EDGE-ONLY is the design: blurring the highlights and adding all of it turned an overcast sky
+	# uniformly pink, because a large bright area glows onto itself. What the eye reads as halation
+	# is the part that spills past an edge, so the stage adds blur(highlight) - highlight, clamped.
+	#
+	# Left half bright (Apple Log 0.9, about six times diffuse white), right half dark. Red-only tint,
+	# so G and B double as a check that nothing else moved.
+	local dir="$BATS_TEST_TMPDIR/hal" raw="$BATS_TEST_TMPDIR/edge.raw"
+	"$SCRIPTS/make-halation-luts.py" "$dir" --threshold 1.0 >/dev/null
+	python3 -c '
+import struct, sys
+w, h = 512, 16
+row = [0.9 if x < w // 2 else 0.3 for x in range(w)]
+open(sys.argv[1], "wb").write(struct.pack("%df" % (w * h * 3), *(row * h * 3)))
+' "$raw"
+	# Sigma 16 pixels. The far side is 250 pixels past the edge, which is further than the glow's
+	# tail reaches: in log, the dark side is sensitive enough that 60 pixels still read as glow.
+	run _float_through "$raw" 512 16 "$(halation_prefix "$dir" 16 1 1,0,0)"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	printf '%s\n' "$output" | python3 -c '
+import sys
+v = [float(l) for l in sys.stdin]
+w, h = 512, 16
+n = w * h
+g, b, r = v[:n], v[n:2 * n], v[2 * n:]
+mid = h // 2 * w
+def at(plane, x): return plane[mid + x]
+problems = []
+if at(r, 260) - 0.3 < 0.01:
+    problems.append("no red glow just past the edge: %.4f" % at(r, 260))
+if abs(at(r, 8) - 0.9) > 0.002 or abs(at(r, 248) - 0.9) > 0.002:
+    problems.append("the bright field glowed onto itself: %.4f, %.4f" % (at(r, 8), at(r, 248)))
+if abs(at(r, 506) - 0.3) > 0.002:
+    problems.append("the glow reached the far side of the frame: %.4f" % at(r, 506))
+if max(abs(at(p, x) - (0.9 if x < w // 2 else 0.3)) for p in (g, b) for x in range(w)) > 0.002:
+    problems.append("a red-only tint moved green or blue")
+sys.exit("; ".join(problems) or None)
+' || fail "the glow is not edge-only"
+}
+
+@test "a neutral halation is left out of the graph" {
+	# Even an idle float round trip moves the picture by a fraction of a code value against the
+	# 10-bit path, so a strength of 0 must remove the stage entirely. That is what keeps the default
+	# render byte-identical to the precursor's.
+	run "$SCRIPTS/make-halation-luts.py" --check-neutral --strength 0
+	[ "$output" = "neutral" ] || fail "strength 0 reported as $output"
+	run "$SCRIPTS/make-halation-luts.py" --check-neutral --strength 0.01
+	[ "$output" = "active" ] || fail "strength 0.01 reported as $output"
+
+	local work="$BATS_TEST_TMPDIR/neutral-hal" look="$BATS_TEST_TMPDIR/neutral-hal.json"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	jq '.halation.strength = 0' "$BATS_TEST_DIRNAME/../look.json" > "$look"
+	LOOK_FILE="$look" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[[ "$output" != *"halation:"* ]] || fail "announced a halation that does nothing: $output"
+	[ ! -d "$work/dist/.grade-work/halation" ] || fail "generated cubes for a neutral halation"
+}
+
+@test "an active halation reaches the render and changes the picture" {
+	local work="$BATS_TEST_TMPDIR/active-hal" look="$BATS_TEST_TMPDIR/active-hal.json" clip
+	mkdir -p "$work/src"
+	clip="$work/src/EDGE.mov"
+	# An edge, because a flat field is exactly what an edge-only glow leaves alone.
+	ffmpeg -y -f lavfi -i "color=c=black:s=72x128:d=0.1:r=24,drawbox=x=0:y=0:w=36:h=128:color=white:t=fill" \
+		-frames:v 1 -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le "$clip" -v error
+	jq '.halation.strength = 0.8 | .halation.radius = 0.05' "$BATS_TEST_DIRNAME/../look.json" > "$look"
+	LOOK_FILE="$look" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$clip"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[[ "$output" == *"halation: strength=0.8"* ]] || fail "said nothing about it: $output"
+	mv "$work/dist/frames/EDGE_t0s_graded.png" "$work/glowing.png"
+	jq '.halation.strength = 0' "$look" > "$look.off"
+	LOOK_FILE="$look.off" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$clip"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	! cmp -s "$work/glowing.png" "$work/dist/frames/EDGE_t0s_graded.png" \
+		|| fail "a strength of 0.8 changed nothing"
+}
+
+@test "a halation tint that is not three numbers is refused before it reaches a graph" {
+	local work="$BATS_TEST_TMPDIR/bad-tint" look="$BATS_TEST_TMPDIR/bad-tint.json" tint
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	for tint in "1,0.3" "1,0.3,0.05,1" "1,0.3,0.05[x]"; do
+		jq --arg t "$tint" '.halation.strength = 0.5 | .halation.tint = $t' \
+			"$BATS_TEST_DIRNAME/../look.json" > "$look"
+		LOOK_FILE="$look" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+			run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+		[ "$status" -ne 0 ] || fail "rendered with tint '$tint'"
+		[[ "$output" == *"halation.tint"* ]] || fail "tint '$tint' refused without naming it: $output"
+		[ ! -d "$work/dist/frames" ] || fail "tint '$tint' got as far as rendering"
+	done
+}
+
+# --- the print, and how strongly each film cube applies -----------------------
+
+@test "a look at full strength and no print leaves the grade chain as it was" {
+	# Absent rather than idle, so the default render stays the precursor's byte for byte.
+	local look="$BATS_TEST_DIRNAME/../luts/looks/kodak_portra_400_nc.cube" chain
+	chain="$(LOOK_LUT="$look" PRINT_LUT="" LOOK_STRENGTH=1 PRINT_STRENGTH=1 grade_chain t.cube 1 0)"
+	[ "$(printf '%s' "$chain" | grep -o 'lut3d' | wc -l | tr -d ' ')" = "1" ] \
+		|| fail "expected exactly the look's lut3d: $chain"
+	[[ "$chain" != *"mix="* ]] || fail "a full-strength look still blends: $chain"
+	chain="$(LOOK_LUT="$look" PRINT_LUT="" LOOK_STRENGTH=0 PRINT_STRENGTH=1 grade_chain t.cube 1 0)"
+	[[ "$chain" != *"lut3d"* ]] || fail "a look at strength 0 is still in the graph: $chain"
+}
+
+@test "the print follows the look and precedes the tone curve" {
+	# A negative, then its print, then the luma-only tone stage — which is what keeps the print's
+	# per-channel contrast from turning saturated signage neon.
+	local root="$BATS_TEST_DIRNAME/.." chain
+	chain="$(LOOK_LUT="$root/luts/looks/kodak_portra_400_nc.cube" \
+		PRINT_LUT="$root/luts/print/kodak_2383_constlmap.cube" LOOK_STRENGTH=1 PRINT_STRENGTH=0.5 \
+		grade_chain t.cube 1 0)"
+	python3 -c '
+import sys
+c = sys.argv[1]
+look, print_, tone = c.find("kodak_portra_400_nc"), c.find("kodak_2383_constlmap"), c.find("lut1d")
+sys.exit(None if 0 <= look < print_ < tone else "order is look@%d print@%d tone@%d" % (look, print_, tone))
+' "$chain" || fail "the film cubes are out of order: $chain"
+}
+
+@test "a film cube's strength blends toward its input by exactly that amount" {
+	# A cube that sends everything to 0.8, at strength 0.25, on an input of 0.2: 0.35. Swapping the
+	# two weights gives 0.65, which is the mistake this exists to catch.
+	local cube="$BATS_TEST_TMPDIR/constant.cube" raw="$BATS_TEST_TMPDIR/grey.raw"
+	python3 -c '
+import struct, sys
+open(sys.argv[1], "w").write("LUT_3D_SIZE 2\n" + "0.8 0.8 0.8\n" * 8)
+open(sys.argv[2], "wb").write(struct.pack("48f", *([0.2] * 48)))
+' "$cube" "$raw"
+	run _float_through "$raw" 4 4 "$(film_lut_stage "$cube" 0.25 t)"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	local worst
+	worst=$(printf '%s\n' "$output" | python3 -c 'import sys; print("%.6f" % max(abs(float(l) - 0.35) for l in sys.stdin))')
+	python3 -c "import sys; sys.exit(0 if $worst < 0.0005 else 1)" \
+		|| fail "strength 0.25 did not land a quarter of the way to the cube: off by $worst"
+}
+
+@test "a print named in look.json reaches the render and changes the picture" {
+	local work="$BATS_TEST_TMPDIR/print" look="$BATS_TEST_TMPDIR/print.json"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	jq '.print.lut = "kodak_2383_constlmap" | .print.strength = 1' "$BATS_TEST_DIRNAME/../look.json" > "$look"
+	LOOK_FILE="$look" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[[ "$output" == *"print="*"kodak_2383_constlmap.cube@1"* ]] || fail "said nothing about it: $output"
+	mv "$work/dist/frames/CLIP_t0s_graded.png" "$work/printed.png"
+	jq '.print.lut = "none"' "$look" > "$look.none"
+	LOOK_FILE="$look.none" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	! cmp -s "$work/printed.png" "$work/dist/frames/CLIP_t0s_graded.png" \
+		|| fail "a print at full strength changed nothing"
+}
+
+@test "a print that is not on disk is refused, naming where prints live" {
+	local work="$BATS_TEST_TMPDIR/no-print"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	PRINT=no_such_stock FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -ne 0 ] || fail "rendered with a print that does not exist"
+	[[ "$output" == *"luts/print/"* ]] || fail "refused without saying where prints live: $output"
+	[[ "$output" == *"kodak_2383_constlmap"* ]] || fail "did not list the prints that do exist: $output"
+}
+
+# --- grain weighted by brightness ---------------------------------------------
+
+# Grain sd per ninth of a horizontal ramp, darkest first, after merging a plate through the given
+# weights. The ramp is `geq`, not `gradients`: the latter seeds itself randomly, and two renders of
+# it disagreed by a whole band.
+_grain_bands() {  # _grain_bands <shadows> <highlights>   -> nine numbers, then the chroma verdict
+	local dir="$BATS_TEST_TMPDIR/grain" w=1080 h=320 src
+	mkdir -p "$dir"
+	src="nullsrc=s=${w}x${h}:d=0.1:r=24,geq=lum='16+219*X/W':cb=128:cr=128,format=yuv420p,${DELIVERY_SETPARAMS}"
+	ffmpeg -v error -y -f lavfi -i "$src" -frames:v 1 -f rawvideo -pix_fmt yuv420p "$dir/clean.yuv"
+	ffmpeg -v error -y -f lavfi -i "$src" -f lavfi -i "$(grain_plate "$w" "$h" 24)" \
+		-filter_complex "[0:v]null[b];[1:v]$(delivery_grain_branch "$w" "$h" 8)[g];$(delivery_grain_merge b g o "$1" "$2")" \
+		-map "[o]" -frames:v 1 -f rawvideo -pix_fmt yuv420p "$dir/grained.yuv"
+	python3 - "$dir/clean.yuv" "$dir/grained.yuv" "$w" "$h" <<'PY'
+import math, sys
+a, b = open(sys.argv[1], "rb").read(), open(sys.argv[2], "rb").read()
+w, h = int(sys.argv[3]), int(sys.argv[4])
+bands = []
+for x0 in range(0, w, w // 9):
+    d = [b[y * w + x] - a[y * w + x] for y in range(0, h, 2) for x in range(x0, x0 + w // 9, 2)]
+    m = sum(d) / len(d)
+    bands.append("%.2f" % math.sqrt(sum((v - m) ** 2 for v in d) / len(d)))
+print(" ".join(bands[:9]))
+print("chroma-untouched" if a[w * h:] == b[w * h:] else "chroma-moved")
+PY
+}
+
+@test "weighted grain recedes into shadow and highlight, and stays luma-only" {
+	# Print grain is most visible in the midtones. Measured at 0.35 and 0.5: sd 1.2 in the darkest
+	# ninth, 3.2 at the midtones, 1.8 in the brightest, against a flat 3.2 unweighted.
+	# Judged against the same plate merged flat, so the bounds are ratios rather than one ramp's sd.
+	run _grain_bands 1 1
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	local flat bands verdict
+	flat="$(printf '%s\n' "$output" | head -1)"
+	run _grain_bands 0.35 0.5
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	bands="$(printf '%s\n' "$output" | head -1)"
+	verdict="$(printf '%s\n' "$output" | tail -1)"
+	python3 -c '
+import sys
+f = [float(v) for v in sys.argv[1].split()]
+b = [float(v) for v in sys.argv[2].split()]
+problems = []
+if b[0] > 0.5 * f[0]: problems.append("deep shadow keeps %.2f of a flat %.2f" % (b[0], f[0]))
+if b[8] > 0.7 * f[8]: problems.append("the highlights keep %.2f of a flat %.2f" % (b[8], f[8]))
+if b[4] < 0.9 * f[4]: problems.append("the midtones lost grain: %.2f of a flat %.2f" % (b[4], f[4]))
+sys.exit("; ".join(problems) or None)
+' "$flat" "$bands" || fail "grain is not weighted by brightness: flat $flat, weighted $bands"
+	# The plate is grey so grainmerge leaves chroma alone, and the hqdn3d pass depends on that.
+	[ "$verdict" = "chroma-untouched" ] || fail "weighted grain moved the chroma planes"
+}
+
+@test "flat grain weights leave the mask out of the graph" {
+	# Absent, not idle: the default render has to stay the precursor's byte for byte.
+	[ "$(delivery_grain_merge b g o 1 1)" = "[b][g]${DELIVERY_BLEND}[o]" ] \
+		|| fail "weights of 1 still built a mask: $(delivery_grain_merge b g o 1 1)"
+	[ "$(delivery_grain_merge b g o 1.0 1.00)" = "[b][g]${DELIVERY_BLEND}[o]" ] \
+		|| fail "1.0 was read as a different number from 1"
+	[[ "$(delivery_grain_merge b g o 0.9 1)" == *maskedmerge* ]] || fail "a weight of 0.9 built no mask"
+}
+
+@test "a grain weight outside 0 to 1 is refused before anything renders" {
+	local work="$BATS_TEST_TMPDIR/bad-grain" look="$BATS_TEST_TMPDIR/bad-grain.json" v
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	for v in 1.5 -0.1 "0.5:x"; do
+		jq --arg v "$v" '.grain.shadows = $v' "$BATS_TEST_DIRNAME/../look.json" > "$look"
+		LOOK_FILE="$look" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+			run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+		[ "$status" -ne 0 ] || fail "rendered with grain.shadows '$v'"
+		[[ "$output" == *"grain.shadows"* ]] || fail "'$v' refused without naming it: $output"
+		[ ! -d "$work/dist/frames" ] || fail "'$v' got as far as rendering"
+	done
+}
+
+@test "a weighted grain render finishes rather than following the infinite plate" {
+	# The plates are endless lavfi sources and `maskedmerge` has no `shortest` option; the render
+	# has to end because its mask comes from the image. A proof that never finished would be the
+	# DELIVERY_BLEND incident again, one filter earlier.
+	local work="$BATS_TEST_TMPDIR/grain-proof" look="$BATS_TEST_TMPDIR/grain-proof.json"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	jq '.grain.shadows = 0.35 | .grain.highlights = 0.5' "$BATS_TEST_DIRNAME/../look.json" > "$look"
+	LOOK_FILE="$look" PROOF=0.1 STAB=0 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	local out
+	out=$(find "$work/dist/proofs" -name '*.mp4' | head -1)
+	[ -s "$out" ] || fail "no proof was written: $output"
+}
+
+@test "the staged path refuses a look it cannot apply, rather than rendering without part of it" {
+	# A baseline has already been converted, so a stage that runs before the conversion has nowhere
+	# to go. For as long as the correction existed this path rendered masters without it, and they
+	# looked finished.
+	local work="$BATS_TEST_TMPDIR/staged-pre" base look="$BATS_TEST_TMPDIR/staged-pre.json" key
+	base="$work/dist/01-baseline/CCC_baseline.mov"
+	mkdir -p "$(dirname "$base")"
+	ffmpeg -y -f lavfi -i "testsrc2=s=72x128:d=0.1:r=24" \
+		-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le "$base" -v error
+	for key in '.correct.exposure = 0.5' '.halation.strength = 0.4'; do
+		jq "$key" "$BATS_TEST_DIRNAME/../look.json" > "$look"
+		LOOK_FILE="$look" GRADE_WORK_DIR="$work" run "$SCRIPTS/02-grade.sh" CCC
+		[ "$status" -ne 0 ] || fail "rendered a master with '$key' left out"
+		[[ "$output" == *"runs before Apple's conversion"* ]] || fail "'$key' refused without saying why: $output"
+		[ ! -e "$work/dist/02-graded/CCC_graded.mov" ] || fail "'$key' got as far as encoding"
+	done
+}
+
+@test "the halation cubes are regenerated by content, and only the one a change affects" {
+	local dir="$BATS_TEST_TMPDIR/hal-fresh"
+	run "$SCRIPTS/make-halation-luts.py" "$dir" --threshold 1.0
+	[ "$status" -eq 0 ]
+	run "$SCRIPTS/make-halation-luts.py" "$dir" --threshold 1.0
+	[[ "$output" == *"already current"* ]] || fail "rewrote cubes that already matched: $output"
+	run "$SCRIPTS/make-halation-luts.py" "$dir" --threshold 2.0
+	[ "$output" = "wrote halation-threshold.cube" ] || fail "a threshold change rewrote: $output"
+	grep -q 'threshold=2' "$dir/halation-threshold.cube" || fail "the cube does not record its threshold"
+	run "$SCRIPTS/make-halation-luts.py" "$dir" --threshold -1
+	[ "$status" -ne 0 ] || fail "accepted a negative threshold"
 }
 
 @test "the recorded event stream still matches what the engine emits" {

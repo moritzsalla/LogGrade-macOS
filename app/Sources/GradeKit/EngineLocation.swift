@@ -23,11 +23,15 @@ public struct EngineLocation {
     public var lookFile: URL { root.appendingPathComponent("look.json") }
     public var toneGenerator: URL { root.appendingPathComponent("scripts/make-tone-lut.py") }
     public var correctGenerator: URL { root.appendingPathComponent("scripts/make-correct-lut.py") }
+    public var halationGenerator: URL {
+        root.appendingPathComponent("scripts/make-halation-luts.py")
+    }
     public var gammaSolver: URL { root.appendingPathComponent("scripts/solve-gamma.py") }
     public var appleCube: URL {
         root.appendingPathComponent("luts/apple/AppleLogToRec709-v1.0.cube")
     }
     public var lookCubes: URL { root.appendingPathComponent("luts/looks") }
+    public var printCubes: URL { root.appendingPathComponent("luts/print") }
 
     /// What a preflight can conclude. Each case names the thing to fix, because "could not render"
     /// is the message this whole type exists to avoid.
@@ -96,7 +100,23 @@ public struct EngineLocation {
     }
 
     public func availableLooks(fileManager: FileManager = .default) -> [String] {
-        let urls = (try? fileManager.contentsOfDirectory(at: lookCubes,
+        stems(in: lookCubes, fileManager: fileManager)
+    }
+
+    /// The print-film cube for a stem, resolved exactly as a look's is but from `luts/print/`.
+    public func printCube(named stem: String,
+                          fileManager: FileManager = .default) -> URL? {
+        guard stem != "none", !stem.isEmpty else { return nil }
+        let url = printCubes.appendingPathComponent("\(stem).cube")
+        return fileManager.fileExists(atPath: url.path) ? url : nil
+    }
+
+    public func availablePrints(fileManager: FileManager = .default) -> [String] {
+        stems(in: printCubes, fileManager: fileManager)
+    }
+
+    private func stems(in folder: URL, fileManager: FileManager) -> [String] {
+        let urls = (try? fileManager.contentsOfDirectory(at: folder,
                                                          includingPropertiesForKeys: nil)) ?? []
         return urls.filter { $0.pathExtension == "cube" }
             .map { $0.deletingPathExtension().lastPathComponent }
@@ -106,7 +126,7 @@ public struct EngineLocation {
     /// Everything wrong with this engine, in the order a person would fix it. Empty means it runs.
     public func preflight(fileManager: FileManager = .default) -> [Problem] {
         var problems: [Problem] = []
-        for url in [gradeScript, toneGenerator, correctGenerator, gammaSolver] {
+        for url in [gradeScript, toneGenerator, correctGenerator, halationGenerator, gammaSolver] {
             if !fileManager.fileExists(atPath: url.path) {
                 problems.append(.missingFile(url))
             } else if !fileManager.isExecutableFile(atPath: url.path) {

@@ -40,6 +40,8 @@ WORK="$(resolve_work_dir "$ROOT")"
 # db rather than typed here — see require_number in lib.sh.
 SMOOTHING="$(require_number SMOOTHING "${SMOOTHING:-$(look .stabilisation.smoothing)}")"  # lowpass
 GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain.strength)}")"
+GRAIN_SHADOWS="$(require_unit grain.shadows "$(look .grain.shadows)")"
+GRAIN_HIGHLIGHTS="$(require_unit grain.highlights "$(look .grain.highlights)")"
 
 # The shape is DATA, resolved by lib.sh. This was a two-branch `case` carrying its own sizes and
 # its own `crop=2160:2700:0:` — the width, the aspect and the master's dimensions all written in,
@@ -124,7 +126,7 @@ render_delivery "$OUT" "$SUFFIX encode" \
 	-y -i "$IN" -f lavfi -i "$(grain_plate "$W" "$H" "$FPS")" \
 	-filter_complex "[0:v]$(delivery_image_chain "$W" "$H" "$STAB_PREFIX" "$CROP")[b];\
 [1:v]$(delivery_grain_branch "$W" "$H" "$GRAIN_STRENGTH")[g];\
-[b][g]${DELIVERY_BLEND}[o]" \
+$(delivery_grain_merge b g o "$GRAIN_SHADOWS" "$GRAIN_HIGHLIGHTS")" \
 	-map "[o]" -map "0:a:0?" -shortest \
 	-c:v libx264 -profile:v high -preset slow -crf 18 \
 	-color_primaries bt709 -color_trc bt709 -colorspace bt709 \

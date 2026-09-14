@@ -46,11 +46,33 @@ TONE="$ROOT/luts/tone/shipped.cube"
 # The look LUT is a look value like any other, so it comes from look.json. LOOK=<name|none|path>
 # overrides it for one run; the app sets it per render.
 LOOK_LUT="$(resolve_look_lut "${LOOK:-$(look .look.lut)}" "$ROOT")"
+PRINT_LUT="$(resolve_look_lut "${PRINT:-$(look .print.lut)}" "$ROOT" print)"
+LOOK_STRENGTH="$(require_unit look.strength "$(look .look.strength)")"
+PRINT_STRENGTH="$(require_unit print.strength "$(look .print.strength)")"
 SAT="$(require_number SAT "$(look .colour.saturation)")"
 WARM="$(require_number WARM "$(look .colour.warmth)")"
 OUT="$WORK/dist/02-graded/${CLIP}_graded.mov"
 
 [ -f "$BASELINE" ] || { echo "baseline not found: $BASELINE — run 01-baseline.sh first" >&2; exit 1; }
+
+# THIS PATH CANNOT APPLY A STAGE THAT RUNS BEFORE THE CONVERSION, and it used to omit one in silence.
+# A baseline has already been through Apple's CST, so the input correction and halation — both of
+# which act on the log picture, where the light still is — have nowhere to go. It rendered a master
+# without the correction for as long as the correction existed, and the master looked finished.
+# Refused rather than approximated on the converted picture, which would be a different grade
+# under the same look.json.
+if [ "$("$SCRIPT_DIR/make-correct-lut.py" --check-neutral \
+		--exposure "$(look .correct.exposure)" --temp "$(look .correct.temp)" \
+		--tint "$(look .correct.tint)" --slope "$(look .correct.slope)" \
+		--offset "$(look .correct.offset)" --power "$(look .correct.power)")" = "active" ] \
+	|| [ "$("$SCRIPT_DIR/make-halation-luts.py" --check-neutral \
+		--strength "$(look .halation.strength)")" = "active" ]; then
+	echo "REFUSING: this look has a stage that runs before Apple's conversion (the input" >&2
+	echo "  correction or halation), and a baseline has already been converted, so the staged" >&2
+	echo "  path cannot apply it. Render with grade.sh, which starts from the source." >&2
+	emit_code REFUSE_STAGED_PRE_CONVERSION
+	exit 1
+fi
 check_disk_space "$WORK/dist" 10
 # Create the output directory. This used to rely on a checked-in dist/*/.gitkeep marker, which
 # is wrong the moment a work dir is set: the marker was in the repo and the output was not.
