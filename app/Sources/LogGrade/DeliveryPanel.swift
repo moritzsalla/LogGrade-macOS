@@ -11,6 +11,8 @@ import SwiftUI
 /// discovered from its exit code.
 struct DeliveryPanel: View {
     @ObservedObject var model: GradeModel
+    @State private var showEditor = false
+    @State private var editingDeliverable: Deliverable?
 
     private static let cropStepperPixels = 8
 
@@ -20,7 +22,7 @@ struct DeliveryPanel: View {
                 .font(Type.heading)
                 .foregroundColor(Palette.ink)
             shapeRow
-            customTargetsNote
+            customTargetsSection
             sizeRow
             sizeCostNote
             stabiliseRow
@@ -32,6 +34,9 @@ struct DeliveryPanel: View {
         }
         .padding(Space.l)
         .background(Palette.panel)
+        .sheet(isPresented: $showEditor) {
+            DeliverableEditor(project: $model.project, existingDeliverable: editingDeliverable)
+        }
     }
 
     // GENERATED FROM THE PRESET LIST, not written out one per line. Two hardcoded toggles is what
@@ -48,15 +53,52 @@ struct DeliveryPanel: View {
         .foregroundColor(Palette.inkSecondary)
     }
 
-    // MARK: - Custom deliverable editor UI stub
-    // The editor will be built here to allow adding/editing/removing custom deliverables.
-    // For now, this displays read-only info about any custom shapes loaded from the project file.
-    @ViewBuilder private var customTargetsNote: some View {
-        if !customTargets.isEmpty {
-            Text("custom shapes: \(customTargets.map(\.spec).joined(separator: ", "))")
-                .font(Type.caption)
-                .foregroundColor(Palette.inkTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+    // MARK: - Custom deliverable editor
+    // Shows custom deliverables loaded from the project file, with controls to edit or remove them.
+    @ViewBuilder private var customTargetsSection: some View {
+        if customTargets.isEmpty {
+            HStack(spacing: 8) {
+                Button(action: { showEditor = true }) {
+                    Label("Add shape", systemImage: "plus")
+                        .font(Type.label)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Spacer()
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text("custom shapes").font(Type.label).foregroundColor(Palette.inkSecondary)
+                    Button(action: { showEditor = true }) {
+                        Label("Add", systemImage: "plus")
+                            .font(Type.label)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    Spacer()
+                }
+                ForEach(customTargets, id: \.self) { deliverable in
+                    HStack(spacing: 8) {
+                        Text(deliverable.spec)
+                            .font(Type.value)
+                            .foregroundColor(Palette.ink)
+                        Spacer()
+                        Button(action: { editingDeliverable = deliverable; showEditor = true }) {
+                            Label("Edit", systemImage: "pencil")
+                                .font(Type.caption)
+                        }
+                        .buttonStyle(.borderless)
+                        Button(action: {
+                            model.project.delivery.targets.removeAll { $0 == deliverable }
+                        }) {
+                            Label("Remove", systemImage: "minus")
+                                .font(Type.caption)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
         }
     }
 
