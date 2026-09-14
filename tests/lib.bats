@@ -2846,7 +2846,8 @@ sys.exit("; ".join(problems) or None)
 	LOGGRADE_TOOLS="$BATS_TEST_TMPDIR/no-tools" run "$BATS_TEST_DIRNAME/../app/make-app.sh" --debug
 	[ "$status" -ne 0 ] || fail "built without the pinned tools: $output"
 	[[ "$output" == *"./app/fetch-tools.sh"* ]] || fail "the refusal does not name the fix: $output"
-	[[ "$output" != *"Compiling"* && "$output" != *"Build complete"* ]] \
+	# xcbuild's words, not SwiftPM's: a build with two --arch goes through Xcode's build system.
+	[[ "$output" != *"Compute target dependency graph"* && "$output" != *"Build succeeded"* ]] \
 		|| fail "compiled before refusing: $output"
 }
 
