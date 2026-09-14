@@ -1,6 +1,6 @@
 #!/bin/bash
-# Stage 2: baseline -> master (look + print + tone + colour trims; Grade without correction and
-# halation, which this path refuses — see below).
+# Stage 2: baseline -> master (look + print + tone + trims: the grade less the correction and
+# halation, which need the log picture — a grade that uses either is refused, see below).
 # Usage: ./02-grade.sh IMG_XXXX
 # Reads dist/01-baseline/<clip>_baseline.mov, writes dist/02-graded/<clip>_graded.mov.
 #
@@ -38,8 +38,8 @@ TONE="$ROOT/luts/tone/shipped.cube"
 #
 # THE NUMBERS ARE NOT HERE. They live in look.json, and ensure_tone_lut below regenerates
 # shipped.cube from it whenever the two disagree. This header used to carry its own copy of all six
-# tone values plus a regenerate command whose path pointed outside the repo — two copies of a grade,
-# which is the drift look.json exists to end.
+# tone values plus a regenerate command whose path pointed outside the repo — two copies of the
+# tone, which is the drift look.json exists to end.
 #
 # Worth keeping from that copy: `toe` was measured to do NOTHING at pivot 0.39 — identical
 # percentiles at 0.07 and 0.00 — so it is zeroed rather than left as a decorative knob. The black
