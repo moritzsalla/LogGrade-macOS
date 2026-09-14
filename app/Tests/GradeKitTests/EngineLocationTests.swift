@@ -46,6 +46,44 @@ final class EngineLocationTests: XCTestCase {
         XCTAssertTrue(FileManager.default.isExecutableFile(atPath: found!.path))
     }
 
+    /// An executable script at `root/name`.
+    private func fakeTool(_ name: String, in root: URL, body: String) throws {
+        let url = root.appendingPathComponent(name)
+        try "#!/bin/sh\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+    }
+
+    func testTheEngineFindsTheToolsItCarries() throws {
+        // A bundle vendors ffmpeg beside the scripts. This machine also has one in ~/.local/bin,
+        // which is what hid the defect: resolved without the engine's own directory, a fresh Mac
+        // was told ffmpeg was missing while the app carried it.
+        let engine = try stubEngine(script: "#!/bin/bash\n")
+        defer { try? FileManager.default.removeItem(at: engine.root) }
+        try fakeTool("ffmpeg", in: engine.root, body: "exit 0")
+        XCTAssertEqual(engine.resolveTool("ffmpeg")?.standardizedFileURL.path,
+                       engine.root.appendingPathComponent("ffmpeg").standardizedFileURL.path)
+    }
+
+    func testAPythonThatCannotRunIsNamedAtPreflight() throws {
+        // What /usr/bin/python3 does on a Mac without the developer tools: it exists, it is
+        // executable, and it refuses. Placed in the engine's directory so it is the one found,
+        // which also proves the preflight searches there.
+        let engine = try stubEngine(script: "#!/bin/bash\n")
+        defer { try? FileManager.default.removeItem(at: engine.root) }
+        try fakeTool("python3", in: engine.root,
+                     body: "echo 'xcode-select: note: No developer tools were found' >&2; exit 1")
+        func namesPython(_ problems: [EngineLocation.Problem]) -> Bool {
+            problems.contains { if case .pythonDoesNotRun = $0 { return true }; return false }
+        }
+        let problems = engine.preflight()
+        XCTAssertTrue(namesPython(problems), "a python3 that cannot run must be named: \(problems)")
+        let text = problems.map(\.description).joined(separator: "\n")
+        XCTAssertTrue(text.contains("xcode-select --install"), "should say how to fix it: \(text)")
+
+        try fakeTool("python3", in: engine.root, body: "exit 0")
+        XCTAssertFalse(namesPython(engine.preflight()), "a python3 that runs is not a problem")
+    }
+
     func testFindsNothingOutsideACheckout() {
         XCTAssertNil(EngineLocation.discover(from: URL(fileURLWithPath: "/")),
                      "the filesystem root is not an engine")

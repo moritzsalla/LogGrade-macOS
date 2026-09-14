@@ -39,6 +39,7 @@ public struct EngineLocation {
         case missingFile(URL)
         case notExecutable(URL)
         case missingTool(String)
+        case pythonDoesNotRun(URL)
         case appleCubeAbsent(URL)
 
         public var description: String {
@@ -49,6 +50,11 @@ public struct EngineLocation {
                 return "not executable: \(u.path)"
             case .missingTool(let name):
                 return "\(name) is not on any path this app knows about"
+            case .pythonDoesNotRun(let u):
+                return """
+                python3 at \(u.path) does not run. On a Mac without the command line developer \
+                tools it is only a placeholder. Install them with: xcode-select --install
+                """
             case .appleCubeAbsent(let u):
                 return """
                 Apple's conversion LUT is missing: \(u.path)
@@ -86,6 +92,14 @@ public struct EngineLocation {
             }
         }
         return nil
+    }
+
+    /// A tool as a render will find it: the engine's own directory first, because that is where
+    /// make-app.sh vendors ffmpeg, ffprobe and jq, and `EngineRun` puts it first on the child's
+    /// PATH. Resolving without it made a bundle carrying all three report them missing on any Mac
+    /// that had no copy of its own in ~/.local/bin or Homebrew — which is every fresh one.
+    public func resolveTool(_ name: String, fileManager: FileManager = .default) -> URL? {
+        Self.resolveTool(name, extraPaths: [root.path], fileManager: fileManager)
     }
 
     /// The cube for a look's stem, or nil for "none" and for a stem that is not on disk.
@@ -139,10 +153,33 @@ public struct EngineLocation {
         if !fileManager.fileExists(atPath: appleCube.path) {
             problems.append(.appleCubeAbsent(appleCube))
         }
-        for tool in Self.requiredTools where Self.resolveTool(tool, fileManager: fileManager) == nil {
-            problems.append(.missingTool(tool))
+        for tool in Self.requiredTools {
+            guard let url = resolveTool(tool, fileManager: fileManager) else {
+                problems.append(.missingTool(tool))
+                continue
+            }
+            if tool == "python3" && !Self.runs(url) {
+                problems.append(.pythonDoesNotRun(url))
+            }
         }
         return problems
+    }
+
+    /// Whether a tool exits cleanly when asked to do nothing.
+    ///
+    /// ONLY python3 IS RUN, because only python3 can exist without being installed. macOS ships
+    /// /usr/bin/python3 as one of the developer-tools placeholders (the same file as /usr/bin/git),
+    /// so it is executable on every Mac and the existence check above passes. Without the tools it
+    /// exits non-zero and asks to install them, which a render would hit at its first generator.
+    static func runs(_ tool: URL) -> Bool {
+        let process = Process()
+        process.executableURL = tool
+        process.arguments = ["-c", "pass"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return false }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
     }
 
     /// Where the engine is, in the order the app should look.

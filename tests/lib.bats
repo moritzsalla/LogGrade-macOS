@@ -2809,6 +2809,18 @@ sys.exit("; ".join(problems) or None)
 	# Drawn from the shipped curve by make-icon.swift. Without it macOS gives the app the generic
 	# document icon, which is how you tell at a glance that a build went wrong.
 	[ -f "$app/Contents/Resources/AppIcon.icns" ] || fail "the icon was not drawn into the bundle"
+	# UNIVERSAL, every executable in it. Nothing on this Intel Mac notices a missing arm64 slice:
+	# on the Apple Mac it is Rosetta, or a prompt to install Rosetta before the first render.
+	local exe
+	for exe in MacOS/LogGrade Resources/engine/ffmpeg Resources/engine/ffprobe \
+		Resources/engine/jq; do
+		lipo "$app/Contents/$exe" -verify_arch x86_64 arm64 \
+			|| fail "$exe is not universal: $(lipo -archs "$app/Contents/$exe")"
+		# Each by itself too: the bundle's verdict does not show that a tool under Resources/
+		# carries a signature of its own, and Apple silicon kills arm64 code without one.
+		codesign --verify --strict "$app/Contents/$exe" || fail "$exe is not signed"
+	done
+	codesign --verify --deep --strict "$app" || fail "the bundle's signature does not verify"
 }
 
 # bats test_tags=slow,serial
@@ -2821,34 +2833,21 @@ sys.exit("; ".join(problems) or None)
 	run "$BATS_TEST_DIRNAME/../app/make-app.sh"
 	[ "$status" -eq 0 ] || fail "$output"
 	[[ "$output" == *"(release)"* ]] || fail "make-app.sh did not default to release: $output"
-	[ -x "$BATS_TEST_DIRNAME/../app/.build/release/LogGrade" ] || fail "no optimised binary"
+	# A universal build writes here, through Xcode's build system. The old .build/release/ path
+	# kept this green after the switch, off a host-only binary left by an earlier build.
+	[ -x "$BATS_TEST_DIRNAME/../app/.build/apple/Products/Release/LogGrade" ] \
+		|| fail "no optimised binary"
 }
 
-# bats test_tags=slow,serial
-@test "the app bundle contains universal binaries" {
+@test "the app build refuses tools that are not the pinned ones, before compiling anything" {
 	command -v swift >/dev/null || skip "no swift toolchain"
-	command -v lipo >/dev/null || skip "lipo not available"
-	local app="$BATS_TEST_DIRNAME/../dist/LogGrade.app"
-	# Build a debug bundle with universal support. Requires arm64 tools in ~/.local/share/loggrade-tools/.
-	[ -f "$HOME/.local/share/loggrade-tools/x86_64/jq" ] || skip "arm64 tools not set up in ~/.local/share/loggrade-tools/"
-	run "$BATS_TEST_DIRNAME/../app/make-app.sh" --debug
-	[ "$status" -eq 0 ] || fail "$output"
-	# The app's executable must be universal (both x86_64 and arm64).
-	local archs
-	archs=$(lipo -archs "$app/Contents/MacOS/LogGrade")
-	[[ "$archs" == *"x86_64"* ]] || fail "app executable missing x86_64: $archs"
-	[[ "$archs" == *"arm64"* ]] || fail "app executable missing arm64: $archs"
-	# jq must be universal. ffmpeg and ffprobe are x86_64-only (no trustworthy arm64 static build).
-	archs=$(lipo -archs "$app/Contents/Resources/engine/jq")
-	[[ "$archs" == *"x86_64"* ]] || fail "jq missing x86_64: $archs"
-	[[ "$archs" == *"arm64"* ]] || fail "jq missing arm64: $archs"
-	# ffmpeg and ffprobe should exist but be x86_64-only.
-	[ -x "$app/Contents/Resources/engine/ffmpeg" ] || fail "ffmpeg not in bundle"
-	[ -x "$app/Contents/Resources/engine/ffprobe" ] || fail "ffprobe not in bundle"
-	archs=$(lipo -archs "$app/Contents/Resources/engine/ffmpeg" 2>&1)
-	[[ "$archs" != *"arm64"* ]] || fail "ffmpeg should be x86_64-only (no trustworthy arm64 build): $archs"
-	# Verify code signatures are valid.
-	codesign --verify --deep --strict "$app" || fail "code signature verification failed"
+	# An empty directory stands for a fresh Mac. The message has to name the script that fixes it,
+	# and the refusal has to come before the build, which is the part that costs minutes.
+	LOGGRADE_TOOLS="$BATS_TEST_TMPDIR/no-tools" run "$BATS_TEST_DIRNAME/../app/make-app.sh" --debug
+	[ "$status" -ne 0 ] || fail "built without the pinned tools: $output"
+	[[ "$output" == *"./app/fetch-tools.sh"* ]] || fail "the refusal does not name the fix: $output"
+	[[ "$output" != *"Compiling"* && "$output" != *"Build complete"* ]] \
+		|| fail "compiled before refusing: $output"
 }
 
 @test "a measured exposure can be handed back instead of measured again" {
