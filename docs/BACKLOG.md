@@ -91,11 +91,6 @@ freedom. Once landscape sources are accepted, a 2D picker has something behind i
 `MATCH=1` default; the exposure probe's inherited, unmeasured `-ss 1` and `scale=320:-1`; the
 stabiliser's `unsharp=5:5:0.2`.
 
-## Cleanups
-
-**`02-grade.sh`'s header is stale in two places.** It uses "look" for both the Portra LUT and the
-whole grade, and still says "the saturation and warmth below" when the values moved to `look.json`.
-
 ## Considered and declined
 
 Kept here so they are not re-litigated from scratch.
