@@ -1,6 +1,7 @@
 # Plan: one LogGrade.app for both Macs
 
-Not started. Written 2026-09-14.
+Steps 1–3 done on the Intel Mac (2026-09-15); step 4 and everything on the Apple Mac are not.
+Written 2026-09-14.
 
 **Goal.** Build once on the Intel Mac, copy the bundle to the Apple silicon Mac, double-click, and
 it runs natively on both. Personal use on two machines, so no Apple Developer account.
@@ -10,17 +11,21 @@ send the wrong one. The app is a few MB, and doubling it costs nothing.
 
 ---
 
-## What is true today (measured 2026-09-14)
+## What is true today (measured 2026-09-15)
 
-- `make-app.sh` runs `swift build` for the host only, so the bundle is x86_64.
-- It copies `ffmpeg`, `ffprobe` and `jq` from `~/.local/bin`. All three are **x86_64 only**. The
-  ffmpeg is statically linked against third-party libraries (`otool -L` lists only system
-  frameworks), so it runs from inside a bundle.
+- `make-app.sh` builds `--arch arm64 --arch x86_64` and refuses any bundled executable that is not
+  universal. Its tools come from `app/fetch-tools.sh`, pinned by `app/tools.sha256`; that script's
+  header records each source, version, licence and why.
+- ffmpeg is two different builds: evermeet 9.0.1 for x86_64 (the `~/.local/bin` one, same sha256)
+  and OSXExperts 9.0 for arm64, the only static arm64 build found with libvidstab.
 - Toolchain: Swift 5.9.2, Xcode 15.2, macOS 13 SDK. `Package.swift` is pinned to 5.9, and that pin
   stays.
 - `python3` is required at render time, not only in tests. `grade.sh` calls
-  `make-tone-lut.py`, `make-correct-lut.py`, `make-halation-luts.py` and `solve-gamma.py`, and
-  `EngineLocation.requiredTools` lists it. Those scripts use only the standard library.
+  `make-tone-lut.py`, `make-correct-lut.py`, `make-halation-luts.py` and `solve-gamma.py`. Those
+  scripts use only the standard library. `/usr/bin/python3` exists on every Mac as a developer-tools
+  placeholder, so the preflight now runs it and names `xcode-select --install` when it refuses.
+- The preflight used to ignore the tools inside the bundle, so a Mac without its own ffmpeg was
+  told ffmpeg was missing. It now searches the engine's directory first, as a render does.
 
 ---
 
@@ -37,25 +42,22 @@ Check: `lipo -archs dist/LogGrade.app/Contents/MacOS/LogGrade` prints `x86_64 ar
 ### 2. Universal ffmpeg, ffprobe, jq
 - **Find out where the current Intel ffmpeg came from** before replacing anything, and write it
   down. That source is also the first place to look for an arm64 build.
-- **Both halves must be the same ffmpeg version and configuration.** A different build on the
-  Apple Mac is a different renderer, and "did the image move" would then depend on which Mac
-  rendered it. If no matching arm64 build exists, replace the Intel half too. `tests/render-golden.sh`
-  will then skip, because the golden names the old build. Compare a render from the new build with
-  the one kept in `dist/golden/`, then re-record with `--regenerate "ffmpeg replaced: <build>"`.
-  `--conformance` cannot catch this, because both of its sides run the same new binary.
-- Required in both halves: `zscale` (zimg), `libx264`, `prores_ks`. Check with
-  `ffmpeg -filters | grep zscale` and `ffmpeg -encoders | grep -E 'libx264|prores_ks'`.
+- **The halves are NOT the same build, deliberately.** No static arm64 9.0.1 with libvidstab
+  exists, and replacing the Intel half would move the image on the Mac where it is judged, with
+  nothing to catch it: `--conformance` runs the same new binary on both sides, and
+  `tests/render-golden.sh` skips on a different ffmpeg build or architecture rather than failing.
+  The cost is on the Apple Mac: 9.0 against 9.0.1, NEON against x86 SIMD, so its renders may not
+  be byte-identical to this Mac's. That is to be measured there, not assumed.
+- Required in both halves: every filter and encoder the scripts name, including `vidstabdetect`,
+  `zscale`, `libx264`, `prores_ks`. The arm64 half cannot run here, so it was checked by `strings`.
 - Statically linked only. A Homebrew ffmpeg depends on libraries under `/opt/homebrew`, so it
   would break on any Mac without Homebrew.
 - jq: the official GitHub releases ship `jq-macos-arm64` and `jq-macos-amd64`.
-- Merge each pair with `lipo -create`. Keep the arm64 binaries somewhere stable that the build reads
-  from (e.g. `~/.local/share/loggrade-tools/arm64/`), rather than downloading during the build.
-
-`make-app.sh` then copies the merged binaries in, not whatever `command -v` finds on this machine.
+- Merge each pair with `lipo -create`, from `~/.local/share/loggrade-tools/{x86_64,arm64}/`.
 
 ### 3. Sign every executable, not just the bundle
-Apple silicon **kills unsigned arm64 code** on launch. An ad-hoc signature is enough. `lipo`
-invalidates the source binaries' signatures, and `codesign --sign - "$APP"` does not reach
+Apple silicon **kills unsigned arm64 code** on launch. An ad-hoc signature is enough. A
+`lipo`-merged binary carries no signature, and `codesign --sign - "$APP"` does not reach
 executables under `Contents/Resources/engine/`. So sign each one first, then the bundle:
 
 ```sh
@@ -64,8 +66,8 @@ codesign --force --sign - "$APP"
 codesign --verify --deep --strict "$APP"
 ```
 
-The signing step currently only warns on failure (`|| echo WARNING`). Make a failed signature stop
-the build, since on the Apple Mac an unsigned bundle simply won't launch.
+A failed signature stops the build. `--deep` alone passed a bundle whose tools were unsigned, so
+the bats test verifies each tool too.
 
 ### 4. Package for transfer
 `ditto -c -k --keepParent dist/LogGrade.app dist/LogGrade.zip`. `ditto` rather than `zip`, because
@@ -92,21 +94,16 @@ all.
 
 ## Verification
 
-- On this Mac: `./scripts/check.sh`, then launch the bundle and render one clip. With the arm64
-  slice present, this proves the x86_64 slice still works.
-- On the Apple Mac, the only place the arm64 half can be proven:
-  - Launch, and confirm Activity Monitor shows *Kind: Apple*, not *Intel*.
-  - Render one clip. Also run `file` on the ffmpeg process to make sure it isn't running under
-    Rosetta.
-  - Render the same clip at the same settings on both Macs and compare the frames. They should be
-    byte-identical if both ffmpeg halves match. Name each output after the machine that rendered it
-    (CLAUDE.md: two renders of one clip can write the same path).
-- Add a bats test that runs `lipo -archs` on the app binary and the three bundled tools, and fails
-  if either architecture is missing. Mutation-test it: build host-only, confirm the test goes red.
-
-## Open questions
-
-- Where did `~/.local/bin/ffmpeg` come from, and does the same source publish a matching arm64 build?
-- Does the app say clearly which tool is missing when python3 isn't installed, or does a render
-  just fail? If it only fails, name the missing tool on first launch, since that will be the first
-  thing seen on the new Mac.
+- On this Mac (done): the bats bundle test checks `lipo -verify_arch` and signatures on the app
+  and all three tools, and went red with ffprobe single-arch. One `PROOF=2` render ran through the
+  bundle's own engine and tools. Not done: launching the bundle from the Finder.
+- On the Apple Mac, the only place the arm64 half can be proven (none done yet):
+  - Launch, and confirm Activity Monitor shows *Kind: Apple*, not *Intel*, for LogGrade and for
+    ffmpeg during a render. The startup screen should list no problems; without the developer
+    tools it names `xcode-select --install`.
+  - Render one clip, including stabilisation.
+  - Render the same clip at the same settings on both Macs and compare the frames. Record how far
+    apart they are; do not expect byte-identical. Name each output after the machine that rendered
+    it (CLAUDE.md: two renders of one clip can write the same path).
+  - If that Mac runs macOS 13: jq 1.8.2 is stamped `minos 14.0`. Its x86_64 build runs on 13 here;
+    confirm the arm64 one does.

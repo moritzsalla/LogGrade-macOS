@@ -296,7 +296,9 @@ window.backgroundColor = NSColor(Palette.surround)
 // autosave name makes macOS keep the size and position; the rest is a handful of defaults.
 window.setFrameAutosaveName("LogGradeMain")
 if window.frame.origin == .zero { window.center() }
-let clipList = ClipList(probe: EngineLocation.resolveTool("ffprobe").map(ClipProbe.init))
+// Through the engine, so a bundle probes with the ffprobe it carries.
+let ffprobe = engine?.resolveTool("ffprobe") ?? EngineLocation.resolveTool("ffprobe")
+let clipList = ClipList(probe: ffprobe.map(ClipProbe.init))
 
 // THE KEYBOARD. A grading tool lives under the fingers: you look, you nudge, you compare, you move
 // to the next clip, and reaching for a mouse between each of those is the difference between a tool

@@ -2809,6 +2809,18 @@ sys.exit("; ".join(problems) or None)
 	# Drawn from the shipped curve by make-icon.swift. Without it macOS gives the app the generic
 	# document icon, which is how you tell at a glance that a build went wrong.
 	[ -f "$app/Contents/Resources/AppIcon.icns" ] || fail "the icon was not drawn into the bundle"
+	# UNIVERSAL, every executable in it. Nothing on this Intel Mac notices a missing arm64 slice:
+	# on the Apple Mac it is Rosetta, or a prompt to install Rosetta before the first render.
+	local exe
+	for exe in MacOS/LogGrade Resources/engine/ffmpeg Resources/engine/ffprobe \
+		Resources/engine/jq; do
+		lipo "$app/Contents/$exe" -verify_arch x86_64 arm64 \
+			|| fail "$exe is not universal: $(lipo -archs "$app/Contents/$exe")"
+		# Each by itself too: the bundle's verdict does not show that a tool under Resources/
+		# carries a signature of its own, and Apple silicon kills arm64 code without one.
+		codesign --verify --strict "$app/Contents/$exe" || fail "$exe is not signed"
+	done
+	codesign --verify --deep --strict "$app" || fail "the bundle's signature does not verify"
 }
 
 # bats test_tags=slow,serial
@@ -2821,7 +2833,22 @@ sys.exit("; ".join(problems) or None)
 	run "$BATS_TEST_DIRNAME/../app/make-app.sh"
 	[ "$status" -eq 0 ] || fail "$output"
 	[[ "$output" == *"(release)"* ]] || fail "make-app.sh did not default to release: $output"
-	[ -x "$BATS_TEST_DIRNAME/../app/.build/release/LogGrade" ] || fail "no optimised binary"
+	# A universal build writes here, through Xcode's build system. The old .build/release/ path
+	# kept this green after the switch, off a host-only binary left by an earlier build.
+	[ -x "$BATS_TEST_DIRNAME/../app/.build/apple/Products/Release/LogGrade" ] \
+		|| fail "no optimised binary"
+}
+
+@test "the app build refuses tools that are not the pinned ones, before compiling anything" {
+	command -v swift >/dev/null || skip "no swift toolchain"
+	# An empty directory stands for a fresh Mac. The message has to name the script that fixes it,
+	# and the refusal has to come before the build, which is the part that costs minutes.
+	LOGGRADE_TOOLS="$BATS_TEST_TMPDIR/no-tools" run "$BATS_TEST_DIRNAME/../app/make-app.sh" --debug
+	[ "$status" -ne 0 ] || fail "built without the pinned tools: $output"
+	[[ "$output" == *"./app/fetch-tools.sh"* ]] || fail "the refusal does not name the fix: $output"
+	# xcbuild's words, not SwiftPM's: a build with two --arch goes through Xcode's build system.
+	[[ "$output" != *"Compute target dependency graph"* && "$output" != *"Build succeeded"* ]] \
+		|| fail "compiled before refusing: $output"
 }
 
 @test "a measured exposure can be handed back instead of measured again" {
