@@ -1229,10 +1229,8 @@ delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-pre
 	# only 1920 has been looked at. It is stated here so the next reader knows which of the two
 	# numbers has evidence behind it.
 	#
-	# Measured at 960-2560, not yet judged by eye (PIPELINE.md, "Sharpen and grain at other
-	# heights"): the sharpening residual stays ~3 code values, but its width grows less than the
-	# radius, so at taller frames it touches relatively finer detail. Grain stays ~1px wide at
-	# every height, so it is coarser relative to a shorter frame.
+	# Measured at 960-2560 in PIPELINE.md (unjudged by eye): strength holds, but the residual widens
+	# less than the radius, and grain stays ~1px, so both change relative to the picture.
 	#
 	# unsharp needs odd sizes and rejects anything below 3.
 	local r
