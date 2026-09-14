@@ -71,11 +71,6 @@ amount does not; the grain was sized at 1080. Both are assumptions, stated as su
 `delivery_image_chain`, the README and `USAGE.md`. Deliverables as data made other sizes reachable.
 A MEASUREMENT task: render one clip at several heights and look.
 
-**Re-measure the parity tolerance on purpose.** `grade_worst_by_case` was computed from the Bench's
-JavaScript; with the Bench gone, `tests/grade-parity.py --regenerate` copies it forward and says so.
-As a regression ceiling that is correct. Missing: a way to re-measure it when a change is meant to
-move it.
-
 **An editor for arbitrary deliverable shapes in the app.** The engine and project file carry any
 shape; the app toggles `Deliverable.presets` and lists anything else read-only.
 
