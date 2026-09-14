@@ -2762,6 +2762,103 @@ sys.exit("; ".join(problems) or None)
 		|| fail "the stream has no run_done, so a consumer cannot tell it ended"
 }
 
+# --- audio --------------------------------------------------------------------
+# A high-pass on the delivered audio only. The cutoff is measured in docs/PIPELINE.md, "Encode".
+
+# RMS in dBFS of a file's audio below <hz>, through a 4-pole lowpass so the louder band above does
+# not leak in. awk reads to the end rather than `exit`: under pipefail a closed pipe kills ffmpeg
+# with SIGPIPE and fails the assignment.
+_low_band_db() {  # _low_band_db <file> <hz>
+	ffmpeg -hide_banner -nostats -i "$1" -map 0:a:0 \
+		-af "lowpass=f=$2,lowpass=f=$2,astats=measure_perchannel=none" -f null - 2>&1 \
+		| awk -F': ' '/Overall/ { o = 1 } o && /RMS level dB/ { v = $2 } END { print v }'
+}
+
+# bats test_tags=slow
+@test "the delivered audio loses its low band to the high-pass, and 0 turns it off" {
+	local src on off hz db_on db_off
+	src=$(_real_clip)
+	[ -n "$src" ] || skip "no source footage"
+	# Two work dirs: both proofs are named by clip and length, so one dir would compare a file with
+	# itself.
+	mkdir -p "$BATS_TEST_TMPDIR/hp-on" "$BATS_TEST_TMPDIR/hp-off"
+	PROOF=3 STAB=0 GRADE_WORK_DIR="$BATS_TEST_TMPDIR/hp-on" run "$SCRIPTS/grade.sh" "$src"
+	[ "$status" -eq 0 ] || fail "default render failed: $output"
+	PROOF=3 STAB=0 AUDIO_HIGHPASS_HZ=0 GRADE_WORK_DIR="$BATS_TEST_TMPDIR/hp-off" \
+		run "$SCRIPTS/grade.sh" "$src"
+	[ "$status" -eq 0 ] || fail "unfiltered render failed: $output"
+	on=$(find "$BATS_TEST_TMPDIR/hp-on/dist/proofs" -name '*.mp4')
+	off=$(find "$BATS_TEST_TMPDIR/hp-off/dist/proofs" -name '*.mp4')
+	[ -s "$on" ] && [ -s "$off" ] || fail "a proof is missing: '$on' '$off'"
+
+	hz=$(( DELIVERY_AUDIO_HIGHPASS_HZ / 2 ))
+	db_on=$(_low_band_db "$on" "$hz")
+	db_off=$(_low_band_db "$off" "$hz")
+	[[ "$db_on" =~ ^-[0-9]+\.[0-9]+$ && "$db_off" =~ ^-[0-9]+\.[0-9]+$ ]] \
+		|| fail "could not measure the low band: on '$db_on', off '$db_off'"
+	# Measured on IMG_0607's first 3 s at 60 Hz: -63.3 dB off, -67.9 on. Two renders with the
+	# filter off differ by nothing, so a 2 dB floor is not noise and leaves room for quieter clips.
+	[ "$(awk -v a="$db_off" -v b="$db_on" 'BEGIN { print (a - b >= 2) ? "ok" : "no" }')" = ok ] \
+		|| fail "below $hz Hz: $db_off dB unfiltered, $db_on dB filtered; expected 2 dB less"
+}
+
+# bats test_tags=slow
+@test "a clip with no audio delivers with the high-pass on, and gains no audio stream" {
+	local src clip work out streams
+	src=$(_real_clip)
+	[ -n "$src" ] || skip "no source footage"
+	clip="$BATS_TEST_TMPDIR/SILENT.mov"
+	work="$BATS_TEST_TMPDIR/silent"
+	mkdir -p "$work"
+	# A real excerpt: a synthetic fixture cannot finish the delivery chain.
+	ffmpeg -v error -y -i "$src" -t 2 -map 0:v -c copy "$clip" || fail "could not cut a silent clip"
+	PROOF=1 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$clip"
+	[ "$status" -eq 0 ] || fail "render failed: $output"
+	[[ "$output" != *highpass* && "$output" != *Filtergraph* ]] \
+		|| fail "the audio filter complained: $output"
+	# Without this the test also passes with the filter off, which is not the case it is about.
+	grep -q -- "-af highpass=f=$DELIVERY_AUDIO_HIGHPASS_HZ" "$work"/dist/reports/*.txt \
+		|| fail "the render did not carry the audio filter"
+	out=$(find "$work/dist/proofs" -name '*.mp4')
+	[ -s "$out" ] || fail "no proof was written: $output"
+	streams=$(ffprobe -v error -show_entries stream=codec_type -of default=nw=1:nk=1 "$out")
+	[ "$streams" = video ] || fail "expected only a video stream, got: $streams"
+}
+
+@test "an AUDIO_HIGHPASS_HZ that is not a whole number is refused before anything renders" {
+	local work="$BATS_TEST_TMPDIR/bad-hz" v
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	# 70.5, -80 and 1e2 all pass require_number; the comma would splice a second filter.
+	for v in 70.5 -80 1e2 "60,volume=10"; do
+		AUDIO_HIGHPASS_HZ="$v" PROOF=0.1 STAB=0 MATCH=0 GRADE_WORK_DIR="$work" \
+			run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+		[ "$status" -ne 0 ] || fail "grade.sh accepted '$v'"
+		[[ "$output" == *"AUDIO_HIGHPASS_HZ must be a whole number of hertz"* ]] \
+			|| fail "grade.sh did not refuse '$v' by name: $output"
+		[ ! -e "$work/dist/proofs" ] || fail "grade.sh got as far as rendering with '$v'"
+		AUDIO_HIGHPASS_HZ="$v" GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP
+		[ "$status" -ne 0 ] || fail "03-final.sh accepted '$v'"
+		[[ "$output" == *"AUDIO_HIGHPASS_HZ must be a whole number of hertz"* ]] \
+			|| fail "03-final.sh did not refuse '$v' by name: $output"
+	done
+}
+
+@test "the master carries no high-pass: only the delivery encode filters audio" {
+	# The master is what every deliverable is cut from, so a filter there cannot be undone. Its
+	# audio is stream-copied, and ffmpeg refuses a filter on a copied stream.
+	local offenders
+	[[ " ${PRORES_MASTER[*]} " == *" -c:a copy "* ]] || fail "PRORES_MASTER no longer copies audio"
+	# The boundary is there because grade.sh's report line spells `audio_highpass=`.
+	offenders=$(grep -nE '(^|[^[:alnum:]_])highpass=|-af[[:space:]]' "$SCRIPTS"/*.sh \
+		| grep -v '/lib\.sh:' | grep -v ':[0-9]*:[[:space:]]*#' || true)
+	[ -z "$offenders" ] || fail "an audio filter is spelled outside lib.sh:$offenders"
+	offenders=$(grep -nE '(^|[^[:alnum:]_])highpass=' "$SCRIPTS/lib.sh" \
+		| grep -v '^[0-9]*:[[:space:]]*#' || true)
+	[ "$(printf '%s\n' "$offenders" | grep -c .)" -eq 1 ] \
+		|| fail "highpass= should be built in exactly one place in lib.sh:$offenders"
+}
+
 # --- the app's toolchain ------------------------------------------------------
 # Xcode 15.2 is the newest release for this machine's macOS, which caps Swift at 5.9 and the SDK at
 # 14.2. The risk of working across two machines is one-directional: raising the tools version or

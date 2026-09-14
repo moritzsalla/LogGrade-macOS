@@ -66,6 +66,7 @@ scripts below do the same work in three passes and exist for a different reason.
 | `HEIGHT=<px>` | height of the 9:16 reference frame, default 1920. It sets the shared width. |
 | `CROP_Y=<px\|centre>` | vertical offset for every deliverable that crops and carries no offset of its own. **No default.** |
 | `FPS_OUT=<n>` | output frame rate. Default is the source's. |
+| `AUDIO_HIGHPASS_HZ=<hz\|0>` | high-pass cutoff for the delivered audio, whole hertz. Default 60; 0 turns it off. The master is never filtered. |
 
 `FPS_OUT` accepts only an integer relation — dropping or repeating whole frames. Anything that
 would need retiming is refused rather than interpolated, because without motion compensation it

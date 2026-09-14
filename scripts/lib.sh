@@ -257,6 +257,17 @@ require_unit() {  # require_unit <label> <value>  -> echoes the value, or fails
 	printf '%s\n' "$2"
 }
 
+# Integers only: require_number passes `-80`, `1e2` and `.`, which would reach `highpass=f=` and
+# break the caller's `-eq`. A fraction of a hertz means nothing against a 12 dB/octave slope.
+require_hz() {  # require_hz <label> <value>  -> echoes the value, or fails
+	case "$2" in
+		''|*[!0-9]*)
+			echo "$1 must be a whole number of hertz, 0 to turn the filter off: got '$2'" >&2
+			return 1;;
+	esac
+	printf '%s\n' "$2"
+}
+
 # A comma-separated list of numbers, such as a CDL wheel's "1,1,1" or a tint. These are handed to
 # a generator's argv UNQUOTED, one flag list per call, so whitespace in one would split into extra
 # arguments — and a generator that then dies of an argparse error answers --check-neutral with
@@ -980,6 +991,10 @@ DELIVERY_ENCODE=(-map "[o]" -map "0:a:0?" -shortest
 	-color_primaries bt709 -color_trc bt709 -colorspace bt709
 	-c:a aac -b:a 192k -movflags +faststart)
 
+# Delivery only; the master keeps its audio. 60, not 80: the 2-pole filter is -3 dB at its cutoff,
+# and 80 cost 1.8 dB at 80-120 Hz for little more. Measured in docs/PIPELINE.md, "Encode".
+DELIVERY_AUDIO_HIGHPASS_HZ=60
+
 # The graded master's encode, shared by the two staged stages that write one. Audio mapping is the
 # caller's: stage 1 maps nothing and takes ffmpeg's default selection.
 # shellcheck disable=SC2034  # used by the stage scripts
@@ -1040,6 +1055,8 @@ load_delivery_look() {
 	GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain.strength)}")" || return 1
 	GRAIN_SHADOWS="$(require_unit grain.shadows "$(look .grain.shadows)")" || return 1
 	GRAIN_HIGHLIGHTS="$(require_unit grain.highlights "$(look .grain.highlights)")" || return 1
+	AUDIO_HIGHPASS_HZ="$(require_hz AUDIO_HIGHPASS_HZ \
+		"${AUDIO_HIGHPASS_HZ:-$DELIVERY_AUDIO_HIGHPASS_HZ}")" || return 1
 }
 
 # THE GRADE ITSELF, as a spliceable filter chain: look LUT, tone curve, saturation, warmth. Both
@@ -1330,10 +1347,14 @@ delivery_grain_merge() {  # delivery_grain_merge <image-label> <grain-label> <ou
 render_deliverable() {  # render_deliverable <final-out> <label> <input> <w> <h> <fps> <image-chain> [ffmpeg-arg]...
 	local out="$1" label="$2" in="$3" w="$4" h="$5" fps="$6" chain="$7"
 	shift 7
+	local af=""
+	[ "$AUDIO_HIGHPASS_HZ" -eq 0 ] || af="highpass=f=$AUDIO_HIGHPASS_HZ"
+	# `${af:+-af "$af"}` is zero words when the filter is off and exactly two when it is on. An
+	# array would be the obvious spelling, but an empty one under `set -u` is "unbound" on bash 3.2.
 	render_delivery "$out" "$label" \
 		-y -i "$in" -f lavfi -i "$(grain_plate "$w" "$h" "$fps")" \
 		-filter_complex "[0:v]${chain}[b];[1:v]$(delivery_grain_branch "$w" "$h" "$GRAIN_STRENGTH")[g];$(delivery_grain_merge b g o "$GRAIN_SHADOWS" "$GRAIN_HIGHLIGHTS")" \
-		"${DELIVERY_ENCODE[@]}" "$@"
+		"${DELIVERY_ENCODE[@]}" ${af:+-af "$af"} "$@"
 }
 
 # Renders to a staging file and installs it only once the render has succeeded, been checked for
