@@ -135,9 +135,8 @@ def is_neutral(a):
     """True when this correction does nothing at all.
 
     The caller uses it to leave the filter out of the graph entirely rather than rendering every
-    pixel through a lookup that returns it unchanged. That is not only cheaper: it is what keeps
-    the default render byte-identical to the one this engine was forked from, which the conformance
-    test measures. An identity 3D cube would also pay interpolation error on every pixel.
+    pixel through a lookup that returns it unchanged. That is not only cheaper: an identity 3D cube
+    would pay interpolation error on every pixel.
     """
     return (a.exposure == 0.0 and a.temp == 0.0 and a.tint == 0.0
             and a.slope == (1.0, 1.0, 1.0) and a.offset == (0.0, 0.0, 0.0)

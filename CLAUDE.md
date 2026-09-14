@@ -26,9 +26,12 @@ having run only bats, so "green" could mean "linted nothing and never compared t
 printed, and a number in prose goes stale by construction — the README said 20 while the suite said
 42.
 
-`--conformance` renders through this fork and the frozen precursor, so it costs minutes. Run it
-**once, before merging a change to the chain** — not after every edit on the way there. It answers
-"did the image move", which only the finished change can.
+**The default image is held by `tests/render-golden.sh`, not by the precursor.** `check.sh` runs it:
+one real render, compared by stream hash with the image this repo recorded. When a change is MEANT
+to move the image, look at both renders in `dist/golden/` and run `--regenerate "<why>"`. The reason
+lands in the golden. Never regenerate to make a red run green without knowing what moved.
+`--conformance` still renders through the frozen precursor, but only reports whether the default
+has departed from it. The precursor was the best edit at the time, not the standard. ADR 0014.
 
 **shellcheck and bats are not substitutes for each other.** shellcheck reported ZERO issues in
 scripts that contained two shipped, load-bearing bugs. bats found both, because it runs the code on

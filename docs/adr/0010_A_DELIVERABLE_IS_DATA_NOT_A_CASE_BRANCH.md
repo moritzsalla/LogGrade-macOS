@@ -34,7 +34,8 @@ same rounding in silence is this project's oldest failure class.
   what keeps the default render byte-identical. Every deliverable resolves its crop through that
   one function now, where the 9:16 one used to be handed a literal empty string by its own branch.
   A no-op `crop=2160:3840:0:0` renders the same picture and still changes the graph, which is a
-  difference `tests/conformance.sh` sees. Verified: byte-identical, 631813 bytes.
+  difference a byte comparison sees. Verified: byte-identical, 631813 bytes. (Measured against the
+  precursor. That comparison is now `tests/render-golden.sh`, per ADR 0014.)
 - **Whether a deliverable crops is a fact about the source, not about its name.** 4:5 is a crop of
   a 9:16 master and the whole frame of a 4:5 one. `deliverable_crops` answers that from a measured
   frame, and the refusal that uses it checks every clip in the run rather than the first — the

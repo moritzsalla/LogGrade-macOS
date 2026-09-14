@@ -39,10 +39,11 @@ verified byte-identical to its precursor.
 - **A GPU preview is still possible and is a separate decision.** What is forbidden is a second
   implementation of the *render*. A preview that approximates it must be measured against it, and
   the tolerances are a decision of their own, to be recorded when that preview exists.
-- **The enforcement is a test, not a convention.** `tests/conformance.sh` renders one clip through
-  the engine from the shell and, once the app exists, through the app, and asserts the outputs are
-  identical. They must be: it is the same binary with the same arguments. Anything less than
-  identity means the app started building its own graph, which is the one failure this whole
-  arrangement exists to prevent.
+- **The enforcement is a test, not a convention.** `EndToEndTests` renders one clip through the
+  engine from the shell and through the app, and asserts the outputs are identical. They must be:
+  it is the same binary with the same arguments. Anything less than identity means the app
+  started building its own graph, which is the one failure this whole arrangement exists to
+  prevent. (This record first named `tests/conformance.sh`, which compares against the precursor
+  instead. ADR 0014.)
 - **The engine must be legible to a program.** That is what the event stream and the named refusal
   codes are for, and why stdout carries one format.

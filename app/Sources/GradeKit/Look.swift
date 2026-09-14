@@ -59,7 +59,7 @@ public struct Look: Equatable {
         /// joins three doubles the obvious way writes "1.0,1.0,1.0" — which is the same correction
         /// and a different string. Drag a wheel and return it to centre and the correction would
         /// stop counting as neutral, the cube would go into the graph, and a default render would
-        /// stop being byte-identical to the precursor's for a look nobody changed.
+        /// move for a look nobody changed.
         ///
         /// So the formatter is %g, which is the generator's own, and neutrality is decided by
         /// parsing rather than by comparing text.
@@ -132,7 +132,7 @@ public struct Look: Equatable {
 
         /// True when this correction does nothing. The engine decides this for itself — the
         /// generator owns the rule — but the interface needs to know whether to show the stage as
-        /// active, and a neutral correction is what keeps a render identical to the precursor's.
+        /// active, and a neutral correction is one the render leaves out.
         public var isNeutral: Bool {
             guard exposure == 0, temp == 0, tint == 0 else { return false }
             // PARSED, not compared as text — the generator decides this by parsing too, and

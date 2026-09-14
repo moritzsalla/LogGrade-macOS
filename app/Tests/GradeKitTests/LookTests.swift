@@ -323,8 +323,8 @@ final class WheelTests: XCTestCase {
     /// THE TRAP THIS EXISTS FOR. The wire format is a string and the engine decides whether a
     /// correction is neutral by parsing it. Joining three doubles the obvious way writes
     /// "1.0,1.0,1.0" — the same correction, a different string — so a wheel dragged and returned
-    /// to centre would put the correction cube back in the filter graph and stop a default render
-    /// being byte-identical to the precursor's.
+    /// to centre would put the correction cube back in the filter graph and move a default render
+    /// for a look nobody changed.
     func testAWheelMovedAndReturnedIsNeutralAgain() {
         var correct = Look.Correct()
         XCTAssertTrue(correct.isNeutral, "the default correction is not neutral")

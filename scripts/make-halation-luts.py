@@ -48,9 +48,8 @@ USAGE
     --threshold  linear scene reflectance above which light contributes glow, per channel. 1.0 is
                  diffuse white; 18% grey is 0.18.
     --strength   only read by --check-neutral. 0 is neutral, and the caller leaves the whole stage
-                 out of the graph — which is what keeps a default render byte-identical to the
-                 precursor's, since even an idle float round trip moves the picture by 0.23 code
-                 values on average against the 10-bit path.
+                 out of the graph, since even an idle float round trip moves the picture by 0.23
+                 code values on average against the 10-bit path.
 """
 import argparse
 import os

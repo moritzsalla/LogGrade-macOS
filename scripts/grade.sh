@@ -118,7 +118,7 @@ FRAME_HEIGHT="$(require_number FRAME_HEIGHT "${FRAME_HEIGHT:-1440}")"
 # too. Every filter in the graded path is absent by construction rather than by a second list that
 # could drift: the chain simply is not built.
 #
-# The app never builds a filter graph, which is what tests/conformance.sh and ADR 0008 are for, so
+# The app never builds a filter graph, which is what EndToEndTests and ADR 0008 are for, so
 # the command lives here with the rest of them rather than in Swift.
 FRAME_STAGE="${FRAME_STAGE:-graded}"
 case "$FRAME_STAGE" in
@@ -191,9 +191,9 @@ load_delivery_look || exit 1
 # still holds. scripts/make-correct-lut.py carries the maths, the published transfer function it
 # decodes with, and the measurements behind its size.
 #
-# A NEUTRAL correction leaves the filter out of the graph entirely. That is not only cheaper: it
-# is what keeps the default render byte-identical to the engine this was forked from, which
-# tests/conformance.sh measures. The generator owns that rule, so it is not restated here.
+# A NEUTRAL correction leaves the filter out of the graph entirely. That is not only cheaper: an
+# identity cube pays interpolation error on every pixel. The generator owns that rule, so it is not
+# restated here.
 CORRECT_ARGS="$(correction_args)" || exit 1
 CORRECT_STATE="$(correction_state)" || exit 1
 CORRECT_SIZE="$(require_number CORRECT_SIZE "${CORRECT_SIZE:-33}")"
@@ -203,7 +203,7 @@ CORRECT_PREFIX=""
 # A warm glow spilling from bright things into what surrounds them, computed in linear light between
 # the correction and the conversion. lib.sh's halation_prefix carries the graph and its traps, and
 # docs/adr/0012 carries why it sits here. A strength of 0 leaves the whole stage out of the graph,
-# which is what keeps a default render identical to the precursor's — the generator owns that rule.
+# because even idle it moves the picture — the generator owns that rule.
 #
 # The tint is three numbers spliced into a filter graph, so each is validated where it is read.
 HAL_STRENGTH="$(require_number halation.strength "$(look .halation.strength)")"
