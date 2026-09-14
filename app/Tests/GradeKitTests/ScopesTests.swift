@@ -54,15 +54,18 @@ final class ScopesTests: XCTestCase {
         XCTAssertTrue(quarters.allSatisfy { $0 > 0 }, "a quarter of the range is empty: \(quarters)")
     }
 
-    func testTheReferencesLandWhereTheirHuesShould() {
+    func testTheReferencesLandWhereTheirHuesShould() throws {
         // Not a colour-science claim, a sanity one: the three calibration colours have to sit in
-        // different quadrants, or a vectorscope with them drawn on it tells you nothing.
-        let plate = Scopes.vectorPosition(0.953, 0.765, 0.000)
-        let red = Scopes.vectorPosition(0.800, 0.024, 0.020)
-        let blue = Scopes.vectorPosition(0.024, 0.224, 0.443)
-        XCTAssertLessThan(plate.x, 0.5, "yellow is short of blue")
-        XCTAssertGreaterThan(blue.x, 0.5, "blue is long of blue")
-        XCTAssertLessThan(red.y, 0.5, "red is high on the red axis")
+        // different quadrants, or a vectorscope with them drawn on it tells you nothing. Read from
+        // `Scopes.references` itself, so what is checked is what the scope draws.
+        func position(_ name: String) throws -> (x: Double, y: Double) {
+            let reference = try XCTUnwrap(Scopes.references.first { $0.name == name },
+                                          "no reference named \(name)")
+            return Scopes.vectorPosition(reference.rgb.0, reference.rgb.1, reference.rgb.2)
+        }
+        XCTAssertLessThan(try position("plate yellow").x, 0.5, "yellow is short of blue")
+        XCTAssertGreaterThan(try position("traffic blue").x, 0.5, "blue is long of blue")
+        XCTAssertLessThan(try position("traffic red").y, 0.5, "red is high on the red axis")
         XCTAssertEqual(Scopes.references.count, 3)
         XCTAssertTrue(Scopes.references.allSatisfy { !$0.ral.isEmpty },
                       "each reference names the standard it comes from")

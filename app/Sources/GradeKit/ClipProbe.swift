@@ -14,6 +14,13 @@ import Foundation
 /// selector returns nothing despite audio being present. The engine's own docs carry the
 /// measurements. So: one field per call, `-of default=nw=1:nk=1`, first line taken, and the value
 /// validated before it is believed.
+///
+/// NO ORIENTATION ANSWER HERE, deliberately. The container's width and height are not what
+/// the filter graph sees: this camera stores rotation as a display-matrix flag and ffmpeg
+/// autorotates on decode, so a vertical clip measures 3840x2160 here — measured, on real
+/// footage, which is how the first version of this type got it wrong. Orientation is decided
+/// by decoding a frame, which is what the engine's own guard does, and the app surfaces that
+/// refusal rather than duplicating it. See docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md.
 public struct ClipProbe {
     public let ffprobe: URL
     public init(ffprobe: URL) { self.ffprobe = ffprobe }
@@ -25,8 +32,8 @@ public struct ClipProbe {
         public var transfer: String
         public var width: Int
         public var height: Int
-        /// Seconds, and the frame rate as a rational, so a queue can turn "frame 412" into a
-        /// fraction of the work. Nil when ffprobe does not answer, which it sometimes does not.
+        /// Seconds, and frames per second resolved from ffprobe's rational, so a queue can turn
+        /// "frame 412" into a fraction of the work. Nil when ffprobe does not answer, which it sometimes does not.
         public var duration: Double?
         public var frameRate: Double?
 
@@ -42,10 +49,6 @@ public struct ClipProbe {
         public var summary: String {
             "\(codec) \(pixelFormat) \(primaries) \(width)x\(height)"
         }
-
-        /// The container's dimensions are not what the graph sees: this camera stores rotation as
-        /// a display-matrix flag, so a clip that plays vertically measures landscape here.
-        public var containerLooksLandscape: Bool { width > height }
     }
 
     public enum Verdict: Equatable, CustomStringConvertible {
@@ -137,11 +140,4 @@ public struct ClipProbe {
         }
         return .appleLog
     }
-
-    /// NO ORIENTATION ANSWER HERE, deliberately. The container's width and height are not what
-    /// the filter graph sees: this camera stores rotation as a display-matrix flag and ffmpeg
-    /// autorotates on decode, so a vertical clip measures 3840x2160 here — measured, on real
-    /// footage, which is how the first version of this type got it wrong. Orientation is decided
-    /// by decoding a frame, which is what the engine's own guard does, and the app surfaces that
-    /// refusal rather than duplicating it. See docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md.
 }

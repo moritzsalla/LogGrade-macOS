@@ -176,7 +176,9 @@ fail() {
 	run require_portrait "$FIXTURES/landscape_tagged.mov"
 	[ "$status" -ne 0 ]
 	[[ "$output" == *"REFUSING"* ]] || fail "[[ \"$output\" == *\"REFUSING\"* ]]"
-	[[ "$output" == *"landscape"* ]] || fail "[[ \"$output\" == *\"landscape\"* ]]"
+	# The refusal's own words. "landscape" only ever matched the fixture's FILENAME in the message,
+	# so it held whatever the guard said.
+	[[ "$output" == *"not portrait"* ]] || fail "not refused as non-portrait: $output"
 }
 
 @test "require_portrait reports the real dimensions, not a guess" {
@@ -322,13 +324,13 @@ fail() {
 	for s in 01-baseline 02-grade 03-final; do
 		GRADE_WORK_DIR="$work" run "$SCRIPTS/$s.sh" CLIP
 		[[ "$output" == *"available in $work/dist"* ]] \
-			|| { echo "$s.sh measured the wrong volume:"; echo "$output"; false; }
+			|| fail "$s.sh measured the wrong volume: $output"
 	done
 	# grade.sh is the path README tells you to run, and it had no disk guard at all while the four
 	# staged scripts did. A test named "every stage" that skipped it is how that went unnoticed.
 	GRADE_WORK_DIR="$work" DRY=1 MATCH=0 STAB=0 run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[[ "$output" == *"available in $work/dist"* ]] \
-		|| { echo "grade.sh measured no volume at all:"; echo "$output"; false; }
+		|| fail "grade.sh measured no volume at all: $output"
 }
 
 
@@ -443,43 +445,55 @@ fail() {
 	# chain moved into lib.sh, so it silently stopped covering source_fps, stab_prefix,
 	# grain_plate, delivery_image_chain, delivery_grain_branch and render_delivery — six of the
 	# sixteen, including the one that protects approved deliverables. A test named for "every
-	# function" that checks a fixed subset is the coverage-shaped hole CLAUDE.md rules out, so the
-	# list now comes from the scripts themselves and cannot go stale again.
-	local fn missing=""
-	source "$BATS_TEST_DIRNAME/../scripts/lib.sh"
-	for fn in $(grep -hoE '^[a-z_]+\(\)' "$BATS_TEST_DIRNAME/../scripts/lib.sh" | tr -d '()'); do
-		[ "$(type -t "$fn")" = "function" ] || missing="$missing $fn"
-	done
-	[ -z "$missing" ] || fail "lib.sh declares but does not define:$missing"
-
-	# And every helper a stage script calls must actually exist in lib.sh — the direction that
-	# catches a rename on one side only. This half was a hand-written list of twenty names, and by
-	# the time it was replaced the scripts called over forty. So the calls are found in the
-	# scripts: every snake_case word in command position — at the start of a line, after a pipe,
-	# `;`, `(`, `$(`, `!`, `then`, `do` or `else` — outside a comment. lib.sh's functions are
-	# snake_case by convention; the few that are single words are named explicitly.
+	# function" that checks a fixed subset is the coverage-shaped hole CLAUDE.md rules out.
 	#
-	# The exceptions are words that sit in command position without being commands: an argument
-	# name at the start of a continued line. Adding one here should be rare and deliberate.
-	local called
-	called=$(grep -hvE '^[[:space:]]*#' "$BATS_TEST_DIRNAME"/../scripts/0*.sh "$BATS_TEST_DIRNAME"/../scripts/grade.sh \
-		| grep -oE '(^|[;&|(!{]|\$\(|then|do|else)[[:space:]]*[a-z][a-z0-9]*(_[a-z0-9]+)+([[:space:]]|\)|;|$)' \
-		| grep -oE '[a-z][a-z0-9]*(_[a-z0-9]+)+' | grep -vxE 'exposure_reference' | sort -u || true)
-	[ "$(printf '%s\n' "$called" | grep -c .)" -gt 30 ] \
-		|| fail "found only $(printf '%s\n' "$called" | grep -c .) calls; the extraction has stopped working"
-	for fn in $called look emit median; do
-		[ "$(type -t "$fn")" = "function" ] || missing="$missing $fn"
+	# So the names come from the scripts: every word in COMMAND POSITION in the stage scripts and
+	# grade.sh — line start, after `$(`, a pipe, `&&`, `||`, `;`, or a keyword — minus the functions
+	# a script defines for itself. Each must resolve to something after lib.sh is sourced (setup()
+	# does that); a helper renamed on one side only resolves to nothing. Line-start words followed by
+	# `|` or `)` are case patterns, and a continuation line is an argument list, so both are read for
+	# `$(` calls only — except the command after a one-line case arm's `)`, which is a real call.
+	local fn missing="" called own
+	called=$(perl -ne '
+		my $cont = $prev_cont; $prev_cont = /\\$/;
+		next if /^\s*#/;
+		my $w = qr/([a-z_][a-z0-9_]*)(?![a-z0-9_]|\+?=|\()/;
+		while (/(?:\$\(|\s(?:\||\|\||&&|;)\s+|(?:^\s*|;\s*)(?:if|elif|then|else|do|while|until|!)\s+)$w/g) { print "$1\n" }
+		print "$1\n" if !$cont && /^\s*([a-z_][a-z0-9_]*)(?![a-z0-9_]|\+?=|\(|\||\))/;
+		print "$1\n" if /^\s*(?:&&|\|\|)\s+([a-z_][a-z0-9_]*)/;
+		print "$1\n" if /;;\s*$/ && /\)\s+([a-z_][a-z0-9_]*)(?![a-z0-9_]|\+?=|\()/;
+	' "$SCRIPTS"/0*.sh "$SCRIPTS"/grade.sh | sort -u)
+	own=$(grep -hoE '^[[:space:]]*[a-z_]+\(\)' "$SCRIPTS"/0*.sh "$SCRIPTS"/grade.sh | tr -d '() \t' || true)
+
+	# The extraction has to be seen to work, or a pattern that matches nothing passes green: every
+	# lib.sh function a stage script names outside a comment must be among the calls it found.
+	# Here-strings rather than pipes into `grep -q`: under pipefail the writer can die of SIGPIPE
+	# when grep exits on its first match, and the lookup then reads as "not found".
+	local code
+	code=$(grep -vhE '^[[:space:]]*#' "$SCRIPTS"/0*.sh "$SCRIPTS"/grade.sh)
+	for fn in $(grep -oE '^[a-z_]+\(\)' "$SCRIPTS/lib.sh" | tr -d '()'); do
+		grep -qw "$fn" <<< "$code" || continue
+		grep -qx "$fn" <<< "$called" || missing="$missing $fn"
 	done
-	[ -z "$missing" ] || fail "stage scripts call functions lib.sh does not define:$missing"
+	[ -z "$missing" ] || fail "the call extraction missed lib.sh functions the scripts use:$missing"
+	for fn in render_deliverable grade_chain require_portrait deliverable_crops size_is_portrait; do
+		grep -qx "$fn" <<< "$called" || fail "the call extraction did not find $fn: $called"
+	done
+
+	for fn in $called; do
+		grep -qx "$fn" <<< "$own" && continue
+		[ -n "$(type -t "$fn")" ] || missing="$missing $fn"
+	done
+	[ -z "$missing" ] || fail "stage scripts call names nothing defines:$missing"
 }
 
 @test "every stage script starts and reports usage rather than dying" {
 	for s in 01-baseline 02-grade 03-final 00-stabilise-detect; do
 		run "$BATS_TEST_DIRNAME/../scripts/$s.sh" __NO_SUCH_CLIP__
 		# It must fail on the MISSING CLIP, not on a broken script.
-		[[ "$output" != *"command not found"* ]] || { echo "$s.sh: $output"; false; }
-		[[ "$output" != *"unbound variable"* ]]  || { echo "$s.sh: $output"; false; }
-		[[ "$output" == *"not found"* ]]         || { echo "$s.sh gave: $output"; false; }
+		[[ "$output" != *"command not found"* ]] || fail "$s.sh: $output"
+		[[ "$output" != *"unbound variable"* ]]  || fail "$s.sh: $output"
+		[[ "$output" == *"not found"* ]]         || fail "$s.sh gave: $output"
 	done
 }
 
@@ -524,7 +538,7 @@ fail() {
 	GRADE_WORK_DIR="$work" DRY=1 MATCH=0 run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"$work/dist/stab/CLIP.trf"* ]] \
-		|| { echo "grade.sh did not find the shared transform:"; echo "$output"; false; }
+		|| fail "grade.sh did not find the shared transform: $output"
 }
 
 @test "a transform older than its source is not reused" {
@@ -538,7 +552,7 @@ fail() {
 	GRADE_WORK_DIR="$work" DRY=1 MATCH=0 run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"stale"* ]] \
-		|| { echo "grade.sh reused a stale transform:"; echo "$output"; false; }
+		|| fail "grade.sh reused a stale transform: $output"
 	[[ "$output" != *"stabilising from"* ]] || fail "[[ \"$output\" != *\"stabilising from\"* ]]"
 }
 
@@ -567,7 +581,7 @@ PY
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"gamma=1.44"* ]] \
-		|| { echo "grade.sh ignored look.json's tone block:"; echo "$output"; false; }
+		|| fail "grade.sh ignored look.json's tone block: $output"
 }
 
 # --- solve-gamma.py ------------------------------------------------------------
@@ -628,7 +642,7 @@ PY
 	run safe_retag "$f"
 	[ "$status" -eq 0 ]
 	after=$(stat -f%i "$f")
-	[ "$before" = "$after" ] || { echo "rewrote a file that was already correct"; false; }
+	[ "$before" = "$after" ] || fail "rewrote a file that was already correct"
 	# ...and it must still report the verdict, not fall silent.
 	[[ "$output" == *"tags OK"* ]] || fail "[[ \"$output\" == *\"tags OK\"* ]]"
 }
@@ -655,7 +669,7 @@ PY
 	touch -t 202609030000 "$work/dist/02-graded/CLIP_graded.mov"
 	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
 	[[ "$output" == *"stabilising with"* ]] \
-		|| { echo "called a valid transform stale after a re-grade:"; echo "$output"; false; }
+		|| fail "called a valid transform stale after a re-grade: $output"
 }
 
 @test "transform_is_fresh refuses when the source it was measured from is gone" {
@@ -687,7 +701,7 @@ PY
 		# small to survive the full delivery chain, and an unrelated encode failure must not let
 		# this pass vacuously.
 		[ -d "$work/dist/03-final" ] \
-			|| { echo "03-final.sh $s did not create its output dir:"; echo "$output"; false; }
+			|| fail "03-final.sh $s did not create its output dir: $output"
 		rm -rf "$work/dist/03-final"
 	done
 }
@@ -711,9 +725,9 @@ PY
 		-y -f lavfi -i "color=c=gray:s=72x128:d=0.1:r=24" \
 		-filter_complex "[0:v]nosuchfilter=1[o]" -map "[o]" -frames:v 1
 	[ "$status" -ne 0 ]
-	[ -s "$out" ] || { echo "the approved deliverable was destroyed"; false; }
-	[ "$(md5 -q "$out")" = "$before" ] || { echo "the approved deliverable was modified"; false; }
-	[ ! -f "$BATS_TEST_TMPDIR/approved.partial.mp4" ] || { echo "left a staging file behind"; false; }
+	[ -s "$out" ] || fail "the approved deliverable was destroyed"
+	[ "$(md5 -q "$out")" = "$before" ] || fail "the approved deliverable was modified"
+	[ ! -f "$BATS_TEST_TMPDIR/approved.partial.mp4" ] || fail "left a staging file behind"
 }
 
 @test "render_delivery installs a good render and tags it" {
@@ -758,7 +772,7 @@ JSON
 	[ "$status" -eq 0 ]
 	run head -1 "$root/luts/tone/shipped.cube"
 	[[ "$output" == *"gamma=2.02"* ]] \
-		|| { echo "kept a cube built at the wrong gamma: $output"; false; }
+		|| fail "kept a cube built at the wrong gamma: $output"
 }
 
 @test "ensure_tone_lut does not rewrite a cube that already matches" {
@@ -769,7 +783,7 @@ JSON
 	LOOK_FILE="$root/look.json" run ensure_tone_lut "$root"
 	[ "$status" -eq 0 ]
 	after=$(stat -f%i "$root/luts/tone/shipped.cube")
-	[ "$before" = "$after" ] || { echo "regenerated an already-current cube"; false; }
+	[ "$before" = "$after" ] || fail "regenerated an already-current cube"
 }
 
 @test "the tone cube records the gamma it was built at" {
@@ -800,14 +814,14 @@ JSON
 	# MATCH stays on so the exposure probe runs too — it once returned empty on every clip
 	# because `metadata=print` logs at INFO level, which `-v error` suppresses.
 	PROOF=0.1 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$src"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
-	[[ "$output" =~ YAVG=[0-9] ]] || { echo "the exposure probe returned nothing:"; echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
+	[[ "$output" =~ YAVG=[0-9] ]] || fail "the exposure probe returned nothing: $output"
 
-	out=$(ls "$work"/dist/proofs/*.mp4 2>/dev/null | head -1)
-	[ -n "$out" ] || { echo "no proof was written:"; echo "$output"; false; }
+	out=$(ls "$work"/dist/proofs/*.mp4 2>/dev/null | head -1) || true
+	[ -n "$out" ] || fail "no proof was written: $output"
 	w=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=nw=1:nk=1 "$out" | head -1)
 	h=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=nw=1:nk=1 "$out" | head -1)
-	[ "$w" = "1080" ] && [ "$h" = "1920" ] || { echo "delivered ${w}x${h}, wanted 1080x1920"; false; }
+	[ "$w" = "1080" ] && [ "$h" = "1920" ] || fail "delivered ${w}x${h}, wanted 1080x1920"
 	# A wrongly tagged file is double-transformed by any player that trusts the tag. That is what
 	# "bleached out" was, and the encoder ignoring the flags is why safe_retag exists.
 	run probe_tags "$out"
@@ -834,7 +848,7 @@ JSON
 
 	safe_retag "$excerpt" >/dev/null
 	run verify_bt709 "$excerpt"
-	[ "$status" -eq 0 ] || { echo "correctly tagged real file rejected: $output"; false; }
+	[ "$status" -eq 0 ] || fail "correctly tagged real file rejected: $output"
 	[[ "$output" == *"tags OK"* ]] || fail "[[ \"$output\" == *\"tags OK\"* ]]"
 }
 
@@ -845,7 +859,7 @@ JSON
 	run probe_tags "$src"
 	# Exactly three comma-separated values, no trailing comma, no blank-line artefact.
 	[[ "$output" =~ ^[a-z0-9]+,[a-z0-9]+,[a-z0-9]+$ ]] \
-		|| { echo "probe_tags gave [$output]"; false; }
+		|| fail "probe_tags gave [$output]"
 }
 
 @test "check_disk_space reports a legible failure when df cannot answer" {
@@ -1030,7 +1044,7 @@ JSON
 		-color_primaries bt709 -color_trc bt709 -colorspace bt709 "$base" -v error
 
 	GRADE_WORK_DIR="$work" run "$SCRIPTS/02-grade.sh" CCC
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	out="$work/dist/02-graded/CCC_graded.mov"
 	[ -s "$out" ] || fail "the staged graph produced nothing: $output"
 	# THE TONE CURVE MUST BE LOAD-BEARING, and proving that took three attempts — each earlier
@@ -1096,8 +1110,8 @@ JSON
 # can write files (`metadata=print:file=`) and read them (`movie=`). There is no eval anywhere here,
 # so this is not shell injection; the ceiling is ffmpeg doing file I/O as whoever ran the script.
 #
-# It matters because neither input is hand-typed. look.json is written by the app, and was written
-# before that by the Bench's artifact db, which was shared and multi-writer; a clip FILENAME arrives
+# It matters because neither input is hand-typed. The look file arrives as the app's LOOK_FILE,
+# and came before that from the Bench's shared, multi-writer artifact db; a clip FILENAME arrives
 # from the camera or from whoever handed over the card. Nothing on the read side checked either one.
 #
 # Ported from a branch of the precursor that never landed, because it predates the chain dedupe and
@@ -1117,6 +1131,7 @@ JSON
 
 	run require_number SAT ""
 	[ "$status" -ne 0 ]
+	[[ "$output" == *"SAT must be numeric: got ''"* ]] || fail "empty refused, but not by the guard: $output"
 }
 
 @test "require_clip_name refuses a path and refuses filter syntax" {
@@ -1126,13 +1141,15 @@ JSON
 
 	run require_clip_name "../../escaped"
 	[ "$status" -ne 0 ]
-	[[ "$output" == *"clip name"* ]] || fail "gave no reason: $output"
+	[[ "$output" == *"contains '/'"* ]] || fail "not refused as a path: $output"
 
 	run require_clip_name "IMG_0609'"
 	[ "$status" -ne 0 ]
+	[[ "$output" == *"ffmpeg reads as filter syntax"* ]] || fail "not refused as filter syntax: $output"
 
 	run require_clip_name ""
 	[ "$status" -ne 0 ]
+	[[ "$output" == *"empty clip name"* ]] || fail "not refused as empty: $output"
 }
 
 @test "grade.sh refuses a SMOOTHING that would splice a filter into the graph" {
@@ -1174,6 +1191,22 @@ JSON
 	# exit and an absent marker are both true whether or not the offset was refused.
 	[[ "$output" == *"CROP_Y must be numeric"* ]] || fail "not refused at the offset: $output"
 	[ ! -f "$marker" ] || fail "the spliced filter ran and wrote $marker"
+}
+
+@test "03-final.sh refuses an unknown deliverable with its code, before anything is created" {
+	# The spec went through a here-string, which swallows the refusal: the script carried on with
+	# empty aspect terms and died on an arithmetic syntax error, with no code for a wrapper to read.
+	local work="$BATS_TEST_TMPDIR/bad-deliv"
+	mkdir -p "$work/src" "$work/dist/02-graded"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
+	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP nope
+	[ "$status" -ne 0 ] || fail "accepted an unknown deliverable"
+	[[ "$output" == *"REFUSING: unknown deliverable 'nope'"* ]] || fail "not refused by the spec: $output"
+	[[ "$output" == *"GRADE_CODE=REFUSE_DELIVERABLE"* ]] || fail "unnamed refusal: $output"
+	[[ "$output" != *"syntax error"* ]] || fail "died in arithmetic instead of refusing: $output"
+	[[ "$output" != *"deliverable:"* ]] || fail "went on to plan a deliverable: $output"
+	[ ! -d "$work/dist/03-final" ] || fail "created the output folder for a refused deliverable"
 }
 
 @test "every stage refuses a clip argument that escapes the work dir" {
@@ -1257,7 +1290,8 @@ PY
 	[ "$status" -eq 0 ]
 	[[ "$output" != *"clip(s)"* ]] || fail "a human line reached stdout under JSON=1: $output"
 	local report
-	report=$(ls "$work"/dist/reports/run-*.txt | head -1)
+	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
+	[ -n "$report" ] || fail "no run report was written: $output"
 	grep -q "clip(s)" "$report" || fail "the report lost its header line"
 	grep -q "gamma=" "$report" || fail "the report lost the per-clip plan"
 }
@@ -1276,7 +1310,8 @@ PY
 	[ "$status" -eq 0 ] || fail "render failed: $output $stderr"
 	[[ "$output" != *"took"* ]] || fail "a report line reached the event stream: $output"
 	local report
-	report=$(ls "$work"/dist/reports/run-*.txt | head -1)
+	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
+	[ -n "$report" ] || fail "no run report was written: $output"
 	grep -qE '^ffmpeg: +ffmpeg version' "$report" || fail "no ffmpeg version: $(cat "$report")"
 	grep -qE '^machine: .*[0-9]+ cores' "$report" || fail "no machine line: $(cat "$report")"
 	grep -qE '^look: +.*look\.json sha256:[0-9a-f]{16}$' "$report" || fail "no look hash: $(cat "$report")"
@@ -1303,7 +1338,8 @@ PY
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "frame failed: $output"
 	local report
-	report=$(ls "$work"/dist/reports/run-*.txt | head -1)
+	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
+	[ -n "$report" ] || fail "no run report was written: $output"
 	grep -qE 'frame render took [0-9]+\.[0-9]{3}s' "$report" || fail "frame untimed: $(cat "$report")"
 	grep -qE -- '--- graph [0-9]+ \(frame, -filter_complex\) ---' "$report" || fail "no frame graph: $(cat "$report")"
 	grep -qE '^  frame render +[0-9]+\.[0-9]{3}s$' "$report" || fail "no phase summary: $(cat "$report")"
@@ -1433,7 +1469,7 @@ PY
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
 	FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	local png="$work/dist/frames/CLIP_t0s_graded.png"
 	[ -s "$png" ] || fail "no preview frame at $png: $output"
 	run ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,height \
@@ -1453,10 +1489,10 @@ PY
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
 	FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	FRAME=0 FRAME_HEIGHT=128 MATCH=0 FRAME_STAGE=source GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	local graded="$work/dist/frames/CLIP_t0s_graded.png"
 	local source="$work/dist/frames/CLIP_t0s_source.png"
 	[ -s "$graded" ] || fail "no graded frame: $output"
@@ -1467,9 +1503,14 @@ PY
 }
 
 @test "FRAME_STAGE refuses a value that is neither stage" {
-	run env FRAME=0 FRAME_STAGE=halfway "$SCRIPTS/grade.sh" "$FIXTURES/portrait_tagged.mov"
+	# A work dir of its own: without one a broken refusal would render into the repo's dist/.
+	local work="$BATS_TEST_TMPDIR/frame-stage"
+	mkdir -p "$work"
+	run env GRADE_WORK_DIR="$work" FRAME=0 FRAME_STAGE=halfway "$SCRIPTS/grade.sh" "$FIXTURES/portrait_tagged.mov"
 	[ "$status" -ne 0 ] || fail "an unknown stage was accepted"
+	[[ "$output" == *"FRAME_STAGE must be 'graded' or 'source'"* ]] || fail "not refused by the guard: $output"
 	[[ "$output" == *"REFUSE_FRAME_STAGE"* ]] || fail "no refusal code: $output"
+	[ ! -d "$work/dist" ] || fail "created output before refusing the stage"
 }
 
 @test "FRAME and PROOF together are refused rather than silently resolved" {
@@ -1524,7 +1565,8 @@ PY
 
 @test "the tone generator keeps its commentary out of the curve" {
 	# A progress line mixed into the table is read as an entry by whatever parses it.
-	run --separate-stderr "$SCRIPTS/make-tone-lut.py" --stdout --gamma 1.0
+	run --separate-stderr "$SCRIPTS/make-tone-lut.py" --stdout --gamma 1 --pivot 0.5 \
+		--contrast 1 --toe 0 --shoulder 0 --black 0
 	[ "$status" -eq 0 ]
 	[[ "$output" == TITLE* ]] || fail "stdout did not begin with the cube's TITLE: ${output:0:80}"
 	[[ "$stderr" == *"stdout"* ]] || fail "no confirmation on stderr: $stderr"
@@ -1535,10 +1577,18 @@ PY
 }
 
 @test "the tone generator refuses an ambiguous destination" {
-	run "$SCRIPTS/make-tone-lut.py" "$BATS_TEST_TMPDIR/x.cube" --stdout
+	# Every tone flag is given, so the destination is the only thing left to refuse — the generator
+	# also refuses a missing tone flag, and status alone cannot tell the two apart.
+	local tone="--gamma 1 --pivot 0.5 --contrast 1 --toe 0 --shoulder 0 --black 0"
+	# shellcheck disable=SC2086
+	run "$SCRIPTS/make-tone-lut.py" "$BATS_TEST_TMPDIR/x.cube" --stdout $tone
 	[ "$status" -ne 0 ] || fail "accepted both a file and stdout"
-	run "$SCRIPTS/make-tone-lut.py"
+	[[ "$output" == *"exactly one of OUT or --stdout"* ]] || fail "not refused at the destination: $output"
+	[ ! -e "$BATS_TEST_TMPDIR/x.cube" ] || fail "wrote the file anyway"
+	# shellcheck disable=SC2086
+	run "$SCRIPTS/make-tone-lut.py" $tone
 	[ "$status" -ne 0 ] || fail "accepted neither a file nor stdout"
+	[[ "$output" == *"exactly one of OUT or --stdout"* ]] || fail "not refused at the destination: $output"
 }
 
 # --- stale transforms ---------------------------------------------------------
@@ -1564,7 +1614,7 @@ PY
 }
 
 @test "ACCEPT_STALE proceeds past the refusal as a decision someone made" {
-	# Scoped to the GUARD, not to the render. A 64x128 synthetic fixture cannot complete the
+	# Scoped to the GUARD, not to the render. A 72x128 synthetic fixture cannot complete the
 	# delivery chain — it fails reinitialising filters on the way to 1080x1920 — so asserting a
 	# successful delivery here would be asserting something about the fixture. What this pins is
 	# that the refusal is skipped, said out loud, and the render is attempted.
@@ -1646,7 +1696,7 @@ PY
 }
 
 @test "look.json is where the look LUT is chosen" {
-	# The whole point: a grade sent from the Bench changes the look LUT too, without editing a
+	# The whole point: a look.json written by the app changes the look LUT too, without editing a
 	# script. A cube nothing else in the repo would pick.
 	local work="$BATS_TEST_TMPDIR/lookchoice" look="$BATS_TEST_TMPDIR/other.json"
 	mkdir -p "$work/src"
@@ -1672,11 +1722,11 @@ PY
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
 	FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	mv "$work/dist/frames/CLIP_t0s_graded.png" "$work/with-look.png"
 	LOOK=none FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	! cmp -s "$work/with-look.png" "$work/dist/frames/CLIP_t0s_graded.png" \
 		|| fail "LOOK=none produced the same pixels as the shipped look"
 }
@@ -2018,7 +2068,7 @@ print("ok")
 
 # --- the input correction -----------------------------------------------------
 # Exposure, white balance and the CDL wheels, as one generated cube that runs BEFORE Apple's
-# conversion — in log, where twelve stops of headroom still exist. A neutral correction leaves the
+# conversion — in log, where highlights up to 12x diffuse white still exist. A neutral correction leaves the
 # filter out of the graph, which is what keeps the default render identical to the precursor's.
 
 @test "the correction generator round-trips Apple's published transfer function" {
@@ -2031,12 +2081,13 @@ mc = importlib.util.module_from_spec(spec); spec.loader.exec_module(mc)
 worst = max(abs(mc.encode(mc.decode(i/1000.0)) - i/1000.0) for i in range(1001))
 print("%.1e %.4f" % (worst, mc.decode(1.0)))
 ' "$SCRIPTS/make-correct-lut.py"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	local worst headroom
 	worst="${output% *}"; headroom="${output#* }"
 	python3 -c "import sys; sys.exit(0 if float('$worst') < 1e-9 else 1)" \
 		|| fail "the transfer function no longer round-trips: $worst"
-	[ "$headroom" = "12.0000" ] || fail "decode(1.0) should be twelve stops, got $headroom"
+	# 12x diffuse white in linear, about 3.6 stops above it — not twelve stops.
+	[ "$headroom" = "12.0000" ] || fail "decode(1.0) should be 12x diffuse white, got $headroom"
 }
 
 @test "a neutral correction is reported as neutral, and any move as active" {
@@ -2076,7 +2127,7 @@ json.dump(d, open(sys.argv[2], "w"))
 PY
 	LOOK_FILE="$look" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	[[ "$output" == *"correction: --exposure 0.75 "* ]] || fail "said nothing about it: $output"
 	[ -s "$work/dist/.grade-work/correct.cube" ] || fail "no cube was generated"
 	# And it changed the picture. A string test cannot tell whether the filter did anything.
@@ -2089,8 +2140,8 @@ PY
 }
 
 @test "the correction precedes Apple's conversion in both graphs" {
-	# ORDER IS THE DECISION. Apple Log holds twelve stops that the Rec.709 cube lands on a display
-	# ceiling of 1.0, so a correction applied after it works on display-referred pixels and clips
+	# ORDER IS THE DECISION. Apple Log holds highlights up to 12x diffuse white, about 3.6 stops
+	# above it, which the Rec.709 cube lands on a display ceiling of 1.0, so a correction applied after it works on display-referred pixels and clips
 	# highlights the source still holds. Before it, the same move is the log-domain correction a
 	# colourist's wheels perform.
 	#
@@ -2137,9 +2188,11 @@ PY
 	run "$SCRIPTS/make-halation-luts.py" "$dir/h" --threshold 1.0000002
 	[ "$output" = "wrote halation-threshold.cube" ] || fail "halation kept a cube built at another threshold: $output"
 
-	run "$SCRIPTS/make-tone-lut.py" "$dir/t.cube" --gamma 2.0200001
+	local tone=(--pivot 0.42 --contrast 1.0 --toe 0 --shoulder 0 --black 0)
+	run "$SCRIPTS/make-tone-lut.py" "$dir/t.cube" --gamma 2.0200001 "${tone[@]}"
 	[ "$status" -eq 0 ] || fail "$output"
-	run "$SCRIPTS/make-tone-lut.py" "$dir/t.cube" --gamma 2.0200002
+	run "$SCRIPTS/make-tone-lut.py" "$dir/t.cube" --gamma 2.0200002 "${tone[@]}"
+	[ "$status" -eq 0 ] || fail "$output"
 	[[ "$output" != *"already current"* ]] || fail "the tone curve kept a cube built at another gamma"
 }
 
@@ -2261,7 +2314,7 @@ ramp = [i / (w - 1) for i in range(w)] * h
 open(sys.argv[1], "wb").write(struct.pack("%df" % (w * h * 3), *(ramp * 3)))
 ' "$raw"
 	run _float_through "$raw" 256 4 "$(halation_prefix "$dir" 4 0.000001 1,1,1)"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	local worst
 	worst=$(printf '%s\n' "$output" | python3 -c '
 import sys
@@ -2292,7 +2345,7 @@ open(sys.argv[1], "wb").write(struct.pack("%df" % (w * h * 3), *(row * h * 3)))
 	# Sigma 16 pixels. The far side is 250 pixels past the edge, which is further than the glow's
 	# tail reaches: in log, the dark side is sensitive enough that 60 pixels still read as glow.
 	run _float_through "$raw" 512 16 "$(halation_prefix "$dir" 16 1 1,0,0)"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	printf '%s\n' "$output" | python3 -c '
 import sys
 v = [float(l) for l in sys.stdin]
@@ -2329,7 +2382,7 @@ sys.exit("; ".join(problems) or None)
 	jq '.halation.strength = 0' "$BATS_TEST_DIRNAME/../look.json" > "$look"
 	LOOK_FILE="$look" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	[[ "$output" != *"halation:"* ]] || fail "announced a halation that does nothing: $output"
 	[ ! -d "$work/dist/.grade-work/halation" ] || fail "generated cubes for a neutral halation"
 }
@@ -2345,13 +2398,13 @@ sys.exit("; ".join(problems) or None)
 	jq '.halation.strength = 0.8 | .halation.radius = 0.05' "$BATS_TEST_DIRNAME/../look.json" > "$look"
 	LOOK_FILE="$look" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$clip"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	[[ "$output" == *"halation: strength=0.8"* ]] || fail "said nothing about it: $output"
 	mv "$work/dist/frames/EDGE_t0s_graded.png" "$work/glowing.png"
 	jq '.halation.strength = 0' "$look" > "$look.off"
 	LOOK_FILE="$look.off" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$clip"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	! cmp -s "$work/glowing.png" "$work/dist/frames/EDGE_t0s_graded.png" \
 		|| fail "a strength of 0.8 changed nothing"
 }
@@ -2409,7 +2462,7 @@ open(sys.argv[1], "w").write("LUT_3D_SIZE 2\n" + "0.8 0.8 0.8\n" * 8)
 open(sys.argv[2], "wb").write(struct.pack("48f", *([0.2] * 48)))
 ' "$cube" "$raw"
 	run _float_through "$raw" 4 4 "$(film_lut_stage "$cube" 0.25 t)"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	local worst
 	worst=$(printf '%s\n' "$output" | python3 -c 'import sys; print("%.6f" % max(abs(float(l) - 0.35) for l in sys.stdin))')
 	python3 -c "import sys; sys.exit(0 if $worst < 0.0005 else 1)" \
@@ -2423,13 +2476,13 @@ open(sys.argv[2], "wb").write(struct.pack("48f", *([0.2] * 48)))
 	jq '.print.lut = "kodak_2383_constlmap" | .print.strength = 1' "$BATS_TEST_DIRNAME/../look.json" > "$look"
 	LOOK_FILE="$look" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	[[ "$output" == *"print="*"kodak_2383_constlmap.cube@1"* ]] || fail "said nothing about it: $output"
 	mv "$work/dist/frames/CLIP_t0s_graded.png" "$work/printed.png"
 	jq '.print.lut = "none"' "$look" > "$look.none"
 	LOOK_FILE="$look.none" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	! cmp -s "$work/printed.png" "$work/dist/frames/CLIP_t0s_graded.png" \
 		|| fail "a print at full strength changed nothing"
 }
@@ -2477,11 +2530,11 @@ PY
 	# ninth, 3.2 at the midtones, 1.8 in the brightest, against a flat 3.2 unweighted.
 	# Judged against the same plate merged flat, so the bounds are ratios rather than one ramp's sd.
 	run _grain_bands 1 1
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	local flat bands verdict
 	flat="$(printf '%s\n' "$output" | head -1)"
 	run _grain_bands 0.35 0.5
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	bands="$(printf '%s\n' "$output" | head -1)"
 	verdict="$(printf '%s\n' "$output" | tail -1)"
 	python3 -c '
@@ -2531,7 +2584,7 @@ sys.exit("; ".join(problems) or None)
 	jq '.grain.shadows = 0.35 | .grain.highlights = 0.5' "$BATS_TEST_DIRNAME/../look.json" > "$look"
 	LOOK_FILE="$look" PROOF=0.1 STAB=0 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	local out
 	out=$(find "$work/dist/proofs" -name '*.mp4' | head -1)
 	[ -s "$out" ] || fail "no proof was written: $output"
@@ -2568,6 +2621,8 @@ sys.exit("; ".join(problems) or None)
 	grep -q 'threshold=2' "$dir/halation-threshold.cube" || fail "the cube does not record its threshold"
 	run "$SCRIPTS/make-halation-luts.py" "$dir" --threshold -1
 	[ "$status" -ne 0 ] || fail "accepted a negative threshold"
+	[[ "$output" == *"--threshold outside"* ]] || fail "not refused at the threshold: $output"
+	grep -q 'threshold=2' "$dir/halation-threshold.cube" || fail "a refused threshold still rewrote the cube"
 }
 
 @test "the recorded event stream still matches what the engine emits" {
@@ -2634,7 +2689,7 @@ sys.exit("; ".join(problems) or None)
 	# release build IS exercised, by the next test, which is the one that matters because it is the
 	# configuration the app actually ships in.
 	run "$BATS_TEST_DIRNAME/../app/make-app.sh" --debug
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	[ -x "$app/Contents/MacOS/LogGrade" ] || fail "no executable in the bundle"
 	[ -f "$app/Contents/Info.plist" ] || fail "no Info.plist, so macOS treats it as a stray binary"
 	# The engine travels with it: a launched app inherits no useful PATH and should not break
@@ -2654,7 +2709,7 @@ sys.exit("; ".join(problems) or None)
 	# feel slow so much as broken. So the default has to stay release, and passing --release must
 	# not be what gets you there. This is the only test that compiles the app the way it ships.
 	run "$BATS_TEST_DIRNAME/../app/make-app.sh"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	[[ "$output" == *"(release)"* ]] || fail "make-app.sh did not default to release: $output"
 	[ -x "$BATS_TEST_DIRNAME/../app/.build/release/LogGrade" ] || fail "no optimised binary"
 }
@@ -2671,7 +2726,7 @@ sys.exit("; ".join(problems) or None)
 	local src="$FIXTURES/probe_mid.mov" a="$BATS_TEST_TMPDIR/measured" b="$BATS_TEST_TMPDIR/handed"
 	mkdir -p "$a" "$b"
 	GRADE_WORK_DIR="$a" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	local measured measured_line
 	measured_line=$(printf '%s\n' "$output" | grep 'YAVG=' | head -1) || true
 	measured=$(printf '%s\n' "$measured_line" | sed -n 's/.*YAVG=\([0-9.]*\).*/\1/p')
@@ -2679,13 +2734,13 @@ sys.exit("; ".join(problems) or None)
 
 	# The same number handed back is the same solve.
 	YAVG_IN="$measured" GRADE_WORK_DIR="$b" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	[[ "$output" == *"$measured_line"* ]] || fail "handing back $measured changed the grade: $output"
 
 	# A number the clip does not measure is the one that shows the probe was skipped.
 	local other=$(( ${measured%.*} + 150 ))
 	YAVG_IN="$other" GRADE_WORK_DIR="$b" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
-	[ "$status" -eq 0 ] || { echo "$output"; false; }
+	[ "$status" -eq 0 ] || fail "$output"
 	[[ "$output" == *"YAVG=${other} "* ]] || fail "measured again instead of using $other: $output"
 	[[ "$output" == *"(matched)"* ]] || fail "the solve did not run: $output"
 

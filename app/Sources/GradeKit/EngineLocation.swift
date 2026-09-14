@@ -60,7 +60,7 @@ public struct EngineLocation {
     }
 
     /// The tools the engine shells out to, by bare name, in the order the scripts need them.
-    public static let requiredTools = ["ffmpeg", "ffprobe", "jq", "python3"]
+    static let requiredTools = ["ffmpeg", "ffprobe", "jq", "python3"]
 
     /// Directories searched for those tools, ahead of whatever PATH says. `~/.local/bin` is first
     /// because that is where this machine's ffmpeg is, and a launched app's PATH does not include
@@ -88,9 +88,6 @@ public struct EngineLocation {
         return nil
     }
 
-    /// The film-emulation cubes on disk, by stem, so the interface offers what is actually there
-    /// rather than a list someone has to remember to update. "none" is not in here: it is the
-    /// absence of a look, and the engine leaves the filter out of the graph for it.
     /// The cube for a look's stem, or nil for "none" and for a stem that is not on disk.
     public func lookCube(named stem: String,
                          fileManager: FileManager = .default) -> URL? {
@@ -99,6 +96,9 @@ public struct EngineLocation {
         return fileManager.fileExists(atPath: url.path) ? url : nil
     }
 
+    /// The film-emulation cubes on disk, by stem, so the interface offers what is actually there
+    /// rather than a list someone has to remember to update. "none" is not in here: it is the
+    /// absence of a look, and the engine leaves the filter out of the graph for it.
     public func availableLooks(fileManager: FileManager = .default) -> [String] {
         stems(in: lookCubes, fileManager: fileManager)
     }

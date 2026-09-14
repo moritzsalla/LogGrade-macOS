@@ -37,7 +37,16 @@ public struct LiveHalation {
 
     /// `halation-threshold.cube`, one entry.
     static func thresholded(_ logValue: Double, threshold: Double) -> Double {
-        max(0, CorrectionCube.decode(logValue) - threshold)
+        thresholded(linear: CorrectionCube.decode(logValue), threshold: threshold)
+    }
+
+    /// The same entry for a value already decoded. `apply` calls this one, because it keeps the
+    /// decoded value for the glow as well, and decoding twice per channel is the hot loop's cost.
+    /// Split rather than inlined so the exact test on the cube reaches the arithmetic that runs,
+    /// not a copy of it beside the loop.
+    @inline(__always)
+    static func thresholded(linear: Double, threshold: Double) -> Double {
+        max(0, linear - threshold)
     }
 
     /// Adds the glow to a frame of Apple Log values, interleaved RGB, in place.
@@ -55,7 +64,7 @@ public struct LiveHalation {
                             for c in 0..<3 {
                                 let decoded = CorrectionCube.decode(Double(src[i * 3 + c]))
                                 lin[i * 3 + c] = Float(decoded)
-                                h[c] = Float(max(0, decoded - t))
+                                h[c] = Float(Self.thresholded(linear: decoded, threshold: t))
                             }
                             hi[i] = (h * Self.lumaWeights).sum()
                         }
@@ -90,6 +99,8 @@ public struct LiveHalation {
 
     /// A separable Gaussian with edges clamped, out to three sigma.
     static func gaussian(_ plane: [Float], width: Int, height: Int, sigma: Float) -> [Float] {
+        // At a twentieth of a pixel the neighbours' weights are below e^-200: the kernel is one tap
+        // and the blur is the identity, so it is skipped rather than computed.
         guard sigma > 0.05 else { return plane }
         let radius = Int((sigma * 3).rounded(.up))
         var kernel = (-radius...radius).map { exp(-Float($0 * $0) / (2 * sigma * sigma)) }

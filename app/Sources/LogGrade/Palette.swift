@@ -4,9 +4,9 @@ import SwiftUI
 /// The room the picture hangs in.
 ///
 /// ACHROMATIC ON PURPOSE. Surrounding luminance and cast bias colour perception, which is why
-/// grading suites are grey rooms — the Bench's own header says the same thing about its dark
-/// theme. So every neutral here is a true grey, and the only saturated thing on screen is the
-/// photograph.
+/// grading suites are grey rooms — the Bench's own header said the same thing about its dark
+/// theme. So every neutral here is a true grey, and the only saturated things on screen are the
+/// photograph and the parade's traces.
 ///
 /// The one accent is RAL 1021, the plate yellow this pipeline measures against. A tool's accent
 /// should be a colour it knows the value of.
@@ -21,9 +21,15 @@ enum Palette {
     static let plate = Color(red: Scopes.plateYellow.rgb.0, green: Scopes.plateYellow.rgb.1,
                              blue: Scopes.plateYellow.rgb.2)             // #F3C300, RAL 1021
     static let lamp = Color(red: 0.878, green: 0.416, blue: 0.294)       // #E06A4B
+
+    /// The parade's channels: the one sanctioned colour besides the photograph. A trace has to
+    /// read as its channel at a glance, and three greys would make the parade a puzzle.
+    static let scopeRed = Color(red: 0.90, green: 0.35, blue: 0.32)
+    static let scopeGreen = Color(red: 0.45, green: 0.78, blue: 0.45)
+    static let scopeBlue = Color(red: 0.42, green: 0.60, blue: 0.90)
 }
 
-/// The type scale, and the only four roles this interface has.
+/// The type scale: four roles for text, and four named exceptions.
 ///
 /// FOUR ROLES, NOT TEN SIZES. There were ten — 8, 9.5, 10, 10.5, 11, 12, 12.5, 13, 15, 33 — chosen
 /// one control at a time, which is how an interface ends up looking assembled rather than designed.
@@ -37,13 +43,29 @@ enum Type {
     static let label = Font.system(size: 11)
     static let value = Font.system(size: 11, design: .monospaced)
     static let caption = Font.system(size: 10)
+
+    // THE EXCEPTIONS, named so they stay four. Each appears in one place and is not a role to
+    // reach for in a new control.
+    /// The app's name at the head of the clip column.
+    static let title = Font.system(size: 15, weight: .semibold)
+    /// The app's name on the startup screen, the one moment nothing else competes with it.
+    static let splash = Font.system(size: 22, weight: .semibold)
+    /// A toast's symbol, which carries the message's kind before its words are read.
+    static let symbol = Font.system(size: 15)
+    /// The lock beside the conversion's title: a mark on a heading, not a word.
+    static let glyph = Font.system(size: 9)
 }
 
 /// Spacing, on a 4-point grid.
 ///
-/// Apple's layout guides are multiples of 8 with 4 as the half-step, and everything here is one of
-/// five values. There were fourteen before, which is the same problem the type scale had: no two
-/// panels agreed on what "a gap" meant, so nothing lined up across them.
+/// Apple's layout guides are multiples of 8 with 4 as the half-step. There were fourteen values
+/// before, which is the same problem the type scale had: no two panels agreed on what "a gap"
+/// meant, so nothing lined up across them.
+///
+/// NOT EVERYTHING IS ON IT YET. Most gaps are one of these five, but the panel inset (18), a few
+/// row gaps in the clip column and the delivery panel (3, 6, 9, 10, 14) and the picture's
+/// `Space.s + 2` predate the grid and are left as they measure — moving them is a visual change,
+/// not a tidy-up. Don't copy them into a new view.
 enum Space {
     static let xs: CGFloat = 4
     static let s: CGFloat = 8

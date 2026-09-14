@@ -3,7 +3,9 @@
 // PINNED DELIBERATELY, and a bats test greps these two lines. Xcode 15.2 is the newest release for
 // this machine's macOS, which caps Swift at 5.9 and the SDK at 14.2. The risk is one-directional:
 // a session on a newer Mac that raises the tools version or reaches for a newer API leaves the
-// always-available machine unable to build at all. See CLAUDE.md.
+// always-available machine unable to build at all. The guard is the bats test "the Swift package
+// still pins the toolchain this machine can build" in tests/lib.bats; the two-Mac reasoning is in
+// docs/UNIVERSAL_APP_PLAN.md.
 //
 // SwiftPM RATHER THAN AN .xcodeproj. The plan said to commit a project file to avoid adding a
 // build tool; authoring a pbxproj by hand is worse than either option, and Xcode opens a

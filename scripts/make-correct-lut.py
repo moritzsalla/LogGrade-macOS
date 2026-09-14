@@ -12,8 +12,8 @@ parity golden can drive directly, and leaves the render chain a `lut3d` like the
 
 WHY IT RUNS BEFORE APPLE'S CONVERSION, AND WHAT THAT MEANS
 ----------------------------------------------------------
-Apple Log carries roughly twelve stops of linear headroom; the Rec.709 conversion lands that on a
-display ceiling of 1.0. A correction applied AFTER the conversion therefore works on display-referred
+Apple Log decodes to linear values up to 12.0, twelve times diffuse white (about 3.6 stops above it);
+the Rec.709 conversion lands that on a display ceiling of 1.0. A correction applied AFTER the conversion therefore works on display-referred
 pixels and clips highlights the log still holds. Applied before it, the same move is a log-domain
 correction — which is what a colourist's log wheels are, and the standard managed-colour order:
 correct in a wide space, display-transform last.
@@ -53,16 +53,17 @@ USAGE
     --lum-mix   1 keeps the per-channel result as computed. 0 restores the original luma, so the
                 move becomes chroma-only. Resolve carries this control for the same reason: a
                 per-channel move shifts saturation as a matter of arithmetic.
-    --size      cube points per axis, 33 by default.
+    --size      cube points per axis, 33 by default, 2..64.
 
 MEASURED, so the defaults are not guesses
 -----------------------------------------
-encode(decode(p)) round-trips to 8e-17 across 0..1, and decode(1.0) is 12.0000 — the twelve stops
-of headroom the Rec.709 conversion has to land on a display ceiling of 1.0. The published formula
-is exact rather than fitted.
+encode(decode(p)) round-trips to 8e-17 across 0..1, and decode(1.0) is 12.0000 — twelve times
+diffuse white, the headroom the Rec.709 conversion has to land on a display ceiling of 1.0. The
+published formula is exact rather than fitted.
 
 Generation cost and worst trilinear error against the exact function, sampled at 4000 random
-points, in 8-bit code values:
+points, in 8-bit code values. The size-65 column is one past the cap --size now enforces, so it
+cannot be reproduced through this CLI as it stands:
 
     correction              size 17      size 33      size 65
     exposure +1, temp 0.5   3.69         1.62         -
@@ -91,6 +92,19 @@ from cubefile import is_current, number, title, write_staged  # noqa: E402
 # Rec.709 luma weights. The luminance mix needs a luma, and this cube's output is fed to Apple's
 # Rec.709 conversion, so 709 weights are the ones that match what happens next.
 LW = (0.2126, 0.7152, 0.0722)
+
+# Luma below this is treated as black: the mix divides by output luma, and a ratio against a
+# near-zero denominator is noise, so black is left as the per-channel result computed it.
+LUMA_EPSILON = 1e-6
+
+# Temperature and tint as per-channel linear gains. The scale is chosen so that 1.0 is a large
+# but not absurd correction, and the green axis moves against magenta rather than alone.
+WB_SCALE = 0.30
+WB_TINT_BLUE = 0.15
+# No white-balance gain goes below this, so an extreme temp/tint cannot zero or invert a channel.
+# CorrectionCube.swift carries the same floor under an exact-equivalence test: change both or
+# neither.
+WB_GAIN_FLOOR = 0.05
 
 
 def triple(s, name):
@@ -157,7 +171,7 @@ def correct(rgb, a, wb):
     if a.lum_mix != 1.0:
         y_in = sum(w * v for w, v in zip(LW, rgb))
         y_out = sum(w * v for w, v in zip(LW, out))
-        if y_out > 1e-6:
+        if y_out > LUMA_EPSILON:
             k = ((1.0 - a.lum_mix) * (y_in / y_out)) + a.lum_mix
             out = [v * k for v in out]
 
@@ -165,17 +179,22 @@ def correct(rgb, a, wb):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out", nargs="?", help="file to write; omit it and pass --stdout instead")
     ap.add_argument("--stdout", action="store_true", help="write the cube to stdout")
-    ap.add_argument("--exposure", type=float, default=0.0)
-    ap.add_argument("--temp", type=float, default=0.0)
-    ap.add_argument("--tint", type=float, default=0.0)
-    ap.add_argument("--slope", type=lambda s: triple(s, "--slope"), default=(1.0, 1.0, 1.0))
-    ap.add_argument("--offset", type=lambda s: triple(s, "--offset"), default=(0.0, 0.0, 0.0))
-    ap.add_argument("--power", type=lambda s: triple(s, "--power"), default=(1.0, 1.0, 1.0))
-    ap.add_argument("--lum-mix", dest="lum_mix", type=float, default=1.0)
-    ap.add_argument("--size", type=int, default=33)
+    ap.add_argument("--exposure", type=float, default=0.0, help="stops, applied in linear")
+    ap.add_argument("--temp", type=float, default=0.0, help="warm (+) / cool (-)")
+    ap.add_argument("--tint", type=float, default=0.0, help="green (+) / magenta (-)")
+    ap.add_argument("--slope", type=lambda s: triple(s, "--slope"), default=(1.0, 1.0, 1.0),
+                    help="gain wheel: per-channel multiply in log, R,G,B")
+    ap.add_argument("--offset", type=lambda s: triple(s, "--offset"), default=(0.0, 0.0, 0.0),
+                    help="lift wheel: per-channel add in log, R,G,B")
+    ap.add_argument("--power", type=lambda s: triple(s, "--power"), default=(1.0, 1.0, 1.0),
+                    help="gamma wheel: per-channel exponent in log, applied as 1/power, R,G,B")
+    ap.add_argument("--lum-mix", dest="lum_mix", type=float, default=1.0,
+                    help="1 keeps the per-channel result; 0 restores the original luma")
+    ap.add_argument("--size", type=int, default=33, help="cube points per axis, 2..64")
     ap.add_argument("--check-neutral", action="store_true",
                     help="print neutral or active for these parameters and exit, writing nothing")
     a = ap.parse_args()
@@ -188,18 +207,19 @@ def main():
         return
     if a.stdout == bool(a.out):
         ap.error("pass exactly one of OUT or --stdout")
+    # An upper bound so a mistyped size cannot spend minutes generating: cost grows with the cube,
+    # 1.52s at 65 and so roughly 45s at 200. Why the bound is 64 and not 65 is not recorded — it
+    # landed in the same commit as the size-65 measurement above, and ffmpeg's lut3d is not the
+    # limit, since it reads Apple's own 65-point conversion.
     if a.size < 2 or a.size > 64:
         ap.error("--size outside 2..64")
-    for name, v in (("--power", a.power),):
-        if any(x <= 0.0 for x in v):
-            ap.error("%s must be positive: %s" % (name, v))
+    if any(x <= 0.0 for x in a.power):
+        ap.error("%s must be positive: %s" % ("--power", a.power))
 
-    # Temperature and tint as per-channel linear gains. The scale is chosen so that 1.0 is a large
-    # but not absurd correction, and the green axis moves against magenta rather than alone.
-    wb = (1.0 + 0.30 * a.temp,
-          1.0 + 0.30 * a.tint,
-          1.0 - 0.30 * a.temp - 0.15 * a.tint)
-    wb = tuple(max(0.05, g) for g in wb)
+    wb = (1.0 + WB_SCALE * a.temp,
+          1.0 + WB_SCALE * a.tint,
+          1.0 - WB_SCALE * a.temp - WB_TINT_BLUE * a.tint)
+    wb = tuple(max(WB_GAIN_FLOOR, g) for g in wb)
 
     if not a.stdout and is_current(a.out, fingerprint(a)):
         print("%s is already current" % a.out)

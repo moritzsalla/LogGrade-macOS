@@ -6,8 +6,8 @@ import SwiftUI
 /// The panel always says what it is showing. There are three states and they are not
 /// interchangeable: a live approximation while a control is moving, the exact render once it
 /// lands, and a stale render when a control the live tier cannot model has moved. An instrument
-/// that shows a stale value while the controls have moved on is lying, so the stale one is dimmed
-/// and named; the live one is neither, because it does answer the controls.
+/// that shows a stale value while the controls have moved on is lying, so the stale one is named
+/// "out of date" beside the picture — named, not dimmed, for the reason given at the spinner.
 struct PreviewView: View {
     @ObservedObject var model: GradeModel
     /// Observed separately, so a new frame redraws the picture and nothing else.
@@ -26,10 +26,6 @@ struct PreviewView: View {
                         Image(nsImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            // NOT DIMMED WHILE IT WORKS. Greying the picture out to say "busy"
-                            // makes the one thing you are trying to judge unjudgeable, at exactly
-                            // the moment you are judging it. The spinner in the corner says the
-                            // same thing and leaves the image alone.
                         // The crop is judged on the picture, because the question it answers is
                         // what is in the frame and no number answers that.
                         if model.project.delivery.anyTargetCrops, let geometry = model.cropGeometry {
@@ -39,6 +35,10 @@ struct PreviewView: View {
                         }
                     }
                     .padding(Space.s + 2)
+                    // NOT DIMMED WHILE IT WORKS. Greying the picture out to say "busy" makes the
+                    // one thing you are trying to judge unjudgeable, at exactly the moment you are
+                    // judging it. The spinner in the corner says the same thing and leaves the
+                    // image alone.
                     .overlay(alignment: .topTrailing) {
                         if preview.isRendering {
                             ProgressView()
@@ -54,11 +54,11 @@ struct PreviewView: View {
                         .font(Type.label)
                         .foregroundColor(Palette.inkTertiary)
                 }
-                // NO SPINNER OVER THE WELL. It used to be an unaligned child of this stack, so it
-                // centred itself — on top of the picture when there was one, and squarely on top
-                // of the placeholder text when there was not. The status line below already says
-                // what is happening in words, so the spinner belongs in front of that, which is
-                // also where every native app puts one.
+                // NO SPINNER CENTRED IN THE WELL. It used to be an unaligned child of this stack,
+                // so it centred itself — on top of the picture when there was one, and squarely on
+                // top of the placeholder text when there was not. It now sits in the picture's
+                // corner when there is a picture, and always in front of the status line below,
+                // which says what is happening in words — where every native app puts one.
             }
 
             HStack(alignment: .top, spacing: 10) {

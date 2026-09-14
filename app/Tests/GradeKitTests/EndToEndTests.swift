@@ -135,9 +135,12 @@ final class DeliveryTests: XCTestCase {
             done.fulfill()
         }
         wait(for: [done], timeout: 600)
-        let settled = expectation(description: "settled")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { settled.fulfill() }
-        wait(for: [settled], timeout: 5)
+        // The queue publishes on the main queue; polled until the job's state lands, which is
+        // published after its outputs, rather than paused for a guessed duration.
+        let deadline = Date().addingTimeInterval(5)
+        while !queue.jobs.allSatisfy({ $0.state.isFinished }) && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
 
         XCTAssertEqual(queue.jobs.first?.state, .done, "the queue said: \(queue.jobs)")
         // WHERE IT LANDED. A deliverable rendered into a scratch directory is one macOS may

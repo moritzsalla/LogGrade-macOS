@@ -2,11 +2,12 @@ import Foundation
 
 /// The input-correction stage, built in this process so a slider can be dragged against it.
 ///
-/// A SECOND IMPLEMENTATION, AND THE ONLY ONE IN THE APP THAT DECIDES ANYTHING ABOUT THE IMAGE. It
-/// exists because the engine's `scripts/make-correct-lut.py` costs 419ms a call — almost all of it
-/// Python starting up rather than the 36,000 samples — and a control that redraws twice a second
-/// is not a control you can find a value with. Every other stage the live preview applies is read
-/// from a file the render also reads.
+/// A SECOND IMPLEMENTATION OF AN IMAGE DECISION. It exists because the engine's
+/// `scripts/make-correct-lut.py` costs 419ms a call — almost all of it Python starting up rather
+/// than the 36,000 samples — and a control that redraws twice a second is not a control you can
+/// find a value with. It is one of several such transcriptions in the live preview, alongside
+/// `ToneCurve.generated`, `LiveHalation` and `LiveGrade`, each held to the engine by its own test;
+/// the conversion, look and print cubes are read from the files the render also reads.
 ///
 /// WHAT MAKES IT SAFE. `CorrectionCubeTests` builds a cube here and the same cube with the
 /// generator and compares every one of the 107,811 numbers. It is not a tolerance test: the two

@@ -92,8 +92,8 @@ final class LookTests: XCTestCase {
     }
 
     func testAWrittenFileKeepsTheCommentaryItWasGiven() throws {
-        // The Bench carries every block it does not edit through to its output verbatim, for the
-        // same reason: a look sent from a tool should not strip the reasoning out of the file. A
+        // The retired Bench carried every block it did not edit through to its output verbatim, for
+        // the same reason: a look sent from a tool should not strip the reasoning out of the file. A
         // mutation that dropped `preserved` on write went unnoticed, because equality here
         // deliberately compares the GRADE and not the commentary — so this asserts on the bytes.
         let url = try engineCheckout().root.appendingPathComponent("look.json")
@@ -306,7 +306,8 @@ final class PresetTests: XCTestCase {
 final class OutputDestinationTests: XCTestCase {
     /// The rule, stated as a test because the app shipped for a day without it: a preview is
     /// scratch and belongs in a temp directory, a deliverable is the thing the app exists to
-    /// produce and must not.
+    /// produce and must not. This half holds the chosen destination across the project file;
+    /// `DeliveryTests` holds where a render actually lands.
     func testAProjectRemembersWhereToDeliver() throws {
         var project = Project(presets: [.init(name: "p", look: try lookFixture())],
                               activePreset: "p")
@@ -314,8 +315,6 @@ final class OutputDestinationTests: XCTestCase {
         let reread = try Project(data: try project.serialised())
         XCTAssertEqual(reread.outputDirectory?.path, "/Users/someone/Footage/shoot",
                        "a chosen destination has to survive the project file")
-        XCTAssertFalse(reread.outputDirectory?.path.contains("/var/folders") ?? true,
-                       "nothing should default into a scratch directory")
     }
 }
 

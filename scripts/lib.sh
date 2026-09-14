@@ -229,12 +229,13 @@ check_disk_space() {
 # eval anywhere in this pipeline, so this is not shell injection; the ceiling is ffmpeg doing file
 # I/O as whoever ran the script. That is still not a thing to leave open.
 #
-# WHY THIS IS NOT PARANOIA ABOUT YOUR OWN TYPING. look.json is not hand-authored. Per 02-grade.sh's
-# header the grade is "sent back through the artifact db" from the Bench — a shared, multi-writer
-# store — and transcribed here. Nothing checked what came back. A clip FILENAME is the other input
-# nobody types: it arrives from the camera or from whoever handed you the card.
+# WHY THIS IS NOT PARANOIA ABOUT YOUR OWN TYPING. the look is not hand-typed: the file a render reads
+# arrives as LOOK_FILE from the app, and before the app it came from the Bench's shared, multi-writer
+# artifact db. Nothing checked what came
+# back. A clip FILENAME is the other input nobody types: it arrives from the camera or from whoever
+# handed you the card.
 #
-# Validate where a value is READ, not where it is used. There are five readers and a dozen uses.
+# Validate where a value is READ, not where it is used: the uses outnumber the reads.
 require_number() {  # require_number <label> <value>  -> echoes the value, or fails
 	case "$2" in
 		''|*[!0-9.eE+-]*)
@@ -591,36 +592,20 @@ resolve_work_dir() {
 	printf '%s\n' "$w"
 }
 
-# This shoot is MIXED ORIENTATION: of 19 clips, 11 have no rotation matrix (they stay landscape
-# 3840x2160), 7 are -90 and IMG_0609 alone is +90 (both of those present as 2160x3840 portrait).
-# A vertical delivery script handed a landscape master will happily scale 3840x2160 into
-# 1080x1920 — no error, no warning, just a badly squashed file that looks "done". That is the
-# dangerous failure in a batch run, so refuse it here instead.
-# There is deliberately NO rotation logic in this pipeline — orientation is an ingest concern and
-# the source is trusted. This guard exists for one thing only: a genuinely landscape clip reaching
-# a vertical deliverable gets silently squashed into 1080x1920, and silent is the problem.
-#
-# So it decodes one frame and measures it, rather than reasoning about display matrices. ffmpeg
-# autorotates on decode, so this reflects what a viewer sees, and it does not care whether the
-# source was corrected by re-encoding or by fixing the matrix in Preview.
 # Decodes one frame and measures it. Separated out of require_portrait because the crop bounds
 # need the same two numbers, and the alternative is decoding a second frame to ask again.
 #
 # It measures a DECODED frame rather than the container's dimensions, deliberately: this camera
-# carries rotation as a display-matrix flag, ffmpeg autorotates on decode, and the container's
-# width and height are therefore not what the filter graph will see. That is the whole reason
-# docs/adr/0005 exists.
+# stores rotation as a display-matrix flag and ffmpeg autorotates on decode, so the container says
+# 3840x2160 for a clip that decodes 2160x3840. That is docs/adr/0005, and nothing here reasons about
+# the matrix — it reads what came out of the decoder, which is what a viewer sees whether the source
+# was corrected by re-encoding or by fixing the matrix in Preview.
 source_frame_size() {  # source_frame_size <file>  -> "W H"
 	local file="$1" size w h
 	# `showinfo` REPORTS THE DECODED FRAME, which is the whole point, and costs only the decode.
 	# This used to write the frame out as a PNG and ffprobe the file: on a 4K clip that is an
 	# 8-megapixel PNG compressed to disk for the sake of two integers, measured at 9.3 seconds
 	# against 0.6 here. Every clip in every run paid it, and so did every preview.
-	#
-	# Measuring a DECODED frame rather than the container is still the rule: this camera stores
-	# rotation as a display-matrix flag and ffmpeg autorotates, so the container says 3840x2160 for
-	# a clip that decodes 2160x3840. That is docs/adr/0005, and nothing here reasons about the
-	# matrix — it reads what came out of the decoder.
 	#
 	# `-v info` because showinfo logs at INFO and `-v error` would suppress the only output that
 	# matters. Same trap the exposure probe hit with metadata=print.
@@ -653,7 +638,6 @@ fps_filter() {  # fps_filter <source-rate> <target-rate>  -> ",fps=N" or "" or r
 	num="${src%%/*}"; den="${src#*/}"
 	[ "$den" != "$src" ] || den=1
 	case "$num$den" in ''|*[!0-9]*) echo "unreadable source rate: $src" >&2; return 1;; esac
-	# Equal rates need no filter at all.
 	if [ $(( num )) -eq $(( out * den )) ]; then
 		printf ''
 		return 0
@@ -732,6 +716,12 @@ crop_prefix() {  # crop_prefix <src-w> <src-h> <aspect-w> <aspect-h> <offset|cen
 # Lives here rather than inline in grade.sh because two callers need the IDENTICAL command: the
 # per-clip match and the batch reference. Two copies of this string is how the INFO-level bug would
 # come back in one of them.
+#
+# `-ss 1` and `scale=320:-1` came over from the precursor as they were and have not been re-measured
+# here. The seek has one consequence worth knowing: a clip shorter than a second measures nothing,
+# so it silently gets the reference gamma — which is why the suite's probe fixtures are two seconds
+# long. Nothing records why 320. Every matched clip's gamma is solved from this number, so a change
+# to either is a change to the grade.
 probe_yavg() {  # probe_yavg <src> <cst-cube>  -> the mean, or empty
 	ffmpeg -v error -ss 1 -i "$1" -frames:v 1 \
 		-vf "lut3d=file='${2}':interp=tetrahedral,scale=320:-1,signalstats,metadata=print:file=-" \
@@ -863,6 +853,14 @@ size_is_portrait() {  # size_is_portrait "<w> <h>"  -> 0 if portrait
 	esac
 }
 
+# The shoot this was written for was MIXED ORIENTATION: of 19 clips, 11 had no rotation matrix
+# (landscape 3840x2160), 7 were -90 and IMG_0609 alone +90 (both presenting as 2160x3840 portrait).
+# A vertical deliverable handed a landscape master will happily scale 3840x2160 into 1080x1920 — no
+# error, no warning, just a badly squashed file that looks "done". That is the dangerous failure in
+# a batch run, so refuse it here instead.
+#
+# There is deliberately NO rotation logic in this pipeline — orientation is an ingest concern and
+# the source is trusted. This guard exists for that one silent squash and nothing else.
 require_portrait() {
 	local file="$1" size w h
 	if ! size="$(source_frame_size "$file")"; then
@@ -954,11 +952,13 @@ DELIVERY_CHROMA="hqdn3d=0:5:0:6,"
 # render runs forever and the output grows without bound (observed: a 26s clip past 189MB and still
 # going, with no moov atom ever written). The blend option terminates on the shortest input, which
 # is the video.
-# shellcheck disable=SC2034  # spliced into filter graphs by the stage scripts, not used here
 DELIVERY_BLEND="blend=all_mode=grainmerge:shortest=1"
 
 # Every output flag a deliverable is encoded with. Both delivery paths passed their own copy, and
 # conformance renders only grade.sh's, so a change to one reached a file nobody compared.
+# CRF 18, preset slow and AAC 192k: the platform recompresses whatever it receives, so it is fed
+# quality (docs/PIPELINE.md, "Encode"), and grain survival through that re-encode was measured
+# against exactly this encode (ADR 0008).
 # `0:a:0?` MUST stay quoted: `?` is a glob character, and a file named `0:a:00` in the launch
 # directory would otherwise expand it. An array, and never empty, so bash 3.2's empty-array trap
 # under `set -u` does not apply.
@@ -1032,9 +1032,9 @@ load_delivery_look() {
 # THE GRADE ITSELF, as a spliceable filter chain: look LUT, tone curve, saturation, warmth. Both
 # render paths use it — the one-pass grade.sh and the staged 02-grade.sh — and they used to build
 # it separately. That had already drifted once (grade.sh carried its own copy of the tone block, so
-# a grade sent from the Bench moved one path and not the other), and NOTHING in the suite renders
-# the staged graph, so a second divergence would ship in silence. One builder, two callers, the
-# same reasoning as the delivery chain below.
+# a grade sent from the since-removed Bench moved one path and not the other), and at the time
+# nothing in the suite rendered the staged graph, so the divergence shipped in silence. One builder,
+# two callers, the same reasoning as the delivery chain below.
 #
 # TONE ON THE LUMA PLANE ONLY. A per-channel contrast curve crushes a saturated colour's two low
 # channels harder than its high one, so saturated things get more saturated — the traffic signage
@@ -1056,14 +1056,15 @@ load_delivery_look() {
 # applied it back in stage 01), and tag is DELIVERY_SETPARAMS wherever the result feeds filters
 # that negotiate a colourspace.
 grade_chain() {  # grade_chain <tone-lut> <sat> <warm> [head-prefix] [tag-prefix]
+	local tone="$1" sat="$2" warm="$3" head="${4:-}" tag="${5:-}"
 	# Two callers sourced lib.sh, called this function without loading the look, and received a
 	# chain with no look filter in it. Both looked correct; the golden's freshness guard is what
 	# caught it. So a look nobody loaded is loaded here, by the same function the scripts call.
 	load_film_look || return 1
 	printf "%s%s%sformat=yuv444p10le,split=2[gc_y][gc_c];[gc_y]lut1d=file='%s':interp=linear,format=yuv444p10le[gc_t];[gc_t][gc_c]mergeplanes=0x001112:yuv444p10le,%shue=s=%s,colorbalance=rm=%s:bm=-%s" \
-		"${4:-}" "$(film_lut_stage "${LOOK_LUT:-}" "$LOOK_STRENGTH" gc_look)" \
+		"$head" "$(film_lut_stage "${LOOK_LUT:-}" "$LOOK_STRENGTH" gc_look)" \
 		"$(film_lut_stage "${PRINT_LUT:-}" "$PRINT_STRENGTH" gc_print)" \
-		"$1" "${5:-}" "$2" "$3" "$3"
+		"$tone" "$tag" "$sat" "$warm" "$warm"
 }
 
 # One film cube — the look or the print — at a strength, as a prefix with its own trailing comma.
@@ -1123,7 +1124,7 @@ film_lut_stage() {  # film_lut_stage <cube-path|empty> <strength> <label-prefix>
 # ONE PLANE IS BLURRED, not three identical ones: gbrp's plane 0 is G, so the luma is written there,
 # `gblur=planes=1` touches only it, and the R and B planes stay zero through the subtraction until
 # the tint reads them back out of G. Blurring three copies of the same plane cost three times as
-# much for the same answer.
+# much for the same answer. The luma weights are BT.2020's, because Apple Log's primaries are.
 #
 # `steps=3`, because gblur's default is not a Gaussian. Measured on an impulse at sigma 10: one step
 # peaks 77% above the true Gaussian with a tail twenty times too heavy at four sigma; three steps are
@@ -1156,22 +1157,19 @@ halation_prefix() {  # halation_prefix <lut-dir> <sigma-px at full resolution> <
 }
 
 # The glow's radius is a fraction of the frame's height, so it covers the same part of the picture
-# at any source resolution. BT.2020 luma weights in the builder above because Apple Log's primaries
-# are BT.2020; this camera's frame is 3840 tall, where 0.006 is 23 pixels.
+# at any source resolution. This camera's frame is 3840 tall, where 0.006 is 23 pixels.
 halation_sigma() {  # halation_sigma <frame-height> <radius>  -> sigma in pixels
 	awk -v h="$1" -v r="$2" 'BEGIN { printf "%.2f", h * r }'
 }
 
-# The warp resamples BEFORE the downscale, so it happens at master resolution rather than at
-# delivery size. The trailing comma belongs to the prefix: callers splice the result directly into
-# a filter chain, and an absent transform must leave no trace.
 # Camera-motion analysis into a transform, staged. Both entry points write the same cache path, so
 # they must measure the same way: a settings change made in one would leave the transform depending
 # on which script happened to write it.
 #
 # shakiness=5 suits "static handheld" — the iPhone's own stabilisation has already removed the large
 # motion, so what is left is low-amplitude sway. stepsize=6 trades a little accuracy for speed and
-# is plenty at this amplitude.
+# is plenty at this amplitude. All three values, accuracy=15 included, are also vidstabdetect's own
+# defaults (`ffmpeg -h filter=vidstabdetect`).
 #
 # Written to a staging file and installed on success only. An interrupted detect (Ctrl-C, a killed
 # background job) otherwise leaves a TRUNCATED .trf in place of a good one, and the failure surfaces
@@ -1200,6 +1198,13 @@ detect_transform() {  # detect_transform <input> <trf> [head-prefix]
 	trap - EXIT
 }
 
+# The warp resamples BEFORE the downscale, so it happens at master resolution rather than at
+# delivery size. The trailing comma belongs to the prefix: callers splice the result directly into
+# a filter chain, and an absent transform must leave no trace.
+#
+# The light `unsharp` after the warp (luma 5x5 at 0.2, chroma untouched) and the transform's options
+# came over from the precursor as they were; nothing in either repo records a measurement behind
+# them, so treat them as unverified rather than tuned.
 stab_prefix() {  # stab_prefix <trf> <smoothing>
 	printf "vidstabtransform=input='%s':smoothing=%s:optzoom=1:interpol=bicubic,unsharp=5:5:0.2:3:3:0.0," \
 		"$1" "$2"
@@ -1251,8 +1256,9 @@ delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-pre
 # planes — measured U-plane residual sd 0.000, i.e. verifiably luma-only. That matters because the
 # hqdn3d pass exists to clean chroma up, and grain must not put any back.
 #
-# c0s is the one number that wants an eye rather than a measurement. 8 reads as "subtle";
-# clustered grain reads stronger per unit amplitude than per-pixel, so it sits below the old 6.
+# c0s is the one number that wants an eye rather than a measurement, so it is look.json's
+# grain.strength rather than a constant here. Clustered grain reads stronger per unit amplitude than
+# per-pixel, so a strength carried over from per-pixel grain renders heavier than it did.
 grain_plate() {  # grain_plate <w> <h> <fps>
 	printf 'color=c=gray:s=%sx%s:r=%s' "$(( $1 / 2 ))" "$(( $2 / 2 ))" "$3"
 }
@@ -1284,9 +1290,16 @@ delivery_grain_merge() {  # delivery_grain_merge <image-label> <grain-label> <ou
 		printf '[%s][%s]%s[%s]' "$1" "$2" "$DELIVERY_BLEND" "$3"
 		return
 	fi
-	local expr
+	local shadows="$4" highlights="$5" expr
+	# ld(0) is luma out of limited range as 0..1; ld(1) runs 0..1 across the shadow ramp below 0.45
+	# and ld(2) across the highlight ramp above 0.55. Each ramp is eased by a smoothstep.
+	local level='st(0,clip((val-16)/219,0,1))'
+	local shadow_ramp='st(1,clip(ld(0)/0.45,0,1))'
+	local highlight_ramp='st(2,clip((ld(0)-0.55)/0.45,0,1))'
+	local shadow_ease='ld(1)*ld(1)*(3-2*ld(1))'
+	local highlight_ease='ld(2)*ld(2)*(3-2*ld(2))'
 	# Quoted, because the expression holds both of the graph's own separators, `,` and `;`.
-	expr="st(0,clip((val-16)/219,0,1));st(1,clip(ld(0)/0.45,0,1));st(2,clip((ld(0)-0.55)/0.45,0,1));255*(($4+(1-$4)*ld(1)*ld(1)*(3-2*ld(1)))+($5-1)*ld(2)*ld(2)*(3-2*ld(2)))"
+	expr="$level;$shadow_ramp;$highlight_ramp;255*(($shadows+(1-$shadows)*$shadow_ease)+($highlights-1)*$highlight_ease)"
 	printf "[%s]split=2[gw_image][gw_luma];[gw_luma]lutyuv=y='%s':u=128:v=128[gw_mask];" "$1" "$expr"
 	printf '[%s]split=2[gw_noise][gw_level];[gw_level]lutyuv=y=128[gw_flat];' "$2"
 	printf '[gw_flat][gw_noise][gw_mask]maskedmerge=planes=1[gw_grain];'

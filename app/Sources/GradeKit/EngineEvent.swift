@@ -19,7 +19,7 @@ public struct EngineEvent: Equatable {
         case bool(Bool)
         case other
 
-        public var stringValue: String? {
+        var stringValue: String? {
             switch self {
             case .string(let s): return s
             case .number(let d): return d == d.rounded() ? String(Int(d)) : String(d)
@@ -27,14 +27,14 @@ public struct EngineEvent: Equatable {
             case .other: return nil
             }
         }
-        public var intValue: Int? {
+        var intValue: Int? {
             switch self {
             case .number(let d): return Int(d)
             case .string(let s): return Int(s)
             default: return nil
             }
         }
-        public var doubleValue: Double? {
+        var doubleValue: Double? {
             switch self {
             case .number(let d): return d
             case .string(let s): return Double(s)
@@ -157,6 +157,16 @@ public enum EngineCode: Equatable {
 
     public init(rawValue: String) {
         self = Self.byRawValue[rawValue] ?? .unknown(rawValue)
+    }
+
+    /// The refusals `grade.sh` reports as `clip_skipped`. It counts them as skips rather than
+    /// failures and can still exit 0, so they are how a successful run says a clip was not
+    /// rendered. A new skip in the engine needs adding here, or the queue shows it as done.
+    var skipsTheClip: Bool {
+        switch self {
+        case .notPortrait, .fpsWouldNeedRetiming: return true
+        default: return false
+        }
     }
 
     /// A sentence for the interface, which cites the file carrying the reason rather than

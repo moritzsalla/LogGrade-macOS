@@ -98,9 +98,9 @@ fi
 echo "CONFORMANCE FAILED: this fork no longer renders what the precursor renders." >&2
 echo "  precursor: $(stat -f%z "$A") bytes" >&2
 echo "  fork:      $(stat -f%z "$B") bytes" >&2
-for f in "$A" "$B"; do
-	printf '  stream %s ' "$(basename "$(dirname "$(dirname "$f")")")" >&2
-	ffmpeg -v error -i "$f" -map 0 -c copy -f md5 - >&2
+for side in "precursor:$A" "fork:$B"; do
+	printf '  stream %s ' "${side%%:*}" >&2
+	ffmpeg -v error -i "${side#*:}" -map 0 -c copy -f md5 - >&2
 done
 echo "  If the stream hashes MATCH, the chain is intact and the container changed." >&2
 echo "  If they differ, the filter graph changed — say so in the commit, or fix it." >&2

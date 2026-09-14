@@ -4,8 +4,9 @@
 # Reads dist/02-graded/<clip>_graded.mov, writes dist/stab/<clip>.trf
 #
 # Numbered 00 but run LAST in practice — it needs the master, and it is only worth running on a
-# clip that was shot handheld. A clip on a tripod needs nothing. The finals skip stabilisation
-# silently when no .trf exists for the clip, so this is opt-in per clip.
+# clip that was shot handheld. A clip on a tripod needs nothing. With no .trf for the clip,
+# 03-final.sh says so and renders unstabilised, so this is opt-in per clip; a .trf older than its
+# source is refused there instead.
 #
 # WHY IT ALSO FIXES A COLOUR ARTEFACT: handheld sway slides high-contrast edges across the chroma
 # sampling grid frame by frame, so chroma fringing does not sit still — it phase-shifts, and reads
@@ -25,9 +26,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 # `${1:-}`, not `$1`: under `set -u` a bare $1 makes a no-argument run die with
-# "$1: unbound variable" and a line number instead of saying what it wanted. The bats test named
-# for this asserts that exact string is absent, but only ever calls the scripts WITH an argument,
-# so it could not see it. grade.sh was the only entry point that got this right.
+# "$1: unbound variable" and a line number instead of saying what it wanted. The suite's first test
+# for this only ever passed an argument, so it could not see it; a no-argument test now covers
+# every stage script.
 CLIP="${1:-}"
 [ -n "$CLIP" ] || { echo "usage: ./00-stabilise-detect.sh IMG_XXXX" >&2; exit 1; }
 # ...and then the name itself: it becomes a path component AND reaches the filter graph.

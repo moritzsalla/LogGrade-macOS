@@ -12,145 +12,178 @@ import SwiftUI
 struct DeliveryPanel: View {
     @ObservedObject var model: GradeModel
 
+    private static let cropStepperPixels = 8
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("deliver")
                 .font(Type.heading)
                 .foregroundColor(Palette.ink)
-
-            // GENERATED FROM THE PRESET LIST, not written out one per line. Two hardcoded
-            // toggles is what made the set of shapes closed at two in the first place; a preset
-            // added to Deliverable.presets now appears here without a UI edit.
-            HStack(spacing: 14) {
-                ForEach(Deliverable.presets, id: \.self) { deliverable in
-                    Toggle(label(for: deliverable), isOn: binding(for: deliverable))
-                }
-            }
-            .toggleStyle(.checkbox)
-            .font(Type.label)
-            .foregroundColor(Palette.inkSecondary)
-
-            // A shape that is not a preset can only come from a project file or the engine's own
-            // DELIVERABLES, and an editor for arbitrary aspects is not built. It is LISTED anyway:
-            // silently hiding a deliverable someone chose would deliver files they cannot see the
-            // reason for, and unticking every visible box while one still rendered would read as a
-            // bug in the renderer.
-            if !customTargets.isEmpty {
-                Text("also rendering \(customTargets.map(\.spec).joined(separator: ", "))"
-                     + " — set in the project file, not editable here.")
-                    .font(Type.caption)
-                    .foregroundColor(Palette.inkTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            // Labels get room rather than wrapping mid-word, which is what "heig / ht" was.
-            HStack(spacing: 8) {
-                Text("size").font(Type.label).foregroundColor(Palette.inkSecondary)
-                    .fixedSize()
-                // Spelled as dimensions, not as "1080p". The output is portrait, so 1080p means a
-                // height of 1920 — which is the number stored, and labelling it "height: 1080p"
-                // was a fresh contradiction in a pass meant to remove them.
-                Picker("", selection: $model.project.delivery.height) {
-                    Text("1080 × 1920").tag(1920)
-                    Text("1440 × 2560").tag(2560)
-                    Text("2160 × 3840").tag(3840)
-                }
-                .labelsHidden().frame(width: 108)
-                Spacer(minLength: 4)
-                Text("fps").font(Type.label).foregroundColor(Palette.inkSecondary)
-                    .fixedSize()
-                Picker("", selection: fpsBinding) {
-                    Text("source").tag(0)
-                    Text("24").tag(24)
-                    Text("12").tag(12)
-                }
-                .labelsHidden().frame(width: 84)
-            }
-
-            // WHAT THIS COSTS, BEFORE IT COSTS IT. A 2160-tall delivery is four times the pixels
-            // of a 1080 one and takes proportionally longer, and Instagram re-encodes everything
-            // to 1080 wide anyway — so the larger sizes buy nothing downstream while multiplying
-            // the render. The look was also tuned at 1080: grain and the sharpener have radii in
-            // pixels, and scaling them with height is an assumption rather than a measurement.
-            // In floating point: integer division called 2560 tall "1× longer", when its pixel
-            // count is 1.8 times the default's.
-            if model.project.delivery.height > Project.Delivery.defaultHeight {
-                let scale = Double(model.project.delivery.height)
-                    / Double(Project.Delivery.defaultHeight)
-                let cost = String(format: "%g", (scale * scale * 10).rounded() / 10)
-                Label("Instagram re-encodes to 1080 wide. This renders \(cost)× longer for no gain, and the grain was tuned at 1080.",
-                      systemImage: "info.circle")
-                    .font(Type.caption)
-                    .foregroundColor(Palette.inkTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
+            shapeRow
+            customTargetsNote
+            sizeRow
+            sizeCostNote
             stabiliseRow
-
-            if model.project.delivery.anyTargetCrops {
-                cropRow
-            } else {
-                Text("Nothing selected crops the frame, so there is no crop to place. Tick a "
-                     + "shape that is not 9:16 and it appears here.")
-                    .font(Type.caption)
-                    .foregroundColor(Palette.inkTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            // WHAT CONVERT IS ABOUT TO DO, counted rather than discovered. Two deliverables and
-            // stabilisation are each a separate pass over every clip, and the difference between
-            // one pass and four is the difference between minutes and an evening.
-            if !model.clipNames.isEmpty {
-                Text(workload)
-                    .font(Type.caption)
-                    .foregroundColor(Palette.inkTertiary)
-            }
-
-            HStack(spacing: 8) {
-                Text("save to").font(Type.label).foregroundColor(Palette.inkSecondary)
-                    .fixedSize()
-                Text(model.outputDirectory.map { $0.path } ?? "drop a clip first")
-                    .font(Type.value)
-                    .foregroundColor(Palette.inkTertiary)
-                    .lineLimit(1).truncationMode(.head)
-                // A BORDERED BUTTON WITH A FOLDER ON IT. It was borderless text, which on a dark
-                // panel beside a dimmed path reads as a label rather than as the one control that
-                // decides where your work lands.
-                Button {
-                    let panel = NSOpenPanel()
-                    panel.canChooseDirectories = true
-                    panel.canChooseFiles = false
-                    panel.prompt = "deliver here"
-                    if panel.runModal() == .OK, let url = panel.url {
-                        model.chooseOutputDirectory(url)
-                    }
-                } label: {
-                    Label("Choose…", systemImage: "folder")
-                        .font(Type.label)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-
-            ForEach(model.blockers.indices, id: \.self) { i in
-                Text(model.blockers[i].description)
-                    .font(Type.caption)
-                    .foregroundColor(Palette.lamp)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            // Only when a rate has been chosen. Shown always, it read as a warning about a
-            // setting nobody had touched.
-            if model.project.delivery.fps != nil {
-                Text("A frame rate that does not divide the source evenly would have to be "
-                     + "retimed, which judders. Those are refused before the render starts.")
-                    .font(Type.caption)
-                    .foregroundColor(Palette.inkTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            cropSection
+            workloadNote
+            saveRow
+            blockerList
+            fpsNote
         }
         .padding(Space.l)
         .background(Palette.panel)
+    }
+
+    // GENERATED FROM THE PRESET LIST, not written out one per line. Two hardcoded toggles is what
+    // made the set of shapes closed at two in the first place; a preset added to
+    // Deliverable.presets now appears here without a UI edit.
+    private var shapeRow: some View {
+        HStack(spacing: 14) {
+            ForEach(Deliverable.presets, id: \.self) { deliverable in
+                Toggle(label(for: deliverable), isOn: binding(for: deliverable))
+            }
+        }
+        .toggleStyle(.checkbox)
+        .font(Type.label)
+        .foregroundColor(Palette.inkSecondary)
+    }
+
+    // A shape that is not a preset can only come from a project file or the engine's own
+    // DELIVERABLES, and an editor for arbitrary aspects is not built. It is LISTED anyway:
+    // silently hiding a deliverable someone chose would deliver files they cannot see the reason
+    // for, and unticking every visible box while one still rendered would read as a bug in the
+    // renderer.
+    @ViewBuilder private var customTargetsNote: some View {
+        if !customTargets.isEmpty {
+            Text("also rendering \(customTargets.map(\.spec).joined(separator: ", "))"
+                 + " — set in the project file, not editable here.")
+                .font(Type.caption)
+                .foregroundColor(Palette.inkTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // Labels get room rather than wrapping mid-word, which is what "heig / ht" was.
+    private var sizeRow: some View {
+        HStack(spacing: 8) {
+            Text("size").font(Type.label).foregroundColor(Palette.inkSecondary)
+                .fixedSize()
+            // Spelled as dimensions, not as "1080p". The output is portrait, so 1080p means a
+            // height of 1920 — which is the number stored, and labelling it "height: 1080p" was a
+            // fresh contradiction in a pass meant to remove them.
+            Picker("", selection: $model.project.delivery.height) {
+                Text("1080 × 1920").tag(1920)
+                Text("1440 × 2560").tag(2560)
+                Text("2160 × 3840").tag(3840)
+            }
+            .labelsHidden().frame(width: 108)
+            Spacer(minLength: 4)
+            Text("fps").font(Type.label).foregroundColor(Palette.inkSecondary)
+                .fixedSize()
+            Picker("", selection: fpsBinding) {
+                Text("source").tag(0)
+                Text("24").tag(24)
+                Text("12").tag(12)
+            }
+            .labelsHidden().frame(width: 84)
+        }
+    }
+
+    // WHAT THIS COSTS, BEFORE IT COSTS IT. A 2160-tall delivery is four times the pixels of a
+    // 1080 one and takes proportionally longer, and Instagram re-encodes everything to 1080 wide
+    // anyway — so the larger sizes buy nothing downstream while multiplying the render. The look
+    // was also tuned at 1080: grain and the sharpener have radii in pixels, and scaling them with
+    // height is an assumption rather than a measurement.
+    @ViewBuilder private var sizeCostNote: some View {
+        if model.project.delivery.height > 1920 {
+            Label("Instagram re-encodes to 1080 wide. This renders \(pixelRatio)× longer for no "
+                  + "gain, and the grain was tuned at 1080.",
+                  systemImage: "info.circle")
+                .font(Type.caption)
+                .foregroundColor(Palette.inkTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The chosen size's pixels over 1080 × 1920's, as the note prints it. In Double: integer
+    /// division made 2560 "1×". A String, because an interpolated number in a SwiftUI Text is
+    /// localised and a German locale would print "1,8".
+    private var pixelRatio: String {
+        let linear = Double(model.project.delivery.height) / 1920
+        let ratio = linear * linear
+        return String(format: ratio == ratio.rounded() ? "%.0f" : "%.1f", ratio)
+    }
+
+    @ViewBuilder private var cropSection: some View {
+        if model.project.delivery.anyTargetCrops {
+            cropRow
+        } else {
+            Text("Nothing selected crops the frame, so there is no crop to place. Tick a "
+                 + "shape that is not 9:16 and it appears here.")
+                .font(Type.caption)
+                .foregroundColor(Palette.inkTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // WHAT CONVERT IS ABOUT TO DO, counted rather than discovered. Two deliverables and
+    // stabilisation are each a separate pass over every clip, and the difference between one pass
+    // and four is the difference between minutes and an evening.
+    @ViewBuilder private var workloadNote: some View {
+        if !model.clipNames.isEmpty {
+            Text(workload)
+                .font(Type.caption)
+                .foregroundColor(Palette.inkTertiary)
+        }
+    }
+
+    private var saveRow: some View {
+        HStack(spacing: 8) {
+            Text("save to").font(Type.label).foregroundColor(Palette.inkSecondary)
+                .fixedSize()
+            Text(model.outputDirectory.map { $0.path } ?? "drop a clip first")
+                .font(Type.value)
+                .foregroundColor(Palette.inkTertiary)
+                .lineLimit(1).truncationMode(.head)
+            // A BORDERED BUTTON WITH A FOLDER ON IT. It was borderless text, which on a dark
+            // panel beside a dimmed path reads as a label rather than as the one control that
+            // decides where your work lands.
+            Button {
+                let panel = NSOpenPanel()
+                panel.canChooseDirectories = true
+                panel.canChooseFiles = false
+                panel.prompt = "deliver here"
+                if panel.runModal() == .OK, let url = panel.url {
+                    model.chooseOutputDirectory(url)
+                }
+            } label: {
+                Label("Choose…", systemImage: "folder")
+                    .font(Type.label)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+    }
+
+    private var blockerList: some View {
+        ForEach(model.blockers.indices, id: \.self) { i in
+            Text(model.blockers[i].description)
+                .font(Type.caption)
+                .foregroundColor(Palette.lamp)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // Only when a rate has been chosen. Shown always, it read as a warning about a setting nobody
+    // had touched.
+    @ViewBuilder private var fpsNote: some View {
+        if model.project.delivery.fps != nil {
+            Text("A frame rate that does not divide the source evenly would have to be "
+                 + "retimed, which judders. Those are refused before the render starts.")
+                .font(Type.caption)
+                .foregroundColor(Palette.inkTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     /// Per clip, because it is a property of the shot rather than of the shoot. The engine has
@@ -171,9 +204,8 @@ struct DeliveryPanel: View {
     /// Named for the shape being placed rather than for "4:5", which stopped being the only
     /// croppable aspect the moment the set opened up.
     private var cropLabel: String {
-        let shapes = model.project.delivery.croppingTargets
-            .map { "\($0.aspectWidth):\($0.aspectHeight)" }
-        return (shapes.first ?? "4:5") + " crop"
+        model.project.delivery.croppingTargets.first
+            .map { "\($0.aspectWidth):\($0.aspectHeight) crop" } ?? "crop"
     }
 
     /// The shapes carried by the project that have no checkbox, because they are not presets.
@@ -209,10 +241,17 @@ struct DeliveryPanel: View {
                         .textFieldStyle(.plain)
                         .foregroundColor(Palette.ink)
                         .frame(width: 46)
-                    Text("of \(geometry.maximumOffset) px from the top")
+                    // A String, not the Int: an interpolated Int is locale-grouped ("1.140").
+                    Text("of \(String(geometry.maximumOffset)) px from the top")
                         .font(Type.caption).foregroundColor(Palette.inkTertiary)
-                    Stepper("") { model.nudgeCrop(by: -8) } onDecrement: { model.nudgeCrop(by: 8) }
-                        .labelsHidden()
+                    // INVERTED ON PURPOSE. The offset counts down from the top, so the stepper's
+                    // up arrow has to shrink it to move the window up, as the Up key does.
+                    Stepper("") {
+                        model.nudgeCrop(by: -Self.cropStepperPixels)
+                    } onDecrement: {
+                        model.nudgeCrop(by: Self.cropStepperPixels)
+                    }
+                    .labelsHidden()
                     Button("clear") { model.cropOffset = nil }
                         .buttonStyle(.borderless).font(Type.caption)
                 } else {
@@ -258,7 +297,7 @@ struct DeliveryPanel: View {
     }
 }
 
-/// The 4:5 window, dragged on the picture.
+/// The crop window, in the first cropping deliverable's shape, dragged on the picture.
 ///
 /// Drawn over the preview because that is the only way to judge a crop: the question is what is in
 /// the frame, and no number answers it. The box is the engine's window — as wide as the master and

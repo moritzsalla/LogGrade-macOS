@@ -29,9 +29,9 @@ Verified on download
 
 Why these and not a third-party LUT
 -----------------------------------
-Apple Log's transfer function is proprietary and ffmpeg has no built-in support
-for it, so the conversion cannot be approximated with a curve — it needs Apple's
-own table. Measured against standardised colours in frame (see docs/PIPELINE.md),
+The Rec.709 display rendering inside Apple's conversion is unpublished and ffmpeg
+has no built-in support for Apple Log, so the conversion cannot be approximated
+with a curve — it needs Apple's own table. Measured against standardised colours in frame (see docs/PIPELINE.md),
 the Rec709 LUT is colorimetrically accurate out of the box: it lands the RAL 5017
 traffic-blue sign at B/G 1.99 against a 1.98 spec with no correction applied.
 Every hand-rolled alternative tried during development measured worse.
@@ -54,14 +54,14 @@ than failing somewhere inside ffmpeg with a path error.
 They were briefly committed early on and have since been purged from the
 history, so `git log` will not show them.
 
-A CORRECTION TO THE CLAIM ABOVE, AND WHAT IT DOES NOT CHANGE
-Apple published the Apple Log transfer function, in the Apple Log Profile white paper — a parabolic
-toe below a small threshold and a log curve above it, with its inverse stated too. So
-AppleLogToLin-v1.0.cube is reproducible from published maths: its recorded output range is exactly
-that function's range.
+WHAT IS PUBLISHED AND WHAT IS NOT
+This file once said the transfer function itself was proprietary. It is not: Apple published the
+Apple Log transfer function, in the Apple Log Profile white paper — a parabolic toe below a small
+threshold and a log curve above it, with its inverse stated too. So AppleLogToLin-v1.0.cube is
+reproducible from published maths: its recorded output range is exactly that function's range.
 
-AppleLogToRec709-v1.0.cube is NOT. Apple Log carries roughly twelve stops of linear headroom and a
-Rec.709 display holds one, so that cube contains a display rendering — a tone map and gamut
-handling — which Apple has not published. That is a sharper statement of why the from-scratch route
+AppleLogToRec709-v1.0.cube is NOT. Apple Log decodes to linear values up to 12.0 — twelve times
+diffuse white, about 3.6 stops above it — and a Rec.709 display tops out at diffuse white, so that
+cube contains a display rendering — a tone map and gamut handling — which Apple has not published. That is a sharper statement of why the from-scratch route
 lost than "the transfer function is proprietary", and it is the reason nothing here should try to
 replace that cube. See docs/adr/0002_KEEP_APPLES_CST.md.

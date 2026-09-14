@@ -9,8 +9,8 @@ came across.
 ## The concept change: the tool stops assuming one shoot
 
 The pipeline was built for one shoot delivered to one platform. These are the pieces of that
-assumption, in the order they block each other. The first three are done; what remains is here so
-it is not re-derived.
+assumption, in the order they block each other. Each says whether it is done; what remains is here
+so it is not re-derived.
 
 **Done — a deliverable is data** (ADR 0010). Any `name:aspect-w:aspect-h[:offset]`, with Instagram's
 two as presets. Byte-identical at defaults, confirmed against the precursor.
@@ -50,7 +50,7 @@ amount does not, and the grain was sized at 1080 — an assumption, stated as on
 `delivery_image_chain`, never a measurement. Opening the deliverable set up makes other sizes easy
 to reach, so this went from theoretical to reachable. It is a MEASUREMENT task, not a coding one:
 render the same clip at several heights and look at them. Until then the README and
-`03-final.sh`'s header both say other sizes are untuned.
+`delivery_image_chain` in `scripts/lib.sh` both say other sizes are untuned.
 
 **An editor for arbitrary shapes in the app.** The engine and the project file carry any shape; the
 interface generates toggles from `Deliverable.presets` and lists anything else read-only. Adding a
@@ -95,8 +95,9 @@ set down, not held) would get street detail that handheld capture cannot. Nothin
 **`02-grade.sh`'s header uses "look" twice for two different things.** Once for the Portra LUT,
 once for the whole grade. One-line fix next time that file is open.
 
-**`dist/proofs/` is doing three jobs** — proofs, variant renders, and ladder images. Nothing
-references the folder, so splitting it is free whenever the naming settles.
+**`dist/proofs/` was doing three jobs** — proofs, variant renders, and ladder images. Variants and
+ladders are retired terms (see `CONTEXT.md`) and nothing produces them any more, so this is
+historical unless old renders are still lying in that folder.
 
 ~~**A fifth ADR.**~~ Written, as `docs/adr/0007_THE_GRADE_IS_DECIDED_IN_A_BENCH_AND_SENT_AS_DATA.md`.
 The item said "a fifth" when six already existed, which is what a count in prose does.
@@ -120,4 +121,4 @@ Kept here so they are not re-litigated from scratch.
   measurements: the framework colour-matches every pixel and would reintroduce *bleached* through
   the framework rather than through a tag, `h264_videotoolbox` has no CRF, and the chain is the
   residue of measured failures that do not transfer.
-- **Python linting.** Two scripts, ~300 lines. Run `ruff` once if it bothers you.
+- **Python linting.** A handful of small generator scripts. Run `ruff` once if it bothers you.

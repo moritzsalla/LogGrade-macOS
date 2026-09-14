@@ -38,7 +38,7 @@
 #                     Overrides look.json's .print.lut for this run.
 #   FRAME=<seconds>   render ONE frame at that timecode through the grade chain to a PNG and
 #                     stop — the app's exact preview. No delivery stage, no stabilisation.
-#   FRAME_HEIGHT=<px> height of that frame (default 1440, the Bench's working height)
+#   FRAME_HEIGHT=<px> height of that frame (default 1440, the app's preview height in PreviewRenderer)
 #   FRAME_STAGE=source  the same frame with NO grade chain on it: the decoded Apple Log picture,
 #                     resampled identically. It is what the app's live preview grades itself while
 #                     a control is moving. Default 'graded'.
@@ -55,8 +55,8 @@
 # intermediates per clip and decodes the footage three times. Those intermediates existed so the
 # look could be re-tuned without redoing the CST. The look is now FROZEN, so they earn nothing:
 # nothing ever re-renders from the master. Collapsing to a single filter graph removes two full
-# encodes, two full decodes and ~5GB of disk per clip. The staged scripts are kept for re-tuning
-# and for the Bench; this is the path for production runs.
+# encodes, two full decodes and ~5GB of disk per clip. The staged scripts are kept for re-tuning;
+# this is the path for production runs.
 #
 # WHAT IS AUTOMATIC vs WHAT THIS REFUSES TO GUESS:
 #   automatic  exposure match, stabilisation, the whole grade, tag verification
@@ -87,7 +87,14 @@ WORK="$(resolve_work_dir "$ROOT")"
 RUN_T0="$(now_ms)"
 
 CST="$APPLE_CST"
-PROOF="${PROOF:-}"        # PROOF=<seconds> renders a short proof; see the note below
+# PROOF=<seconds> renders that many seconds through the REAL chain, into dist/proofs/ rather than
+# dist/03-final/. Two reasons it exists. docs/BATCH_RUNBOOK.md makes a proof a required sign-off
+# before committing to the slow render, and until then that recipe lived only in shell history. And
+# nothing in the suite executed this filter graph at all: shellcheck cannot see inside the string
+# (it reported clean on both previously shipped load-bearing bugs), the parity check touches only
+# the tone curve, and every other test stopped at DRY=1 — so a dropped label went green and failed
+# three minutes into a 19-clip run.
+PROOF="${PROOF:-}"
 # Validated because it is spliced UNQUOTED below (`-t $PROOF`) so that an empty value disappears
 # instead of becoming an empty argument — bash 3.2 cannot expand an empty array under `set -u`.
 # That split means whitespace in PROOF becomes extra ffmpeg OPTIONS, and `-f mp4 <path>` would
@@ -163,12 +170,12 @@ CACHE="$WORK/dist/.grade-work"
 
 # --- the look. Every value comes from look.json; nothing here holds a copy. ---
 # This path used to carry its own tone block while reading colour, grain and stabilisation from
-# look.json, so a grade sent from the Bench updated shipped.cube and the staged path while THIS
-# script kept rendering the previous tone. That is the two-copies-one-edited failure look() was
-# written to end, one layer up. No fallbacks on purpose: a missing value must stop the run, not
-# quietly substitute a different look.
-# Every one of these is spliced into an ffmpeg filter graph, and look.json is transcribed from the
-# Bench's artifact db rather than typed here — see require_number in lib.sh for why that matters.
+# look.json, so a grade sent from the since-removed Bench updated shipped.cube and the staged path
+# while THIS script kept rendering the previous tone. That is the two-copies-one-edited failure
+# look() was written to end, one layer up. No fallbacks on purpose: a missing value must stop the
+# run, not quietly substitute a different look.
+# Every one of these is spliced into an ffmpeg filter graph, and the look file is usually the
+# app's LOOK_FILE rather than typed — see require_number in lib.sh for why that matters.
 # LOOK=<name|none|path> and PRINT= override the film cubes for one run; the app sets them per
 # render. The loaders keep a value that is already set, which is for callers that source lib.sh —
 # so the names are cleared first, or a stray SAT in someone's environment would become the grade.
@@ -178,10 +185,11 @@ load_delivery_look || exit 1
 
 # --- the input correction ---------------------------------------------------------------
 # Exposure, white balance and the CDL wheels, generated into one cube that runs BEFORE Apple's
-# conversion. Before, because Apple Log carries twelve stops of headroom that the Rec.709 cube
-# lands on a display ceiling of 1.0: a correction applied after it works on display-referred
-# pixels and clips highlights the source still holds. scripts/make-correct-lut.py carries the
-# maths, the published transfer function it decodes with, and the measurements behind its size.
+# conversion. Before, because Apple Log decodes to 12x diffuse white at code 1.0 — about 3.6 stops
+# of highlight headroom — and the Rec.709 cube lands all of it on a display ceiling of 1.0: a
+# correction applied after it works on display-referred pixels and clips highlights the source
+# still holds. scripts/make-correct-lut.py carries the maths, the published transfer function it
+# decodes with, and the measurements behind its size.
 #
 # A NEUTRAL correction leaves the filter out of the graph entirely. That is not only cheaper: it
 # is what keeps the default render byte-identical to the engine this was forked from, which
@@ -255,15 +263,7 @@ if [ "${#D_NAME[@]}" -eq 0 ]; then
 	emit refused code REFUSE_NO_DELIVERABLES
 	exit 1
 fi
-# PROOF=<seconds> renders that many seconds through the REAL chain, into dist/proofs/ rather than
-# dist/03-final/. Two reasons it exists. docs/BATCH_RUNBOOK.md makes a proof a required sign-off
-# before committing to the slow render, and until now that recipe lived only in shell history. And
-# nothing in the suite executed this filter graph at all: shellcheck cannot see inside the string
-# (it reported clean on both previously shipped load-bearing bugs), the parity check touches only
-# the tone curve, and every other test stops at DRY=1 — so a dropped label here went green and
-# failed three minutes into a 19-clip run.
 
-# Collect inputs: folders expand to their .mov files.
 CLIPS=()
 for arg in "$@"; do
 	if [ -d "$arg" ]; then
@@ -344,6 +344,9 @@ done
 # `./grade.sh` with no arguments made the output directories and an empty run-*.txt, then printed
 # usage and exited 1 — a usage error leaving litter in the folder someone delivers from, and one
 # stray report per suite run.
+#
+# 10GB is the staged stages' margin, kept although this path writes no ProRes masters; nothing
+# records a measurement for a one-pass run, so it has not been lowered on a guess.
 check_disk_space "$WORK/dist" 10
 mkdir -p "$OUT_DIR" "$REPORT_DIR" "$CACHE"
 [ -z "$FRAME" ] || mkdir -p "$FRAME_DIR"
@@ -429,8 +432,8 @@ emit run_start clips "${#CLIPS[@]}" saturation "$SAT" warmth "$WARM" \
 	proof "${PROOF:-0}" dry "$DRY" report "$REPORT" out_dir "$OUT_DIR"
 
 OK=0; SKIPPED=0; FAILED=0
-# Indexed rather than `for SRC in "${CLIPS[@]}"`: under MATCH=batch the probe already ran, and the
-# result is found by position.
+# A position counter beside the loop: under MATCH=batch the probe already ran, and each clip's
+# result is found in BATCH_YAVGS by its index in CLIPS.
 CLIP_I=0
 for SRC in "${CLIPS[@]}"; do
 	# Taken and advanced BEFORE any `continue`, because BATCH_YAVGS is aligned with CLIPS — every
@@ -505,14 +508,15 @@ for SRC in "${CLIPS[@]}"; do
 			# Only reachable in a dry run: a real run recomputes a stale transform a few lines
 			# up, because `! transform_is_fresh` is what triggers the detect pass. The old
 			# message said "rendering unstabilised", which is what neither case does — a dry run
-			# renders nothing and a real one refreshes it. Saying the cost out loud matters
-			# because this is the one decision in a plan that costs ~65s per clip to get wrong.
+			# renders nothing and a real one refreshes it.
+			#
+			# Both this branch and the next say the cost out loud: whether a transform exists is the
+			# one decision in a plan that costs ~65s per clip to get wrong, and it used to be made
+			# silently.
 			say "      stale transform at $TRF — a real run will recompute it (~65s)"
 			emit_code STALE_TRANSFORM
 			emit stabilisation clip "$CLIP" state stale transform "$TRF"
 		else
-			# Worth saying out loud: this is the one decision in a dry run that costs ~65s per
-			# clip to get wrong, and it used to be made silently.
 			say "      no transform at $TRF — will render unstabilised"
 			emit_code NO_TRANSFORM
 			emit stabilisation clip "$CLIP" state none transform "$TRF"
@@ -569,8 +573,8 @@ for SRC in "${CLIPS[@]}"; do
 		# test once compared a frame against itself and read 16 code values of error.
 		frame_out="$FRAME_DIR/${CLIP}_t${FRAME}s_${FRAME_STAGE}.png"
 		# 16-bit PNG, because the point of a preview is to predict a 10-bit render and an 8-bit
-		# still is a known source of misreading in the Bench. Lanczos to match the delivery
-		# resample; no dither, because nothing here reduces to 8 bits.
+		# still was a known source of misreading in the since-removed Bench. Lanczos to match the
+		# delivery resample; no dither, because nothing here reduces to 8 bits.
 		if [ "$FRAME_STAGE" = source ]; then
 			# The SAME resample, so the two frames register pixel for pixel and one can be
 			# measured against the other. format=gbrp16le before the scale forces the YUV to RGB
@@ -580,7 +584,7 @@ for SRC in "${CLIPS[@]}"; do
 			frame_graph="format=gbrp16le,scale=-2:${FRAME_HEIGHT}:flags=lanczos"
 		else
 			frame_graph="$(grade_chain "$TONE" "$SAT" "$WARM" \
-  "${CORRECT_PREFIX}${HALATION_PREFIX}lut3d=file='${CST}':interp=tetrahedral,"),scale=-2:${FRAME_HEIGHT}:flags=lanczos"
+				"${CORRECT_PREFIX}${HALATION_PREFIX}lut3d=file='${CST}':interp=tetrahedral,"),scale=-2:${FRAME_HEIGHT}:flags=lanczos"
 		fi
 		# One argument list for both the report and ffmpeg, so what is recorded cannot drift from what
 		# ran. Never empty, so bash 3.2's empty-array trap under `set -u` does not apply.

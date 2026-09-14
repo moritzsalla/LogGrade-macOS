@@ -62,7 +62,17 @@ final class EngineRunTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: empty) }
-        XCTAssertThrowsError(try EngineRun(engine: EngineLocation(root: empty)).run(arguments: []))
+        let location = EngineLocation(root: empty)
+        // THE PREFLIGHT'S OWN REFUSAL, not merely a throw. With the guard removed the spawn of a
+        // missing grade.sh throws too, so asserting only that something was thrown stayed green.
+        XCTAssertThrowsError(try EngineRun(engine: location).run(arguments: [])) { error in
+            guard case .cannotRun(let problem) = error as? EngineRun.Failure else {
+                return XCTFail("expected the preflight's refusal, got \(error)")
+            }
+            XCTAssertEqual(problem, .missingFile(location.gradeScript))
+            XCTAssertTrue(String(describing: error).contains("missing: \(location.gradeScript.path)"),
+                          "the refusal has to name what to fix, got \(error)")
+        }
     }
 
     func testTheChildGetsAPathThatFindsTheTools() throws {

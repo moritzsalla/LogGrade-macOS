@@ -4,8 +4,8 @@ import Foundation
 ///
 /// The app's whole relationship with the image is here: it sets environment variables the engine's
 /// own header documents, spawns `grade.sh`, and consumes its two streams. It never builds a filter
-/// string — `tests/conformance.sh` asserts that by rendering through both paths and comparing the
-/// bytes, and ADR 0008 carries why.
+/// string — `EndToEndTests` asserts that by rendering one clip through the shell and through this
+/// adapter and comparing the bytes, and ADR 0008 carries why.
 public final class EngineRun {
     public struct Outcome: Equatable {
         public let exitCode: Int32
@@ -20,10 +20,8 @@ public final class EngineRun {
         public var succeeded: Bool { exitCode == 0 }
     }
 
-    /// Stops a running engine and everything it spawned.
-    ///
-    /// Ends the engine and everything it started, so no encode carries on writing to a staging file
-    /// nobody is waiting for any more.
+    /// Stops a running engine and everything it spawned, so no encode carries on writing to a
+    /// staging file nobody is waiting for any more.
     public static func stop(_ process: Process) {
         // THE WHOLE TREE, deepest first, and then the group. Foundation starts the engine as the
         // leader of its own process group and `terminate()` signals that group, so today every
@@ -81,7 +79,7 @@ public final class EngineRun {
     /// PATH IS THE POINT. Every tool in the scripts is a bare name, and a GUI process has no
     /// useful PATH, so this puts the directories where the tools actually are in front — plus the
     /// bundle's own vendored copies, which is where they live once the app is assembled.
-    public func childEnvironment(extra: [String: String] = [:]) -> [String: String] {
+    func childEnvironment(extra: [String: String] = [:]) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         var dirs = [engine.root.path] + EngineLocation.toolSearchPaths
         if let existing = env["PATH"] { dirs += existing.split(separator: ":").map(String.init) }
@@ -93,14 +91,13 @@ public final class EngineRun {
         return env
     }
 
-    /// Spawns the engine and returns once it has exited. `onEvent` and `onCode` are called as the
-    /// lines arrive, on an arbitrary queue, so a queue view can update while a render runs.
+    /// Spawns the engine and returns once it has exited. `onEvent` is called as the lines arrive,
+    /// on an arbitrary queue, so a queue view can update while a render runs.
     @discardableResult
     public func run(arguments: [String],
                     environment: [String: String] = [:],
                     onStart: ((Process) -> Void)? = nil,
-                    onEvent: ((EngineEvent) -> Void)? = nil,
-                    onCode: ((EngineCode) -> Void)? = nil) throws -> Outcome {
+                    onEvent: ((EngineEvent) -> Void)? = nil) throws -> Outcome {
         let problems = engine.preflight()
         if let first = problems.first { throw Failure.cannotRun(first) }
 
@@ -162,7 +159,6 @@ public final class EngineRun {
                     if line.hasPrefix("GRADE_CODE=") {
                         let code = EngineCode(rawValue: String(line.dropFirst("GRADE_CODE=".count)))
                         lock.lock(); codes.append(code); lock.unlock()
-                        onCode?(code)
                     }
                 }
             }
@@ -181,6 +177,9 @@ public final class EngineRun {
         if group.wait(timeout: .now() + 5) == .timedOut {
             out.fileHandleForReading.closeFile()
             err.fileHandleForReading.closeFile()
+            // A short grace for the readers to append what they already hold, and bounded again for
+            // the same orphan: the outcome is returned either way, because a line lost here costs
+            // less than a queue that never finishes.
             _ = group.wait(timeout: .now() + 2)
         }
 

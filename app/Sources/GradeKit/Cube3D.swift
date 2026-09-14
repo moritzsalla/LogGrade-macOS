@@ -125,8 +125,9 @@ public struct Cube3D: Equatable {
         return result
     }
 
-    /// Reads a cube the engine's generators write to stdout, so a correction can be regenerated
-    /// on a control change without a temporary file.
+    /// Reads a cube one of the engine's generators writes to stdout. The app does not call this:
+    /// it is the oracle `CorrectionCubeTests` holds `CorrectionCube` to. The output goes through a
+    /// temporary file so it is parsed by the same reader as every cube on disk.
     public static func fromGenerator(_ generator: URL, arguments: [String]) throws -> Cube3D {
         let process = Process()
         process.executableURL = generator

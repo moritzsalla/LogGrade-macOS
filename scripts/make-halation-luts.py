@@ -10,8 +10,8 @@ into whatever dark surrounds them. It is the single most recognisable film artef
 cannot do it: it is spatial.
 
 Light adds in LINEAR light, so the glow is computed and added there — decoded from Apple Log with
-the published transfer function, before Apple's conversion compresses twelve stops onto a display
-ceiling. Added after the conversion, a sky and a white car would contribute the same glow, because
+the published transfer function, before Apple's conversion compresses linear values up to 12.0 —
+twelve times diffuse white — onto a display ceiling. Added after the conversion, a sky and a white car would contribute the same glow, because
 both were already landed on 1.0. See docs/adr/0012_HALATION_IN_LINEAR_BEFORE_THE_CONVERSION.md.
 
 THE GLOW IS AT EDGES ONLY: blur(highlight) - highlight, clamped at zero
@@ -86,26 +86,38 @@ def cube(heading, size, domain_max, fn):
     return "\n".join(lines) + "\n"
 
 
+def stamp(size, domain_max):
+    """VERSION plus the table's size and domain. is_current() trusts a TITLE match, so a changed
+    TRANSFER_SIZE, SMALL_SIZE or LINEAR_MAX that forgot to bump VERSION would otherwise keep
+    serving the cubes cached at the old values."""
+    return "%s size=%d domain_max=%g" % (VERSION, size, domain_max)
+
+
 def files(threshold):
     """Every file this generator owns, as (name, title, size, domain max, function). Titles carry
     what each was built from, so a changed threshold regenerates only the cube that depends on it."""
     return [
-        ("applelog-to-linear.cube", "%s: Apple Log to linear, offset by -R0" % VERSION,
+        ("applelog-to-linear.cube",
+         "%s: Apple Log to linear, offset by -R0" % stamp(TRANSFER_SIZE, 1.0),
          TRANSFER_SIZE, 1.0, lambda p: decode(p) - R0),
-        ("linear-to-applelog.cube", "%s: linear offset by -R0 to Apple Log" % VERSION,
+        ("linear-to-applelog.cube",
+         "%s: linear offset by -R0 to Apple Log" % stamp(TRANSFER_SIZE, LINEAR_MAX),
          TRANSFER_SIZE, LINEAR_MAX, lambda x: min(1.0, encode(x + R0))),
-        ("halation-threshold.cube", "%s: threshold=%s" % (VERSION, number(threshold)),
+        ("halation-threshold.cube", "%s: threshold=%s" % (stamp(SMALL_SIZE, 1.0), number(threshold)),
          SMALL_SIZE, 1.0, lambda p: max(0.0, decode(p) - threshold)),
-        ("nonnegative.cube", "%s: clamp below zero" % VERSION,
+        ("nonnegative.cube", "%s: clamp below zero" % stamp(SMALL_SIZE, LINEAR_MAX),
          SMALL_SIZE, LINEAR_MAX, lambda x: x),
     ]
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out", nargs="?", help="directory to write the four cubes into")
-    ap.add_argument("--threshold", type=float, default=1.0)
-    ap.add_argument("--strength", type=float, default=0.0)
+    ap.add_argument("--threshold", type=float, default=1.0,
+                    help="linear reflectance above which light glows; 1.0 is diffuse white")
+    ap.add_argument("--strength", type=float, default=0.0,
+                    help="only read by --check-neutral; 0 is neutral")
     ap.add_argument("--check-neutral", action="store_true",
                     help="print neutral or active for --strength and exit, writing nothing")
     a = ap.parse_args()

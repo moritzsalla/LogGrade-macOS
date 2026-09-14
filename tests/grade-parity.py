@@ -23,10 +23,11 @@ same golden and holds Swift's `LiveGrade` to the numbers in it. Removing the Ben
 and trim arithmetic from three implementations (JavaScript, Swift, ffmpeg) down to two and cost no
 coverage, because the oracle was never the Bench: it was always ffmpeg's recorded output.
 
-WHAT THIS FILE STILL GUARDS on its own, both of which can fail:
+WHAT THIS FILE STILL GUARDS on its own, all of which can fail:
 
   1. FRESHNESS of the golden against the chain that produced it, by content (see below);
-  2. the PROBE image against the hash recorded in the golden that was measured on it.
+  2. the PROBE image against the hash recorded in the golden that was measured on it;
+  3. the `shipped` and `tone-only` cases against look.json's tone and colour values.
 
 `grade_worst_by_case` IS CARRIED FORWARD, NOT RECOMPUTED. Those tolerances measure an approximation
 against ffmpeg, and with the Bench gone the only approximation left is Swift's — which this file
@@ -113,6 +114,7 @@ import subprocess
 import sys
 import tempfile
 import zlib
+from collections import namedtuple
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GEN = os.path.join(ROOT, "scripts", "make-tone-lut.py")
@@ -120,6 +122,7 @@ LIB = os.path.join(ROOT, "scripts", "lib.sh")
 FIXTURES = os.path.join(ROOT, "tests", "fixtures")
 PROBE = os.path.join(FIXTURES, "grade-probe.png")
 GOLDEN = os.path.join(FIXTURES, "grade-golden.json")
+LOOK = os.path.join(ROOT, "look.json")
 
 # Two calibration runs, then the shipped look, then the corners — a divergence is most likely to
 # hide in a branch the shipped values never take, which is why the extremes are here at all.
@@ -130,41 +133,43 @@ GOLDEN = os.path.join(FIXTURES, "grade-golden.json")
 #   floor      no look filter at all. What this moves is the RGB/YUV round-trip ffmpeg performs
 #              side of the chain — error that belongs to colour conversion, not to anyone's maths.
 #              Every other number here has to be read on top of it.
-#   post-look  the real Portra cube. This is the Bench's documented input (post-CST, post-look), so
-#              it is what the Bench's own maths gets fed in the comparison below.
+#   post-look  the real Portra cube. This was the Bench's documented input (post-CST, post-look),
+#              so it is what the Bench's maths was fed; LiveGradeTests now reads it the same way.
 #
 # The first version of this file used one run for both jobs and reported a 189-code-value "floor",
 # which was the look LUT's own effect rather than any conversion error. Two runs, two questions.
+Case = namedtuple("Case", "name params sat warm look")
+NEUTRAL_TONE = dict(gamma=1.00, pivot=0.50, contrast=1.00, toe=0.00, shoulder=0.00, black=0.000)
+
+# Written out rather than read from look.json, because the golden records each case at the values
+# it was rendered at and a look re-tune must not silently re-point these cases. check() asserts
+# they still equal look.json, so a re-tune fails by name instead of leaving `shipped` stale.
+SHIPPED_TONE = dict(gamma=2.02, pivot=0.39, contrast=1.09, toe=0.00, shoulder=0.10, black=0.025)
+SHIPPED_SAT, SHIPPED_WARM = 1.27, 0.005
+
 CASES = [
-    ("floor", dict(gamma=1.00, pivot=0.50, contrast=1.00, toe=0.00, shoulder=0.00, black=0.000),
-     1.00, 0.000, "none"),
-    ("post-look", dict(gamma=1.00, pivot=0.50, contrast=1.00, toe=0.00, shoulder=0.00, black=0.000),
-     1.00, 0.000, "real"),
+    Case("floor", NEUTRAL_TONE, 1.00, 0.000, "none"),
+    Case("post-look", NEUTRAL_TONE, 1.00, 0.000, "real"),
     # The shipped look, then the same look split in half, so the divergence can be attributed
     # rather than just reported. `tone-only` moves the curve with the trims neutral, which isolates
-    # the curve's APPLICATION — ffmpeg curves the Y plane in YUV, the Bench curves an RGB-derived
+    # the curve's APPLICATION — ffmpeg curves the Y plane in YUV, the Bench curved an RGB-derived
     # luma in full range. `trims-only` moves saturation and warmth with the curve neutral, which
     # isolates hue=s= against an RGB saturation and colorbalance against a flat offset.
-    ("shipped", dict(gamma=2.02, pivot=0.39, contrast=1.09, toe=0.00, shoulder=0.10, black=0.025),
-     1.27, 0.005, "real"),
-    ("tone-only", dict(gamma=2.02, pivot=0.39, contrast=1.09, toe=0.00, shoulder=0.10, black=0.025),
-     1.00, 0.000, "real"),
-    ("trims-only", dict(gamma=1.00, pivot=0.50, contrast=1.00, toe=0.00, shoulder=0.00,
-                        black=0.000), 1.27, 0.005, "real"),
+    Case("shipped", SHIPPED_TONE, SHIPPED_SAT, SHIPPED_WARM, "real"),
+    Case("tone-only", SHIPPED_TONE, 1.00, 0.000, "real"),
+    Case("trims-only", NEUTRAL_TONE, SHIPPED_SAT, SHIPPED_WARM, "real"),
     # One trim each, at a value large enough to see on its own. Without these the guard is
     # insensitive to a small trim regression: the shipped look's divergence is dominated by the
     # tone stage, so deleting the Bench's warmth line entirely hid underneath it and left
     # `shipped` green. Found by mutation.
-    ("warm-only", dict(gamma=1.00, pivot=0.50, contrast=1.00, toe=0.00, shoulder=0.00,
-                       black=0.000), 1.00, 0.120, "real"),
-    ("sat-only", dict(gamma=1.00, pivot=0.50, contrast=1.00, toe=0.00, shoulder=0.00,
-                      black=0.000), 1.60, 0.000, "real"),
-    ("extreme", dict(gamma=2.60, pivot=0.25, contrast=1.80, toe=0.80, shoulder=0.80, black=0.080),
-     1.60, 0.120, "real"),
-    ("negative-black", dict(gamma=1.50, pivot=0.65, contrast=0.80, toe=0.40, shoulder=0.00,
-                            black=-0.080), 0.60, -0.120, "real"),
-    ("midrange", dict(gamma=1.85, pivot=0.45, contrast=1.12, toe=0.30, shoulder=0.35, black=0.000),
-     1.12, 0.000, "real"),
+    Case("warm-only", NEUTRAL_TONE, 1.00, 0.120, "real"),
+    Case("sat-only", NEUTRAL_TONE, 1.60, 0.000, "real"),
+    Case("extreme", dict(gamma=2.60, pivot=0.25, contrast=1.80, toe=0.80, shoulder=0.80,
+                         black=0.080), 1.60, 0.120, "real"),
+    Case("negative-black", dict(gamma=1.50, pivot=0.65, contrast=0.80, toe=0.40, shoulder=0.00,
+                                black=-0.080), 0.60, -0.120, "real"),
+    Case("midrange", dict(gamma=1.85, pivot=0.45, contrast=1.12, toe=0.30, shoulder=0.35,
+                          black=0.000), 1.12, 0.000, "real"),
 ]
 CALIBRATION = ("floor", "post-look")
 
@@ -176,13 +181,15 @@ CALIBRATION = ("floor", "post-look")
 #           of colour, so a denser grid would cost golden size without adding a failure mode.
 #   ramp    256 neutral steps. The tone curve lives here, and the curve is the part with branches
 #           in it, so it gets the dense coverage.
-#   refs    the four references the Bench measures, taken from its own SAMPLERS swatches rather
-#           than invented here: RAL 1021 plate yellow, RAL 3020 traffic red, RAL 5017 traffic blue
-#           and a near-neutral. Saturated colour is where a per-channel trim misbehaves.
+#   refs    the four references the Bench measured, taken from its SAMPLERS swatches rather than
+#           invented here (app/Sources/GradeKit/Scopes.swift carries them now): RAL 1021 plate
+#           yellow, RAL 3020 traffic red, RAL 5017 traffic blue and a near-neutral. Saturated
+#           colour is where a per-channel trim misbehaves.
 CUBE_STEPS = 5
 RAMP_STEPS = 256
 REFS = [(0xf3, 0xc3, 0x00), (0xcc, 0x06, 0x05), (0x06, 0x39, 0x71), (0x8b, 0x8f, 0x96)]
 PATCH = 4          # pixels per patch side; the reader samples the centre
+RGB48_BYTES = 6    # bytes per pixel in an rgb48le frame: three 16-bit channels
 GRID_W = 20        # patches per row
 
 
@@ -238,7 +245,7 @@ def sample_offsets(n):
     for i in range(n):
         px = (i % GRID_W) * PATCH + PATCH // 2
         py = (i // GRID_W) * PATCH + PATCH // 2
-        off.append((py * w + px) * 6)
+        off.append((py * w + px) * RGB48_BYTES)
     return off
 
 
@@ -276,9 +283,6 @@ def chain_fingerprint():
 def render_case(params, sat, warm, probe_path, look="real"):
     with tempfile.NamedTemporaryFile(suffix=".cube", delete=False) as f:
         cube = f.name
-    # "none" omits the look filter rather than interpolating an identity cube through it, which is
-    # what the engine itself now does — and it measures the round trip without a lookup in it at
-    # all, which is what this case was always trying to isolate.
     try:
         cmd = [sys.executable, GEN, cube]
         for k, v in params.items():
@@ -287,13 +291,16 @@ def render_case(params, sat, warm, probe_path, look="real"):
         if r.returncode != 0:
             sys.exit("make-tone-lut.py failed:\n" + r.stderr)
         # TELL ffmpeg WHAT THE PROBE IS. An untagged RGB input is converted to YUV with BT.601 at
-        # LIMITED range — swscale's default — while the Bench models 709 full. Measured on one
+        # LIMITED range — swscale's default — while the Bench modelled 709 full. Measured on one
         # patch: ffmpeg's luma plane held 112.67 where 709 full says 95.94 and 601 limited says
         # 112.65, and its chroma matched 601 limited to two decimal places. That conversion is not
         # one production performs: its source arrives already in YUV. So the probe is tagged, with
         # the same setparams the engine uses on its own synthesised branches, and what is left to
         # measure is the maths rather than an artefact of an untagged PNG.
         tag = "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=pc,"
+        # A `look` of "none" omits the look filter rather than interpolating an identity cube
+        # through it, which is what the engine itself now does — and it measures the round trip
+        # without a lookup in it at all, which is what the floor case was always trying to isolate.
         graph = "[0:v]%s%s,format=rgb48le[o]" % (tag, chain_string(cube, str(sat), str(warm), look))
         r = subprocess.run(["ffmpeg", "-v", "error", "-i", probe_path,
                             "-filter_complex", graph, "-map", "[o]",
@@ -325,17 +332,18 @@ def regenerate():
     if not os.path.isdir(FIXTURES):
         os.makedirs(FIXTURES)
     png = probe_png_bytes()
-    open(PROBE, "wb").write(png)
+    with open(PROBE, "wb") as f:
+        f.write(png)
     patches = probe_patches()
     w, h = probe_size(len(patches))
     print("probe   %dx%d, %d patches, %d bytes" % (w, h, len(patches), len(png)))
 
     cases = []
-    for name, params, sat, warm, look in CASES:
-        out = render_case(params, sat, warm, PROBE, look)
-        cases.append(dict(name=name, params=params, saturation=sat, warmth=warm,
-                          look=look, output=out))
-        print("render  %-15s %d samples (%s look LUT)" % (name, len(out), look))
+    for case in CASES:
+        out = render_case(case.params, case.sat, case.warm, PROBE, case.look)
+        cases.append(dict(name=case.name, params=case.params, saturation=case.sat,
+                          warmth=case.warm, look=case.look, output=out))
+        print("render  %-15s %d samples (%s look LUT)" % (case.name, len(out), case.look))
 
     by = {c["name"]: c for c in cases}
 
@@ -346,7 +354,8 @@ def regenerate():
     # leaves `XCTAssertFalse(perCase.isEmpty)` as the only guard against a vacuous pass.
     worst = {}
     if os.path.exists(GOLDEN):
-        worst = json.load(open(GOLDEN))["tolerances"].get("grade_worst_by_case", {})
+        with open(GOLDEN) as f:
+            worst = json.load(f)["tolerances"].get("grade_worst_by_case", {})
     worst = {k: v for k, v in worst.items() if k not in CALIBRATION}
 
     floor = worst_delta([to8(v) for v in by["floor"]["output"]], [to8(v) for v in patches])
@@ -470,8 +479,28 @@ def shipped_case_drift():
 def check():
     if not os.path.exists(GOLDEN):
         sys.exit("no golden at %s — run tests/grade-parity.py --regenerate" % GOLDEN)
-    golden = json.load(open(GOLDEN))
+    with open(GOLDEN) as f:
+        golden = json.load(f)
     fails = []
+
+    # 0. The shipped cases are look.json's look. Checked before freshness so a re-tune fails by
+    #    this name even when the golden is also stale for another reason.
+    with open(LOOK) as f:
+        look_json = json.load(f)
+    drift = []
+    if look_json["tone"] != SHIPPED_TONE:
+        drift.append("tone: look.json %s, harness %s" % (look_json["tone"], SHIPPED_TONE))
+    if (look_json["colour"]["saturation"], look_json["colour"]["warmth"]) != (SHIPPED_SAT,
+                                                                             SHIPPED_WARM):
+        drift.append("colour: look.json %s, harness saturation=%s warmth=%s"
+                     % (look_json["colour"], SHIPPED_SAT, SHIPPED_WARM))
+    if drift:
+        print("SHIPPED CASE IS NOT THE SHIPPED LOOK\n"
+              "  The `shipped` and `tone-only` cases claim to be look.json's look and are not, so\n"
+              "  the app would be held to a look nothing ships. Update SHIPPED_* in\n"
+              "  tests/grade-parity.py, re-run --regenerate, and re-measure in LiveGradeTests.\n  "
+              + "\n  ".join(drift), file=sys.stderr)
+        return 1
 
     # 1. Freshness, by content: the guard that stops a chain edit shipping with a golden that
     #    describes the chain it replaced.
@@ -487,7 +516,8 @@ def check():
 
     # 2. The probe itself, by content, for the same reason.
     if os.path.exists(PROBE):
-        have = hashlib.sha256(open(PROBE, "rb").read()).hexdigest()
+        with open(PROBE, "rb") as f:
+            have = hashlib.sha256(f.read()).hexdigest()
         if have != golden["probe"]["sha256"]:
             print("the probe image does not match the golden measured on it", file=sys.stderr)
             return 1
@@ -497,17 +527,17 @@ def check():
     #    unrendered, and LiveGradeTests skips a case it cannot find — so the new case would read
     #    as covered while being measured against nothing.
     recorded = {c["name"]: c for c in golden["cases"]}
-    for name, params, sat, warm, look in CASES:
-        c = recorded.get(name)
+    for case in CASES:
+        c = recorded.get(case.name)
         if c is None:
-            fails.append("case %s is declared here but absent from the golden" % name)
+            fails.append("case %s is declared here but absent from the golden" % case.name)
             continue
-        if (c["params"] != params or c["saturation"] != sat or c["warmth"] != warm
-                or c["look"] != look):
+        if (c["params"] != case.params or c["saturation"] != case.sat
+                or c["warmth"] != case.warm or c["look"] != case.look):
             fails.append("case %s is recorded at different parameters than it is declared at"
-                         % name)
+                         % case.name)
         elif not c.get("output"):
-            fails.append("case %s has no recorded ffmpeg output" % name)
+            fails.append("case %s has no recorded ffmpeg output" % case.name)
 
     # 3b. The cases NAMED for the shipped look are at the shipped look. They are literals so that a
     #    re-tune cannot quietly move what the golden recorded, and nothing tied them to look.json:
@@ -520,14 +550,14 @@ def check():
     #    with no entry is one that test silently skips. Losing one is how the app's only parity
     #    gate would go quiet without anything going red.
     per_case = golden["tolerances"].get("grade_worst_by_case", {})
-    for name, _params, _sat, _warm, _look in CASES:
-        if name in CALIBRATION:
+    for case in CASES:
+        if case.name in CALIBRATION:
             continue
-        if name not in per_case:
+        if case.name not in per_case:
             fails.append("case %s has no tolerance in grade_worst_by_case, so LiveGradeTests "
-                         "will skip it" % name)
+                         "will skip it" % case.name)
     for name in per_case:
-        if name not in {c[0] for c in CASES}:
+        if name not in {c.name for c in CASES}:
             fails.append("grade_worst_by_case carries %s, which is no longer a case" % name)
 
     if fails:

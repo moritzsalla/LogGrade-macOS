@@ -44,8 +44,13 @@ load_delivery_look || exit 1
 # and all three wrong the moment any of them changed. The crop window is computed from the master
 # that is actually on disk, a few lines down, once it has been measured.
 # Assigned before it is read: inside a here-string a refused spec is an empty line, and `read` would
-# carry on with no name, no aspect and no suffix.
-SPEC="$(deliverable_spec "$TARGET")" || exit 1
+# carry on with no name, no aspect and no suffix. Refused with its code, as grade.sh does, so the
+# app can say which spec was wrong rather than showing a bare exit status.
+SPEC="$(deliverable_spec "$TARGET")" || {
+	emit_code REFUSE_DELIVERABLE
+	emit refused code REFUSE_DELIVERABLE spec "$TARGET"
+	exit 1
+}
 read -r NAME AW AH OFF SUFFIX <<< "$SPEC"
 W="$(delivery_width)" || exit 1
 H="$(deliverable_height "$W" "$AW" "$AH")"
@@ -62,6 +67,8 @@ SRC="$(source_path "$WORK" "$CLIP")"
 OUT="$(deliverable_path "$WORK/dist/03-final" "$CLIP" "$SUFFIX")"
 
 [ -f "$IN" ] || { echo "graded master not found: $IN — run 02-grade.sh first" >&2; exit 1; }
+# Lower than the ProRes stages' 10: a delivery mp4 measured ~100-170MB against 4.6GB for a clip's
+# two masters (docs/PIPELINE.md, "Disk space policy"). The margins themselves are a judgement.
 check_disk_space "$WORK/dist" 2
 # Create the output directory. This used to rely on a checked-in dist/*/.gitkeep marker, which
 # is wrong the moment a work dir is set: the marker was in the repo and the output was not.
@@ -71,7 +78,10 @@ mkdir -p "$(dirname "$OUT")"
 # computed from — measured, never assumed to be 2160x3840.
 IN_SIZE="$(require_portrait "$IN")"
 CROP="$(crop_prefix "${IN_SIZE% *}" "${IN_SIZE#* }" "$AW" "$AH" "$OFF")"
-echo "deliverable: $NAME  ${W}x${H}${CROP:+  cropped at $OFF}"
+# The RESOLVED row, read back out of the filter, not the word that was asked for: `centre` is
+# computed against the measured master, so printing "centre" would hide where the window landed.
+CROP_AT="${CROP%,}"; CROP_AT="${CROP_AT##*:}"
+echo "deliverable: $NAME  ${W}x${H}${CROP:+  cropped at $CROP_AT}"
 
 # --- optional stabilisation -------------------------------------------------
 # If a transform exists (from 00-stabilise-detect.sh), the sway is smoothed out before the
