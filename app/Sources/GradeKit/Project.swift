@@ -65,11 +65,14 @@ public struct Project: Equatable {
             self.targets = targets; self.height = height; self.fps = fps
         }
 
-        /// Whether anything selected needs a crop offset picked before a render can start.
-        public var anyTargetCrops: Bool { targets.contains { $0.cropsPortraitMaster } }
+        /// Whether anything selected needs a per-clip crop offset picked before a render can start.
+        ///
+        /// A DELIVERABLE WITH A FIXED CENTRE OFFSET CROPS BUT DOES NOT NEED PER-CLIP FRAMING. It is
+        /// excluded from this check, which is about deliverables that crop and must ask every clip.
+        public var anyTargetCrops: Bool { targets.contains { $0.needsClipOffset } }
 
-        /// The shapes that crop, for a refusal that names them rather than saying "one of these".
-        public var croppingTargets: [Deliverable] { targets.filter { $0.cropsPortraitMaster } }
+        /// The shapes that crop and need per-clip framing, for a refusal that names them.
+        public var croppingTargets: [Deliverable] { targets.filter { $0.needsClipOffset } }
 
         public func isSelected(_ deliverable: Deliverable) -> Bool {
             targets.contains(deliverable)
@@ -215,7 +218,10 @@ extension Project.Delivery {
                       let w = ($0["aspect_width"] as? NSNumber)?.intValue,
                       let h = ($0["aspect_height"] as? NSNumber)?.intValue,
                       w > 0, h > 0 else { return nil }
-                return Deliverable(name: name, aspectWidth: w, aspectHeight: h)
+                let offset: DeliverableCropOffset? =
+                    ($0["crop_offset"] as? String) == "centre" ? .centre : nil
+                return Deliverable(name: name, aspectWidth: w, aspectHeight: h,
+                                 cropOffset: offset)
             }
             return parsed
         }
@@ -255,9 +261,15 @@ extension Project {
             clipMap[name] = entry
         }
         var deliveryBlock: [String: Any] = [
-            "targets": delivery.targets.map {
-                ["name": $0.name, "aspect_width": $0.aspectWidth,
-                 "aspect_height": $0.aspectHeight]
+            "targets": delivery.targets.map { d in
+                var entry: [String: Any] = [
+                    "name": d.name, "aspect_width": d.aspectWidth,
+                    "aspect_height": d.aspectHeight
+                ]
+                if let offset = d.cropOffset, offset == .centre {
+                    entry["crop_offset"] = "centre"
+                }
+                return entry
             },
             "height": delivery.height,
         ]

@@ -48,15 +48,12 @@ struct DeliveryPanel: View {
         .foregroundColor(Palette.inkSecondary)
     }
 
-    // A shape that is not a preset can only come from a project file or the engine's own
-    // DELIVERABLES, and an editor for arbitrary aspects is not built. It is LISTED anyway:
-    // silently hiding a deliverable someone chose would deliver files they cannot see the reason
-    // for, and unticking every visible box while one still rendered would read as a bug in the
-    // renderer.
+    // MARK: - Custom deliverable editor UI stub
+    // The editor will be built here to allow adding/editing/removing custom deliverables.
+    // For now, this displays read-only info about any custom shapes loaded from the project file.
     @ViewBuilder private var customTargetsNote: some View {
         if !customTargets.isEmpty {
-            Text("also rendering \(customTargets.map(\.spec).joined(separator: ", "))"
-                 + " — set in the project file, not editable here.")
+            Text("custom shapes: \(customTargets.map(\.spec).joined(separator: ", "))")
                 .font(Type.caption)
                 .foregroundColor(Palette.inkTertiary)
                 .fixedSize(horizontal: false, vertical: true)
