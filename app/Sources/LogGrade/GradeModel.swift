@@ -565,7 +565,7 @@ final class GradeModel: ObservableObject {
     /// finds a framing and only a number repeats one — the same reason every readout in the
     /// inspector can be typed into.
     func nudgeCrop(by pixels: Int) {
-        guard let geometry = cropGeometry else { return }
+        guard cropIsPerClip, let geometry = cropGeometry else { return }
         cropOffset = geometry.clamp((cropOffset ?? geometry.maximumOffset / 2) + pixels)
     }
 
@@ -573,18 +573,37 @@ final class GradeModel: ObservableObject {
     /// from this camera's numbers assumed — and in the shape of the deliverable that will actually
     /// be cropped, rather than in 4:5 whatever was ticked.
     ///
-    /// THE FIRST CROPPING TARGET DECIDES when several crop. They share one per-clip offset, so one
-    /// box is all there is to draw; drawing it in the first one's shape is at least a window the
-    /// render produces. Two cropping deliverables wanting different framing is the case this does
+    /// THE FIRST CROPPING TARGET DECIDES when several crop, preferring one the clip frames over one
+    /// fixed at `centre` (`Delivery.cropBoxTarget`). They share one per-clip offset, so one box is
+    /// all there is to draw; drawing it in the first one's shape is at least a window the render
+    /// produces. Two cropping deliverables wanting different framing is the case this does
     /// not cover, and it needs a second offset before it needs a second box.
     var cropGeometry: CropGeometry? {
         guard let f = selectedClip?.fields,
-              let target = project.delivery.croppingTargets.first else { return nil }
+              let target = project.delivery.cropBoxTarget else { return nil }
         // The container reports these clips landscape, because rotation is a display-matrix flag.
         // The master the engine crops is the DECODED frame, so the two are swapped here.
         let w = min(f.width, f.height), h = max(f.width, f.height)
         return CropGeometry(sourceWidth: w, sourceHeight: h,
                             aspectWidth: target.aspectWidth, aspectHeight: target.aspectHeight)
+    }
+
+    /// Whether the box on the picture is this clip's to place. False when the only cropping shapes
+    /// carry `centre`, whose box is drawn fixed.
+    var cropIsPerClip: Bool {
+        project.delivery.cropBoxTarget?.needsClipOffset ?? false
+    }
+
+    /// Saves a shape from the editor through the engine's own resolver, or says why not. A copy is
+    /// taken so a refusal does not publish a project change that did not happen.
+    func saveShape(_ draft: ShapeDraft, replacing original: Deliverable?) -> ShapeRefusal? {
+        var delivery = project.delivery
+        if let refusal = delivery.save(draft, replacing: original,
+                                       resolve: engine.resolveDeliverable) {
+            return refusal
+        }
+        project.delivery = delivery
+        return nil
     }
 
     /// What would stop a render, named before one starts.

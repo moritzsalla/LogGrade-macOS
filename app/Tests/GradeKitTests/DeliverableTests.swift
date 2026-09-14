@@ -100,8 +100,8 @@ final class DeliverableTests: XCTestCase {
     }
 
     func testAShapeWithNoCheckboxSurvivesSelectingOneThatHasOne() throws {
-        // The interface has no editor for arbitrary aspects, so the only thing that must not
-        // happen is losing one that a project file carries.
+        // A custom shape has no checkbox, so ticking a preset is not a moment anyone is watching
+        // it, and losing it here would be silent.
         let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
         var delivery = Project.Delivery(targets: [square])
         delivery.setTarget(.feed, selected: true)
@@ -143,4 +143,60 @@ final class DeliverableTests: XCTestCase {
 
     // What blocks a render is `ProjectTests.testACroppedRenderIsBlockedUntilEveryClipHasAnOffset`,
     // which covers both the shape that crops and the one that does not. Two tests here repeated it.
+
+    // MARK: - A shape carrying its own offset
+
+    func testACentreShapeSaysSoInItsSpecAndAnUnoffsetOneDoesNot() throws {
+        let centred = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
+                                  cropOffset: .centre)
+        XCTAssertEqual(centred.spec, "square:1:1:centre")
+        XCTAssertEqual(Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1).spec,
+                       "square:1:1")
+    }
+
+    /// The engine lets a deliverable's own offset beat `CROP_Y`, so a `centre` shape has nothing
+    /// for a clip to decide, while one without an offset still takes the clip's.
+    func testOnlyAShapeWithoutItsOwnOffsetWaitsForTheClip() throws {
+        let centred = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
+                                  cropOffset: .centre)
+        var project = Project(presets: [.init(name: "p", look: try lookFixture())],
+                              activePreset: "p", delivery: .init(targets: [centred]))
+        XCTAssertEqual(project.blockers(for: ["IMG_0609"]), [],
+                       "a centred shape blocked Convert on a framing it ignores")
+        project.delivery.targets.append(.feed)
+        XCTAssertEqual(project.blockers(for: ["IMG_0609"]),
+                       [.cropWithoutOffset(deliverables: [.feed], clips: ["IMG_0609"])],
+                       "the blocker must name only the shape that takes the clip's offset")
+    }
+
+    func testTheEngineReadsACentreShapeAsCentred() throws {
+        let engine = try engineCheckout()
+        let centred = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
+                                  cropOffset: .centre)
+        XCTAssertEqual(engine.resolveDeliverable(name: centred.name, spec: centred.spec),
+                       .resolved(.init(name: "square", aspectWidth: "1", aspectHeight: "1",
+                                       offset: "centre", suffix: "square_1x1")))
+    }
+
+    /// Both directions, because a serialiser that dropped the key would read every shape back as
+    /// nil and still pass a test that only saves shapes without one.
+    func testACentreOffsetSurvivesTheProjectFileAndItsAbsenceReadsAsNone() throws {
+        let centred = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
+                                  cropOffset: .centre)
+        let plain = Deliverable(name: "tall", aspectWidth: 2, aspectHeight: 3)
+        let project = Project(presets: [], activePreset: "",
+                              delivery: .init(targets: [.reels, centred, plain]))
+        let reread = try Project(data: try project.serialised())
+        XCTAssertEqual(reread.delivery.targets, [.reels, centred, plain])
+
+        // Written before a shape could carry an offset: every shape then followed CROP_Y.
+        let older = """
+        {"version": 2, "presets": [], "active_preset": "",
+         "delivery": {"targets": [{"name": "square", "aspect_width": 1, "aspect_height": 1}]},
+         "clips": {}}
+        """
+        let opened = try Project(data: Data(older.utf8))
+        XCTAssertEqual(opened.delivery.targets,
+                       [Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)])
+    }
 }

@@ -1,5 +1,14 @@
 import Foundation
 
+/// A crop offset a deliverable carries for itself, which the engine lets beat the run's `CROP_Y`.
+///
+/// ONLY CENTRE, not a pixel count. A pixel offset is a composition call about one clip, and this
+/// value applies to every clip in the project; `centre` is resolved per clip against the frame the
+/// engine measured, which is the one fixed offset that means the same thing on all of them.
+public enum DeliverableCropOffset: Equatable, Hashable {
+    case centre
+}
+
 /// A delivery shape: a name and an aspect, and nothing about pixels.
 ///
 /// WHY THIS IS DATA AND NOT AN ENUM OF TWO CASES. It was `reels: Bool, feed: Bool` here and a
@@ -11,15 +20,24 @@ import Foundation
 /// width, and that arithmetic lives in the engine (`deliverable_height` in scripts/lib.sh) because
 /// the engine is what renders. Carrying a second copy of it in Swift is exactly the duplication
 /// ADR 0008 exists to prevent.
+///
+/// A PRESET WITH AN OFFSET IS NOT THE PRESET. Equality includes `cropOffset`, so a project file
+/// entry `reels` 9:16 `centre` is a custom shape and goes to the engine as `reels:9:16:centre`,
+/// writing `reels_9x16` rather than the preset's file. Nothing stops a hand-edited project file
+/// saying that; the editor refuses a preset's name, which is what keeps the interface from
+/// producing it.
 public struct Deliverable: Equatable, Hashable {
     public let name: String
     public let aspectWidth: Int
     public let aspectHeight: Int
+    public let cropOffset: DeliverableCropOffset?
 
-    public init(name: String, aspectWidth: Int, aspectHeight: Int) {
+    public init(name: String, aspectWidth: Int, aspectHeight: Int,
+                cropOffset: DeliverableCropOffset? = nil) {
         self.name = name
         self.aspectWidth = aspectWidth
         self.aspectHeight = aspectHeight
+        self.cropOffset = cropOffset
     }
 
     /// 9:16 — Reels and Stories, the whole portrait frame.
@@ -38,7 +56,9 @@ public struct Deliverable: Equatable, Hashable {
     /// (`reels-stories_9x16`, `feed_4x5`) that an arbitrary spec cannot reproduce, so an expanded
     /// preset would silently start writing `reels_9x16.mp4` beside somebody's existing files.
     public var spec: String {
-        Self.presets.contains(self) ? name : "\(name):\(aspectWidth):\(aspectHeight)"
+        if Self.presets.contains(self) { return name }
+        let shape = "\(name):\(aspectWidth):\(aspectHeight)"
+        return cropOffset == .centre ? shape + ":centre" : shape
     }
 
     /// Whether this shape is a crop of a 9:16 master, by cross-multiplication rather than by name:
@@ -52,5 +72,13 @@ public struct Deliverable: Equatable, Hashable {
     /// an exit code.
     public var cropsPortraitMaster: Bool {
         aspectWidth * 16 != aspectHeight * 9
+    }
+
+    /// Whether this shape crops AND takes its offset from the clip's `CROP_Y`, which is what has to
+    /// be decided per clip before Convert can run. A shape carrying `centre` still crops — its box
+    /// is still drawn — but the engine lets its own offset beat `CROP_Y`, so there is nothing to
+    /// ask.
+    public var needsClipOffset: Bool {
+        cropsPortraitMaster && cropOffset == nil
     }
 }

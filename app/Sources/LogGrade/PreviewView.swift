@@ -29,7 +29,8 @@ struct PreviewView: View {
                         // The crop is judged on the picture, because the question it answers is
                         // what is in the frame and no number answers that.
                         if model.project.delivery.anyTargetCrops, let geometry = model.cropGeometry {
-                            CropOverlay(model: model, geometry: geometry)
+                            CropOverlay(model: model, geometry: geometry,
+                                        framedPerClip: model.cropIsPerClip)
                                 .aspectRatio(image.size.width / image.size.height,
                                              contentMode: .fit)
                         }
