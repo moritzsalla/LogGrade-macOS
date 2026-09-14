@@ -1,6 +1,7 @@
 import Foundation
 
-/// Where the 4:5 window sits on the master, and what a drag on the preview means in its terms.
+/// Where a deliverable's crop window sits on the master, and what a drag on the preview means in
+/// its terms.
 ///
 /// THE OFFSET IS IN MASTER PIXELS, not preview pixels, because that is what the engine takes and
 /// what the project file records. The preview is the same frame at display height, so the mapping
@@ -16,8 +17,12 @@ public struct CropGeometry: Equatable {
     public let aspectWidth: Int
     public let aspectHeight: Int
 
-    public init(sourceWidth: Int, sourceHeight: Int,
-                aspectWidth: Int = 4, aspectHeight: Int = 5) {
+    /// THE ASPECT HAS NO DEFAULT, deliberately. It defaulted to 4:5 and `GradeModel` never passed
+    /// one, so the box drawn on the picture was a Feed window whatever the cropping deliverable
+    /// actually was — a crop that lies, which this type's own header calls worse than no crop
+    /// picker at all. Unreachable while Feed was the only cropping preset; reachable the moment a
+    /// deliverable became any shape. Requiring it at the call site is what stops it recurring.
+    public init(sourceWidth: Int, sourceHeight: Int, aspectWidth: Int, aspectHeight: Int) {
         self.sourceWidth = sourceWidth
         self.sourceHeight = sourceHeight
         self.aspectWidth = aspectWidth

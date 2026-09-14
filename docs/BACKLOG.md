@@ -27,18 +27,23 @@ finished and are all framed wrong.
 **Done — the Bench is deleted** (ADR 0007, superseded). Three implementations of the tone and trim
 arithmetic became two.
 
-**Two-dimensional crop geometry.** The window is still as wide as the source with only a vertical
-offset, in the engine (`crop_prefix`) and in the app (`CropGeometry`). So a landscape deliverable is
-a horizontal band of the master and cannot be panned sideways, and a shape narrower than the source
-cannot be placed horizontally at all. Roughly doubles the deliverable work; deliberately left as its
-own decision.
+**Done — the on-picture crop box follows the deliverable.** `CropGeometry` defaulted to 4:5 and
+`GradeModel` never passed an aspect, so the box drawn on the preview was a Feed window whatever was
+ticked. The aspect is now required at the call site, which is what stops it recurring, and a test
+ties the box to the arithmetic `crop_prefix` uses.
 
-**The on-picture crop box is hardcoded to 4:5.** `CropGeometry` defaults to `aspectWidth: 4,
-aspectHeight: 5` and `GradeModel.cropGeometry` never passes an aspect, so the rectangle dragged on
-the preview draws a 4:5 window whatever the cropping deliverable actually is. Unreachable from the
-interface today, since the only cropping preset IS 4:5 — but a project file carrying, say, a 1:1
-target will show a box that does not match what the engine renders. Same seam as the 2D crop work
-above; fix them together.
+**Two-dimensional crop geometry — blocked, and not by size.** The entry here used to say this
+"roughly doubles the deliverable work" and should be done alongside the crop box. That was wrong
+about the reason. `crop_prefix` emits `crop=<sw>:<ch>:0:<y>`: the window is ALWAYS the full source
+width, x is always 0. It could only be narrower than the source if the deliverable's aspect were
+taller than the source's, and that is exactly the case the function refuses (`crop window 2160x6480
+is taller than the source 2160x3840`). So with portrait-only ingest there is no horizontal freedom
+to expose, and building a 2D picker would add a control with nothing behind it.
+
+It becomes real only when ingest accepts sources that are not portrait, which is ADR 0005's
+territory: `require_portrait` refuses them on purpose, because the failure it prevents is a
+landscape master silently squashed into a vertical frame. Reopen this with that decision, not
+before.
 
 **Sharpen and grain at other frame sizes.** The sharpener's radius follows the output height and its
 amount does not, and the grain was sized at 1080 — an assumption, stated as one in
@@ -51,10 +56,8 @@ render the same clip at several heights and look at them. Until then the README 
 interface generates toggles from `Deliverable.presets` and lists anything else read-only. Adding a
 preset costs no UI work, which was the point; authoring one in the app is not built.
 
-**`USAGE.md` does not exist** and the README links to it. It is where the environment knobs belong —
-`DELIVERABLES`, `MATCH`, `WIDTH`, `CROP_Y` and the rest are currently documented only in
-`grade.sh`'s header, which is the one place that cannot go stale but is also the last place anyone
-looks.
+**Done — `USAGE.md` exists.** The environment knobs, the deliverable spec grammar and the named
+refusal codes live there now, rather than only in `grade.sh`'s header.
 
 **The parity tolerance is carried forward, not measured.** `grade_worst_by_case` in the golden used
 to be computed from the Bench's JavaScript; with the Bench gone, `--regenerate` copies it forward

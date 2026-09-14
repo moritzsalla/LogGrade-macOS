@@ -499,13 +499,21 @@ final class GradeModel: ObservableObject {
     }
 
     /// The window's geometry for the selected clip, from what was measured about it rather than
-    /// from this camera's numbers assumed.
+    /// from this camera's numbers assumed — and in the shape of the deliverable that will actually
+    /// be cropped, rather than in 4:5 whatever was ticked.
+    ///
+    /// THE FIRST CROPPING TARGET DECIDES when several crop. They share one per-clip offset, so one
+    /// box is all there is to draw; drawing it in the first one's shape is at least a window the
+    /// render produces. Two cropping deliverables wanting different framing is the case this does
+    /// not cover, and it needs a second offset before it needs a second box.
     var cropGeometry: CropGeometry? {
-        guard let f = selectedClip?.fields else { return nil }
+        guard let f = selectedClip?.fields,
+              let target = project.delivery.croppingTargets.first else { return nil }
         // The container reports these clips landscape, because rotation is a display-matrix flag.
         // The master the engine crops is the DECODED frame, so the two are swapped here.
         let w = min(f.width, f.height), h = max(f.width, f.height)
-        return CropGeometry(sourceWidth: w, sourceHeight: h)
+        return CropGeometry(sourceWidth: w, sourceHeight: h,
+                            aspectWidth: target.aspectWidth, aspectHeight: target.aspectHeight)
     }
 
     /// What would stop a render, named before one starts.
