@@ -23,6 +23,23 @@
 # requirement is stated here instead of being discovered from the noise.
 bats_require_minimum_version 1.5.0
 
+# TWO TAGS, and scripts/check.sh is what reads them.
+#
+#   slow    left out by `check.sh --fast`. A test measured at three seconds or more on this machine:
+#           the app builds, and renders or probes of real footage. The ranking is in
+#           docs/adr/0013_A_PARALLEL_SUITE_WITH_A_FAST_TIER.md. Tag a new test that renders
+#           real footage or builds the app.
+#   serial  kept out of the parallel pass, because it writes a path another test writes too. The two
+#           make-app.sh tests both rebuild dist/LogGrade.app, and one asserts on its contents while
+#           the other can be halfway through replacing it. The two 02-grade.sh tests regenerate the
+#           REPO's luts/tone/shipped.cube when look.json has moved, and make-tone-lut.py stages that
+#           write through one fixed .partial name, so two at once can interleave. Tag any new test
+#           that writes outside $BATS_TEST_TMPDIR.
+#
+# A serial test runs alongside the parallel pass, one at a time, not after it: those tests
+# conflict with each other, not with the rest, and waiting for the builds would give back most of
+# what the parallel pass saves.
+
 setup_file() {
 	command -v ffmpeg >/dev/null || skip "ffmpeg not installed"
 	export FIXTURES="$BATS_FILE_TMPDIR/fixtures"
@@ -291,6 +308,7 @@ fail() {
 	[[ "$output" != *"syntax error"* ]] || fail "[[ \"$output\" != *\"syntax error\"* ]]"
 }
 
+# bats test_tags=slow
 @test "every stage checks free space on the volume it writes to" {
 	# The work dir became opt-in, and three of the four call sites kept asking about the REPO's
 	# volume while writing to the work dir's. With no .workdir present those are the same path, so
@@ -465,6 +483,7 @@ fail() {
 	done
 }
 
+# bats test_tags=slow
 @test "grade.sh plans a real clip end to end (dry run)" {
 	local work src
 	work=$(resolve_work_dir "$BATS_TEST_DIRNAME/.." 2>/dev/null) || work="$BATS_TEST_DIRNAME/.."
@@ -756,6 +775,7 @@ JSON
 	[[ "$output" == *"gamma="* ]] || fail "[[ \"$output\" == *\"gamma=\"* ]]"
 }
 
+# bats test_tags=slow
 @test "the production filter graph renders a real clip end to end" {
 	# NOTHING else in this suite executes this graph. shellcheck cannot see inside a filter string
 	# — it reported clean on both of the previously shipped load-bearing bugs — the parity check
@@ -923,6 +943,7 @@ JSON
 	[ ! -e "$BATS_TEST_TMPDIR/untaggable.partial.mp4" ] || fail "left a staging file behind"
 }
 
+# bats test_tags=slow
 @test "a clip whose render fails does not take the rest of the batch with it" {
 	# Measured: a two-clip run whose first render failed never attempted the second, printed no
 	# summary line, and left the report ending mid-file. grade.sh already skips a non-portrait clip
@@ -978,6 +999,7 @@ JSON
 	[ -z "$offenders" ] || fail "builds its own grade chain instead of calling grade_chain:$offenders"
 }
 
+# bats test_tags=serial
 @test "the staged grade graph initialises and renders" {
 	# 02-grade.sh's graph was executed by NOTHING. shellcheck cannot see inside a filter string,
 	# the parity check touches only the tone curve, and the one real render in this suite goes
@@ -1260,6 +1282,7 @@ for i, line in enumerate(sys.stdin.read().splitlines(), 1):
 # The report is what a slow or broken render is debugged from afterwards, so what it records has to
 # come out of a REAL render: a DRY run never times an encode and never builds the graph. HEIGHT=128
 # is what lets a 72x128 fixture finish the delivery chain; at 1080x1920 it fails reinitialising.
+# bats test_tags=slow
 @test "the run report records the machine, the knobs, the graph and the timing of a real render" {
 	local work="$BATS_TEST_TMPDIR/report-proof"
 	mkdir -p "$work/src"
@@ -1673,6 +1696,7 @@ PY
 	[[ "$output" == *"not found"* ]] || fail "no reason given: $output"
 }
 
+# bats test_tags=slow
 @test "LOOK=none renders a visibly different still than the shipped look" {
 	# End to end, through the real chain, because a string test cannot tell whether the filter that
 	# left the graph was the one doing the work.
@@ -1902,6 +1926,7 @@ PY
 # MATCH=1 lands every clip on look.json's match.reference_yavg, which is a measurement of one frame
 # of one clip of one shoot. MATCH=batch anchors on the run's own median instead. See docs/adr/0011.
 
+# bats test_tags=slow
 @test "MATCH=batch anchors on the run's own clips, not on look.json's reference" {
 	local work="$BATS_TEST_TMPDIR/batch"
 	mkdir -p "$work/src"
@@ -2063,6 +2088,7 @@ print("%.1e %.4f" % (worst, mc.decode(1.0)))
 	[ ! -f "$work/dist/.grade-work/correct.cube" ] || fail "generated a cube for a neutral correction"
 }
 
+# bats test_tags=slow
 @test "an active correction reaches the render and changes the picture" {
 	local work="$BATS_TEST_TMPDIR/active" look="$BATS_TEST_TMPDIR/warm.json"
 	mkdir -p "$work/src"
@@ -2235,6 +2261,7 @@ sys.exit("; ".join(problems) or None)
 	[ ! -d "$work/dist/.grade-work/halation" ] || fail "generated cubes for a neutral halation"
 }
 
+# bats test_tags=slow
 @test "an active halation reaches the render and changes the picture" {
 	local work="$BATS_TEST_TMPDIR/active-hal" look="$BATS_TEST_TMPDIR/active-hal.json" clip
 	mkdir -p "$work/src"
@@ -2437,6 +2464,7 @@ sys.exit("; ".join(problems) or None)
 	[ -s "$out" ] || fail "no proof was written: $output"
 }
 
+# bats test_tags=serial
 @test "the staged path refuses a look it cannot apply, rather than rendering without part of it" {
 	# A baseline has already been converted, so a stage that runs before the conversion has nowhere
 	# to go. For as long as the correction existed this path rendered masters without it, and they
@@ -2528,6 +2556,7 @@ if not any(json.loads(l)["event"] == "run_done" for l in lines):
 		|| fail "@Observable needs macOS 14; use ObservableObject"
 }
 
+# bats test_tags=slow,serial
 @test "the app bundle script produces something launchable" {
 	command -v swift >/dev/null || skip "no swift toolchain"
 	local app="$BATS_TEST_DIRNAME/../dist/LogGrade.app"
@@ -2549,6 +2578,7 @@ if not any(json.loads(l)["event"] == "run_done" for l in lines):
 	[ -f "$app/Contents/Resources/AppIcon.icns" ] || fail "the icon was not drawn into the bundle"
 }
 
+# bats test_tags=slow,serial
 @test "the default build is the optimised one, because the live preview needs it" {
 	command -v swift >/dev/null || skip "no swift toolchain"
 	# THE CONFIGURATION MATTERS MORE THAN IT LOOKS. The live preview grades a whole frame per
@@ -2561,6 +2591,7 @@ if not any(json.loads(l)["event"] == "run_done" for l in lines):
 	[ -x "$BATS_TEST_DIRNAME/../app/.build/release/LogGrade" ] || fail "no optimised binary"
 }
 
+# bats test_tags=slow
 @test "a measured exposure can be handed back instead of measured again" {
 	# The probe reads a number that does not change when a look does, so an interface adjusting a
 	# curve re-measures the same value on every render — about a second of a four-second preview.

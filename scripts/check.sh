@@ -21,14 +21,40 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 ALLOW_SKIPS=0
 CONFORMANCE=0
+FAST=0
 for a in "$@"; do
 	case "$a" in
 		--allow-skips) ALLOW_SKIPS=1;;
 		--conformance) CONFORMANCE=1;;
+		--fast) FAST=1;;
 		*) echo "unknown option: $a" >&2; exit 2;;
 	esac
 done
 SKIPPED=""
+
+# --fast is for iterating, and the full run stays the DEFAULT. This is the command CLAUDE.md says
+# to trust, so a default that quietly ran less would bring back the "green but tested nothing"
+# failure the missing-tool rule below exists for. What --fast leaves out is named at the end.
+#
+# The Swift classes left out are the ones that render real footage through the engine. Their
+# measured cost, and that of the bats tests tagged `slow`, is in
+# docs/adr/0013_A_PARALLEL_SUITE_WITH_A_FAST_TIER.md. Re-measure rather than guess before adding
+# to this list.
+SLOW_SWIFT='LiveChainTests|EndToEndTests|DeliveryTests|PreviewRendererTests|ClipListTests'
+
+# Parallel runs lose one signal: `swift test --parallel` reports a skipped test as passed, where
+# the serial run printed "N tests skipped". Nearly every skip in this suite means missing footage
+# or Apple's cube, both gitignored, so the absence is checked directly rather than left to be
+# inferred from a count nobody reads.
+MISSING_MEDIA=""
+ls src/*.mov >/dev/null 2>&1 || MISSING_MEDIA="$MISSING_MEDIA src/*.mov"
+[ -f luts/apple/AppleLogToRec709-v1.0.cube ] || MISSING_MEDIA="$MISSING_MEDIA luts/apple/AppleLogToRec709-v1.0.cube"
+if [ -n "$MISSING_MEDIA" ]; then
+	echo "NOTE — missing:$MISSING_MEDIA"
+	echo "  Every test that needs real footage or Apple's conversion will skip, and in the parallel"
+	echo "  Swift run a skip reads as a pass. Green here does not cover the render."
+	echo
+fi
 
 echo "== shellcheck =="
 if command -v shellcheck >/dev/null; then
@@ -73,8 +99,23 @@ echo "== swift (GradeKit) =="
 # fatal at the end unless --allow-skips. Xcode 15.2 is the newest for this machine's macOS, which
 # is why Package.swift pins the tools version rather than tracking whatever is installed.
 if command -v swift >/dev/null; then
-	swift build --package-path app 2>&1 | tail -2
-	swift test --package-path app 2>&1 | tail -3
+	# --parallel runs each test class in its own process: 104s serially, 61s parallel, measured on
+	# this 8-thread i7. Every render test works in its own UUID temp directory, which is what makes
+	# that safe.
+	# Captured rather than piped to `tail`: under --parallel the last lines are only the last tests
+	# started, so a tail showed neither the count nor a failing assertion.
+	swift_args=(--package-path app --parallel)
+	[ "$FAST" = "1" ] && swift_args+=(--skip "$SLOW_SWIFT")
+	[ "$FAST" = "1" ] || swift build --package-path app 2>&1 | tail -2
+	swift_log=$(mktemp -t check-swift)
+	if swift test "${swift_args[@]}" > "$swift_log" 2>&1; then
+		echo "$(grep -c '^\[[0-9]*/[0-9]*\] Testing' "$swift_log") tests passed"
+		rm -f "$swift_log"
+	else
+		grep -E 'error:|failed|Fatal' "$swift_log" || tail -30 "$swift_log"
+		echo "swift test FAILED — full log: $swift_log" >&2
+		exit 1
+	fi
 else
 	echo "swift NOT INSTALLED (needs Xcode, and its licence accepted)"
 	SKIPPED="$SKIPPED swift"
@@ -100,7 +141,34 @@ fi
 echo
 echo "== bats =="
 if command -v bats >/dev/null; then
-	bats tests/
+	# Tags are explained at the top of tests/lib.bats. The serial pass runs ALONGSIDE the parallel
+	# one, not after it: serial tests conflict with each other, not with the rest, and the release
+	# build among them is the single longest test in the suite.
+	# Without GNU parallel, bats cannot use -j; everything then runs in one serial pass. That is
+	# the same coverage, only slower, so it is not recorded as a skip.
+	# ONE --filter-tags per call, with the conditions comma-joined. bats ANDs within a list but ORs
+	# separate --filter-tags flags, so `--filter-tags '!slow' --filter-tags serial` would run every
+	# test that is fast OR serial.
+	slow_tag=""
+	[ "$FAST" = "1" ] && slow_tag='!slow,'
+	if command -v parallel >/dev/null; then
+		serial_log=$(mktemp -t check-bats-serial)
+		bats --filter-tags "${slow_tag}serial" tests/ > "$serial_log" 2>&1 &
+		serial_pid=$!
+		bats_rc=0
+		bats -j "$(sysctl -n hw.ncpu)" --filter-tags "${slow_tag}!serial" tests/ || bats_rc=1
+		wait "$serial_pid" || bats_rc=1
+		echo "-- serial --"
+		cat "$serial_log"
+		rm -f "$serial_log"
+		[ "$bats_rc" = "0" ] || exit 1
+	elif [ "$FAST" = "1" ]; then
+		echo "(GNU parallel not installed: running bats serially)"
+		bats --filter-tags '!slow' tests/
+	else
+		echo "(GNU parallel not installed: running bats serially)"
+		bats tests/
+	fi
 else
 	echo "bats NOT INSTALLED (github.com/bats-core/bats-core, install.sh ~/.local)"
 	SKIPPED="$SKIPPED bats"
@@ -116,4 +184,10 @@ if [ -n "$SKIPPED" ]; then
 		echo "  ./scripts/check.sh --allow-skips to accept a partial run deliberately." >&2
 		exit 1
 	fi
+fi
+
+if [ "$FAST" = "1" ]; then
+	echo
+	echo "FAST RUN (--fast): did not run the bats tests tagged slow, the Swift classes"
+	echo "  ${SLOW_SWIFT//|/, }, or swift build. Not a pass for a commit: run ./scripts/check.sh."
 fi

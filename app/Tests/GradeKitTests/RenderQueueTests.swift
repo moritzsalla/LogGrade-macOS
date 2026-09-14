@@ -133,12 +133,16 @@ final class RenderQueueTests: XCTestCase {
             queue.start(environment: { _ in [:] })
             finished.fulfill()
         }
-        let started = expectation(description: "child started")
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) { started.fulfill() }
-        wait(for: [started], timeout: 10)
-
-        let pid = Int32(try String(contentsOf: pidFile, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        // POLLED, not a fixed wait. It was 1.5 seconds, which held when the suite ran serially and
+        // failed under `swift test --parallel`: with the render tests starting at the same moment,
+        // the stub had not written its pid yet and the read threw before the cancel was reached.
+        var pid: Int32 = 0
+        let deadline = Date().addingTimeInterval(15)
+        while pid == 0 && Date() < deadline {
+            pid = (try? String(contentsOf: pidFile, encoding: .utf8))
+                .flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+            if pid == 0 { Thread.sleep(forTimeInterval: 0.05) }
+        }
         XCTAssertGreaterThan(pid, 0, "the stub engine never reported a child")
         XCTAssertEqual(kill(pid, 0), 0, "the child was not running before the cancel")
 
