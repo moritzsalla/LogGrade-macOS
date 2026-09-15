@@ -32,20 +32,27 @@ public struct Look: Equatable {
         public var power: String
         public var lumMix: Double
 
-        public init(exposure: Double = 0, temp: Double = 0, tint: Double = 0,
-                    slope: String = "1,1,1", offset: String = "0,0,0", power: String = "1,1,1",
-                    lumMix: Double = 1) {
-            self.exposure = exposure; self.temp = temp; self.tint = tint
-            self.slope = slope; self.offset = offset; self.power = power; self.lumMix = lumMix
+        public init(
+            exposure: Double = 0, temp: Double = 0, tint: Double = 0,
+            slope: String = "1,1,1", offset: String = "0,0,0", power: String = "1,1,1",
+            lumMix: Double = 1
+        ) {
+            self.exposure = exposure
+            self.temp = temp
+            self.tint = tint
+            self.slope = slope
+            self.offset = offset
+            self.power = power
+            self.lumMix = lumMix
         }
 
         /// The three ASC CDL controls, which is what a colourist's wheels are. The names on the
         /// left are the wire format's; the names on the right are what the interface shows,
         /// because nobody reaches for "slope".
         public enum Wheel: String, CaseIterable {
-            case offset   // lift
-            case power    // gamma
-            case slope    // gain
+            case offset  // lift
+            case power  // gamma
+            case slope  // gain
 
             /// The value that does nothing. Lift adds, so its neutral is zero; the other two
             /// multiply or exponentiate, so theirs is one.
@@ -95,8 +102,10 @@ public struct Look: Equatable {
             }
         }
 
-        static func replacing(_ triple: (Double, Double, Double), _ channel: Int,
-                              with value: Double) -> (Double, Double, Double) {
+        static func replacing(
+            _ triple: (Double, Double, Double), _ channel: Int,
+            with value: Double
+        ) -> (Double, Double, Double) {
             var changed = triple
             switch channel {
             case 0: changed.0 = value
@@ -113,7 +122,8 @@ public struct Look: Equatable {
         }
 
         public mutating func setValue(_ wheel: Wheel, _ channel: Int, _ value: Double) {
-            let current = Self.parse(text(for: wheel)) ?? (wheel.neutral, wheel.neutral, wheel.neutral)
+            let current =
+                Self.parse(text(for: wheel)) ?? (wheel.neutral, wheel.neutral, wheel.neutral)
             let written = Self.format(Self.replacing(current, channel, with: value))
             switch wheel {
             case .slope: slope = written
@@ -125,9 +135,11 @@ public struct Look: Equatable {
         /// The arguments the engine's generator takes, spelled once so the interface and the
         /// render cannot disagree about which knob is which.
         public func generatorArguments(size: Int) -> [String] {
-            ["--stdout", "--exposure", String(exposure), "--temp", String(temp),
-             "--tint", String(tint), "--slope", slope, "--offset", offset, "--power", power,
-             "--lum-mix", String(lumMix), "--size", String(size)]
+            [
+                "--stdout", "--exposure", String(exposure), "--temp", String(temp),
+                "--tint", String(tint), "--slope", slope, "--offset", offset, "--power", power,
+                "--lum-mix", String(lumMix), "--size", String(size),
+            ]
         }
 
         /// True when this correction does nothing. The engine decides this for itself — the
@@ -162,10 +174,14 @@ public struct Look: Equatable {
         // Public only because a public initialiser's default argument has to be.
         public static let defaultTint = Correct.format(defaultTintValues)
 
-        public init(strength: Double = 0, threshold: Double = 1, radius: Double = 0.006,
-                    tint: String = Halation.defaultTint) {
-            self.strength = strength; self.threshold = threshold
-            self.radius = radius; self.tint = tint
+        public init(
+            strength: Double = 0, threshold: Double = 1, radius: Double = 0.006,
+            tint: String = Halation.defaultTint
+        ) {
+            self.strength = strength
+            self.threshold = threshold
+            self.radius = radius
+            self.tint = tint
         }
 
         public var isNeutral: Bool { strength == 0 }
@@ -276,10 +292,11 @@ public struct Look: Equatable {
             power: try text(correctBlock, "power", "correct.power"),
             lumMix: try number(correctBlock, "lum_mix", "correct.lum_mix"))
         let halationBlock = try block("halation")
-        halation = Halation(strength: try number(halationBlock, "strength", "halation.strength"),
-                            threshold: try number(halationBlock, "threshold", "halation.threshold"),
-                            radius: try number(halationBlock, "radius", "halation.radius"),
-                            tint: try text(halationBlock, "tint", "halation.tint"))
+        halation = Halation(
+            strength: try number(halationBlock, "strength", "halation.strength"),
+            threshold: try number(halationBlock, "threshold", "halation.threshold"),
+            radius: try number(halationBlock, "radius", "halation.radius"),
+            tint: try text(halationBlock, "tint", "halation.tint"))
         let lookBlock = try block("look")
         lookLUT = try text(lookBlock, "lut", "look.lut")
         lookStrength = try number(lookBlock, "strength", "look.strength")
@@ -287,26 +304,33 @@ public struct Look: Equatable {
         printLUT = try text(printBlock, "lut", "print.lut")
         printStrength = try number(printBlock, "strength", "print.strength")
         let toneBlock = try block("tone")
-        tone = Tone(gamma: try number(toneBlock, "gamma", "tone.gamma"),
-                    pivot: try number(toneBlock, "pivot", "tone.pivot"),
-                    contrast: try number(toneBlock, "contrast", "tone.contrast"),
-                    toe: try number(toneBlock, "toe", "tone.toe"),
-                    shoulder: try number(toneBlock, "shoulder", "tone.shoulder"),
-                    black: try number(toneBlock, "black", "tone.black"))
+        tone = Tone(
+            gamma: try number(toneBlock, "gamma", "tone.gamma"),
+            pivot: try number(toneBlock, "pivot", "tone.pivot"),
+            contrast: try number(toneBlock, "contrast", "tone.contrast"),
+            toe: try number(toneBlock, "toe", "tone.toe"),
+            shoulder: try number(toneBlock, "shoulder", "tone.shoulder"),
+            black: try number(toneBlock, "black", "tone.black"))
         let colourBlock = try block("colour")
-        colour = Colour(saturation: try number(colourBlock, "saturation", "colour.saturation"),
-                        warmth: try number(colourBlock, "warmth", "colour.warmth"))
+        colour = Colour(
+            saturation: try number(colourBlock, "saturation", "colour.saturation"),
+            warmth: try number(colourBlock, "warmth", "colour.warmth"))
         let grainBlock = try block("grain")
         grainStrength = try number(grainBlock, "strength", "grain.strength")
         grainShadows = try number(grainBlock, "shadows", "grain.shadows")
         grainHighlights = try number(grainBlock, "highlights", "grain.highlights")
-        stabilisationSmoothing = try number(try block("stabilisation"), "smoothing",
-                                            "stabilisation.smoothing")
-        matchReferenceYAVG = try number(try block("match"), "reference_yavg",
-                                        "match.reference_yavg")
+        stabilisationSmoothing = try number(
+            try block("stabilisation"), "smoothing",
+            "stabilisation.smoothing")
+        matchReferenceYAVG = try number(
+            try block("match"), "reference_yavg",
+            "match.reference_yavg")
 
         var extra = root
-        for known in ["correct", "halation", "look", "print", "tone", "colour", "grain", "stabilisation", "match"] {
+        for known in [
+            "correct", "halation", "look", "print", "tone", "colour", "grain", "stabilisation",
+            "match",
+        ] {
             extra.removeValue(forKey: known)
         }
         preserved = extra
@@ -330,12 +354,15 @@ public struct Look: Equatable {
             "toe": tone.toe, "shoulder": tone.shoulder, "black": tone.black,
         ]
         root["colour"] = ["saturation": colour.saturation, "warmth": colour.warmth]
-        root["grain"] = ["strength": grainStrength, "shadows": grainShadows,
-                         "highlights": grainHighlights]
+        root["grain"] = [
+            "strength": grainStrength, "shadows": grainShadows,
+            "highlights": grainHighlights,
+        ]
         root["stabilisation"] = ["smoothing": stabilisationSmoothing]
         root["match"] = ["reference_yavg": matchReferenceYAVG]
-        return try JSONSerialization.data(withJSONObject: root,
-                                          options: [.prettyPrinted, .sortedKeys])
+        return try JSONSerialization.data(
+            withJSONObject: root,
+            options: [.prettyPrinted, .sortedKeys])
     }
 
     /// A stage of the chain that can be switched off. The raw value is the inspector's title,
@@ -368,8 +395,9 @@ public struct Look: Equatable {
             case .filmLook: out.lookLUT = "none"
             case .print: out.printLUT = "none"
             case .tone:
-                out.tone = Tone(gamma: 1, pivot: tone.pivot, contrast: 1, toe: 0, shoulder: 0,
-                                black: 0)
+                out.tone = Tone(
+                    gamma: 1, pivot: tone.pivot, contrast: 1, toe: 0, shoulder: 0,
+                    black: 0)
             case .trims: out.colour = Colour(saturation: 1, warmth: 0)
             case .grain: out.grainStrength = 0
             }

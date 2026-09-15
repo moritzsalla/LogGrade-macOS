@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import GradeKit
 
 final class ToneCurveTests: XCTestCase {
@@ -16,8 +17,9 @@ final class ToneCurveTests: XCTestCase {
         XCTAssertEqual(curve.value(at: 1), 1, accuracy: 0.002)
         // Monotone, or the interface would draw something the eye reads as a fold.
         for i in 1..<curve.samples.count {
-            XCTAssertGreaterThanOrEqual(curve.samples[i], curve.samples[i - 1] - 1e-9,
-                                        "the curve reverses at \(i)")
+            XCTAssertGreaterThanOrEqual(
+                curve.samples[i], curve.samples[i - 1] - 1e-9,
+                "the curve reverses at \(i)")
         }
     }
 
@@ -30,10 +32,13 @@ final class ToneCurveTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: file) }
         let write = Process()
         write.executableURL = e.toneGenerator
-        write.arguments = [file.path, "--gamma", "2.02", "--pivot", "0.39", "--contrast", "1.09",
-                           "--toe", "0", "--shoulder", "0.1", "--black", "0.025"]
+        write.arguments = [
+            file.path, "--gamma", "2.02", "--pivot", "0.39", "--contrast", "1.09",
+            "--toe", "0", "--shoulder", "0.1", "--black", "0.025",
+        ]
         write.standardOutput = Pipe()
-        try write.run(); write.waitUntilExit()
+        try write.run()
+        write.waitUntilExit()
 
         let text = try String(contentsOf: file, encoding: .utf8)
         let fromFile = text.split(separator: "\n").compactMap { line -> Double? in
@@ -60,8 +65,10 @@ final class PreviewRendererTests: XCTestCase {
     func testRendersAStillThroughTheRealChainAndTheLookChangesIt() throws {
         let engine = try engineCheckout()
         try XCTSkipIf(!engine.preflight().isEmpty, "engine preflight not clean")
-        let clips = (try? FileManager.default.contentsOfDirectory(
-            at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil)) ?? []
+        let clips =
+            (try? FileManager.default.contentsOfDirectory(
+                at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil))
+            ?? []
         guard let clip = clips.first(where: { $0.pathExtension.lowercased() == "mov" }) else {
             throw XCTSkip("no footage in src/")
         }
@@ -99,9 +106,10 @@ final class PreviewRendererTests: XCTestCase {
             XCTFail("rendering a file that is not there should fail")
         } catch let failure as PreviewRenderer.Failure {
             // Named, and the engine's own code carried through rather than a generic message.
-            XCTAssertTrue(failure.description.contains("not there")
-                          || failure.description.contains("not found"),
-                          "got: \(failure.description)")
+            XCTAssertTrue(
+                failure.description.contains("not there")
+                    || failure.description.contains("not found"),
+                "got: \(failure.description)")
         }
     }
 }

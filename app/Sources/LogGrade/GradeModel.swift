@@ -1,6 +1,6 @@
 import AppKit
-import CoreGraphics
 import Combine
+import CoreGraphics
 import GradeKit
 import SwiftUI
 
@@ -141,9 +141,12 @@ final class GradeModel: ObservableObject {
         let printStrength: Double
 
         init(_ look: Look) {
-            correct = look.correct; halation = look.halation
-            lookLUT = look.lookLUT; lookStrength = look.lookStrength
-            printLUT = look.printLUT; printStrength = look.printStrength
+            correct = look.correct
+            halation = look.halation
+            lookLUT = look.lookLUT
+            lookStrength = look.lookStrength
+            printLUT = look.printLUT
+            printStrength = look.printStrength
         }
     }
 
@@ -246,7 +249,8 @@ final class GradeModel: ObservableObject {
 
     private func startGradeIfIdle() {
         guard !gradeInFlight, let wanted = pendingLook, let source = sourceImage,
-              let conversion = conversionCube else { return }
+            let conversion = conversionCube
+        else { return }
         pendingLook = nil
         gradeInFlight = true
         let measuredYAVG = matchedYAVG
@@ -256,8 +260,9 @@ final class GradeModel: ObservableObject {
         // slow rather than the picture being late.
         liveQueue.async { [weak self] in
             guard let self else { return }
-            let outcome = self.grade(wanted, source: source, conversion: conversion,
-                                     measuredYAVG: measuredYAVG)
+            let outcome = self.grade(
+                wanted, source: source, conversion: conversion,
+                measuredYAVG: measuredYAVG)
             DispatchQueue.main.async {
                 self.gradeInFlight = false
                 switch outcome {
@@ -266,9 +271,11 @@ final class GradeModel: ObservableObject {
                     self.preview.say(reason, failure: true)
                 case .graded(let image, let scopes, let tone, let curve):
                     self.publishCurve(curve, for: tone)
-                    self.preview.image = NSImage(cgImage: image,
-                                                 size: NSSize(width: image.width,
-                                                              height: image.height))
+                    self.preview.image = NSImage(
+                        cgImage: image,
+                        size: NSSize(
+                            width: image.width,
+                            height: image.height))
                     self.preview.scopes = scopes
                     self.preview.isLive = true
                     self.preview.say("Live preview. Release to render the exact frame.")
@@ -288,10 +295,14 @@ final class GradeModel: ObservableObject {
     }
 
     /// One live frame. Runs on `liveQueue`, where the caches it reads live.
-    private func grade(_ wanted: Look, source: CGImage, conversion: Cube3D,
-                       measuredYAVG: Double?) -> LiveOutcome {
+    private func grade(
+        _ wanted: Look, source: CGImage, conversion: Cube3D,
+        measuredYAVG: Double?
+    ) -> LiveOutcome {
         if correctionFor != wanted.correct {
-            correctionCube = wanted.correct.isNeutral ? nil
+            correctionCube =
+                wanted.correct.isNeutral
+                ? nil
                 : CorrectionCube.cube(for: wanted.correct, size: Self.correctionCubeSize)
             correctionFor = wanted.correct
         }
@@ -302,7 +313,8 @@ final class GradeModel: ObservableObject {
         }
         // Built against the SOURCE frame's height, because the look stores the glow's radius as a
         // fraction of the frame and the frame this grades is the preview-sized one.
-        let halation = LiveHalation(wanted.halation, frameLongEdge: max(source.width, source.height))
+        let halation = LiveHalation(
+            wanted.halation, frameLongEdge: max(source.width, source.height))
         if !wanted.halation.isNeutral && halation == nil {
             return .refused("That halation tint isn’t a value the engine accepts.")
         }
@@ -329,12 +341,13 @@ final class GradeModel: ObservableObject {
         if convertedFor == key, convertedFrom === source, let reused = convertedFrame {
             converted = reused
         } else {
-            let stages = LiveChain.colourStages(correction: correctionCube, halation: halation,
-                                                conversion: conversion,
-                                                look: lookStage,
-                                                lookStrength: wanted.lookStrength,
-                                                print: printStage,
-                                                printStrength: wanted.printStrength)
+            let stages = LiveChain.colourStages(
+                correction: correctionCube, halation: halation,
+                conversion: conversion,
+                look: lookStage,
+                lookStrength: wanted.lookStrength,
+                print: printStage,
+                printStrength: wanted.printStrength)
             converted = LiveChain.converted(source, through: stages)
             if let converted {
                 convertedFrame = converted
@@ -342,8 +355,9 @@ final class GradeModel: ObservableObject {
                 convertedFrom = source
             }
         }
-        let grade = LiveGrade(curve: curve, saturation: wanted.colour.saturation,
-                              warmth: wanted.colour.warmth)
+        let grade = LiveGrade(
+            curve: curve, saturation: wanted.colour.saturation,
+            warmth: wanted.colour.warmth)
         guard let graded = converted.flatMap({ LiveChain.graded($0, with: grade) }) else {
             return .failed
         }
@@ -367,14 +381,17 @@ final class GradeModel: ObservableObject {
     private func refreshSource(for clip: ClipList.Entry, seconds: Double, look: Look) {
         let frame: PreviewRenderer.Frame
         do {
-            frame = try renderer.render(clip: clip.url, seconds: seconds, look: look,
-                                        height: Self.sourceFrameHeight, stage: .source)
+            frame = try renderer.render(
+                clip: clip.url, seconds: seconds, look: look,
+                height: Self.sourceFrameHeight, stage: .source)
         } catch {
             sourceFailed("The live preview couldn’t read this clip: \(error)")
             return
         }
-        guard let image = NSImage(contentsOf: frame.url)?
-            .cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+        guard
+            let image = NSImage(contentsOf: frame.url)?
+                .cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else {
             sourceFailed("The live preview couldn’t decode the frame it rendered.")
             return
         }
@@ -426,8 +443,9 @@ final class GradeModel: ObservableObject {
         self.look = look
         self.availableLooks = engine.availableLooks()
         self.availablePrints = engine.availablePrints()
-        self.project = Project(presets: [.init(name: "shipped", look: look)],
-                               activePreset: "shipped")
+        self.project = Project(
+            presets: [.init(name: "shipped", look: look)],
+            activePreset: "shipped")
         let work = FileManager.default.temporaryDirectory
             .appendingPathComponent("loggrade-preview", isDirectory: true)
         self.workDirectory = work
@@ -440,14 +458,16 @@ final class GradeModel: ObservableObject {
         }
         refreshCurve()
 
-        for changed in [$selectedClip.map { _ in () }.eraseToAnyPublisher(),
-                        $isComparing.map { _ in () }.eraseToAnyPublisher(),
-                        $renderedLook.map { _ in () }.eraseToAnyPublisher(),
-                        $project.map { _ in () }.eraseToAnyPublisher(),
-                        $openStages.map { _ in () }.eraseToAnyPublisher(),
-                        $bypassed.map { _ in () }.eraseToAnyPublisher(),
-                        $frameSizes.map { _ in () }.eraseToAnyPublisher(),
-                        $projectURL.map { _ in () }.eraseToAnyPublisher()] {
+        for changed in [
+            $selectedClip.map { _ in () }.eraseToAnyPublisher(),
+            $isComparing.map { _ in () }.eraseToAnyPublisher(),
+            $renderedLook.map { _ in () }.eraseToAnyPublisher(),
+            $project.map { _ in () }.eraseToAnyPublisher(),
+            $openStages.map { _ in () }.eraseToAnyPublisher(),
+            $bypassed.map { _ in () }.eraseToAnyPublisher(),
+            $frameSizes.map { _ in () }.eraseToAnyPublisher(),
+            $projectURL.map { _ in () }.eraseToAnyPublisher(),
+        ] {
             changed.dropFirst()
                 .sink { [changes] in changes.objectWillChange.send() }
                 .store(in: &relayed)
@@ -494,9 +514,10 @@ final class GradeModel: ObservableObject {
     static func appliedTone(_ look: Look, measuredYAVG: Double?) -> Look.Tone {
         var tone = look.tone
         if let measuredYAVG {
-            tone.gamma = ToneCurve.solvedGamma(clipYAVG: measuredYAVG,
-                                               referenceYAVG: look.matchReferenceYAVG,
-                                               referenceGamma: tone.gamma)
+            tone.gamma = ToneCurve.solvedGamma(
+                clipYAVG: measuredYAVG,
+                referenceYAVG: look.matchReferenceYAVG,
+                referenceGamma: tone.gamma)
         }
         return tone
     }
@@ -595,14 +616,17 @@ final class GradeModel: ObservableObject {
         // be written is the PREVIOUS run's look still on disk, so carrying on renders a whole
         // shoot with a grade nobody is looking at.
         do {
-            try FileManager.default.createDirectory(at: workDirectory,
-                                                    withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: workDirectory,
+                withIntermediateDirectories: true)
             try effectiveLook.write(to: lookFile)
-            try FileManager.default.createDirectory(at: destination,
-                                                    withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: destination,
+                withIntermediateDirectories: true)
         } catch {
-            toaster?.show("exclamationmark.triangle.fill", "Export not started",
-                          String(describing: error))
+            toaster?.show(
+                "exclamationmark.triangle.fill", "Export not started",
+                String(describing: error))
             return
         }
         queue.clearFinished()
@@ -699,7 +723,8 @@ final class GradeModel: ObservableObject {
     /// report the same 3840x2160.
     var cropGeometry: CropGeometry? {
         guard let size = selectedFrameSize,
-              let target = project.delivery.cropBoxTarget(size) else { return nil }
+            let target = project.delivery.cropBoxTarget(size)
+        else { return nil }
         return CropGeometry(source: size, deliverable: target)
     }
 
@@ -711,15 +736,18 @@ final class GradeModel: ObservableObject {
     /// Whether the box on the picture is this clip's to place. False when the only cropping shapes
     /// carry `centre`, whose box is drawn fixed.
     var cropIsPerClip: Bool {
-        project.delivery.cropBoxTarget(selectedFrameSize)?.needsClipOffset(selectedFrameSize) ?? false
+        project.delivery.cropBoxTarget(selectedFrameSize)?.needsClipOffset(selectedFrameSize)
+            ?? false
     }
 
     /// Saves a shape from the editor through the engine's own resolver, or says why not. A copy is
     /// taken so a refusal does not publish a project change that did not happen.
     func saveShape(_ draft: ShapeDraft, replacing original: Deliverable?) -> ShapeRefusal? {
         var delivery = project.delivery
-        if let refusal = delivery.save(draft, replacing: original,
-                                       resolve: engine.resolveDeliverable) {
+        if let refusal = delivery.save(
+            draft, replacing: original,
+            resolve: engine.resolveDeliverable)
+        {
             return refusal
         }
         project.delivery = delivery

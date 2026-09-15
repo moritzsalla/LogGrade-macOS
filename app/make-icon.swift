@@ -38,23 +38,29 @@ func sweep(height: Int) -> URL {
         // Held deliberately low. The shipped look adds saturation on top of whatever it is given,
         // so a sweep that looks right going in comes out as neon: the first attempt produced a
         // fire-orange right-hand side rather than a film one.
-        let colour = NSColor(hue: 0.085 - 0.02 * CGFloat(t),
-                             saturation: CGFloat(0.10 + 0.22 * t),
-                             brightness: CGFloat(1 - 0.94 * t), alpha: 1)
-            .usingColorSpace(.deviceRGB)!
+        let colour = NSColor(
+            hue: 0.085 - 0.02 * CGFloat(t),
+            saturation: CGFloat(0.10 + 0.22 * t),
+            brightness: CGFloat(1 - 0.94 * t), alpha: 1
+        )
+        .usingColorSpace(.deviceRGB)!
         let r = UInt16(colour.redComponent * 65535)
         let g = UInt16(colour.greenComponent * 65535)
         let b = UInt16(colour.blueComponent * 65535)
         for x in 0..<width {
             let i = (y * width + x) * 4
-            px[i] = r; px[i + 1] = g; px[i + 2] = b
+            px[i] = r
+            px[i + 1] = g
+            px[i + 2] = b
         }
     }
-    let wide = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue
-        | CGBitmapInfo.byteOrder16Little.rawValue)
-    let ctx = CGContext(data: &px, width: width, height: height, bitsPerComponent: 16,
-                        bytesPerRow: width * 8, space: CGColorSpaceCreateDeviceRGB(),
-                        bitmapInfo: wide.rawValue)!
+    let wide = CGBitmapInfo(
+        rawValue: CGImageAlphaInfo.premultipliedLast.rawValue
+            | CGBitmapInfo.byteOrder16Little.rawValue)
+    let ctx = CGContext(
+        data: &px, width: width, height: height, bitsPerComponent: 16,
+        bytesPerRow: width * 8, space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: wide.rawValue)!
     let url = URL(fileURLWithPath: NSTemporaryDirectory())
         .appendingPathComponent("\(UUID().uuidString).png")
     try! NSBitmapImageRep(cgImage: ctx.makeImage()!)
@@ -83,17 +89,18 @@ func gradedChain(cst: String) -> String {
     // does not see a substitution that fails inside an argument list, so a look.json missing
     // `colour` built a graph with an empty saturation and exited 0.
     let script = #"""
-    source "$1/scripts/lib.sh"
-    ensure_tone_lut "$1" >/dev/null
-    sat="$(look .colour.saturation)"
-    warm="$(look .colour.warmth)"
-    grade_chain "$1/luts/tone/shipped.cube" "$sat" "$warm" \
-        "format=gbrp16le,lut3d=file='$2':interp=tetrahedral,"
-    """#
+        source "$1/scripts/lib.sh"
+        ensure_tone_lut "$1" >/dev/null
+        sat="$(look .colour.saturation)"
+        warm="$(look .colour.warmth)"
+        grade_chain "$1/luts/tone/shipped.cube" "$sat" "$warm" \
+            "format=gbrp16le,lut3d=file='$2':interp=tetrahedral,"
+        """#
     let bash = Process()
     bash.executableURL = URL(fileURLWithPath: "/bin/bash")
     bash.arguments = ["-c", script, "make-icon", root.path, cst]
-    let out = Pipe(), err = Pipe()
+    let out = Pipe()
+    let err = Pipe()
     bash.standardOutput = out
     bash.standardError = err
     do { try bash.run() } catch { fail("could not run bash: \(error)") }
@@ -133,13 +140,17 @@ func strip(graded: Bool, height: Int) -> [(CGFloat, CGFloat, CGFloat)] {
     // dies on a missing dylib. Searching in the obvious order finds it and nothing else.
     // A copy of `EngineLocation.toolSearchPaths`, because this is run as a standalone script and
     // cannot import GradeKit; change the two together.
-    let ffmpeg = ["\(NSHomeDirectory())/.local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg",
-                  "/usr/local/bin/ffmpeg"].first { FileManager.default.isExecutableFile(atPath: $0) }
+    let ffmpeg = [
+        "\(NSHomeDirectory())/.local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+    ].first { FileManager.default.isExecutableFile(atPath: $0) }
     guard let ffmpeg else { return [] }
     let run = Process()
     run.executableURL = URL(fileURLWithPath: ffmpeg)
-    run.arguments = ["-v", "error", "-y", "-i", source.path, "-filter_complex", graph,
-                     "-map", "[o]", "-frames:v", "1", "-pix_fmt", "rgb48be", out.path]
+    run.arguments = [
+        "-v", "error", "-y", "-i", source.path, "-filter_complex", graph,
+        "-map", "[o]", "-frames:v", "1", "-pix_fmt", "rgb48be", out.path,
+    ]
     let err = Pipe()
     run.standardError = err
     guard (try? run.run()) != nil else { return [] }
@@ -150,12 +161,15 @@ func strip(graded: Bool, height: Int) -> [(CGFloat, CGFloat, CGFloat)] {
         FileHandle.standardError.write(Data(text.utf8))
     }
     guard run.terminationStatus == 0,
-          let image = NSImage(contentsOf: out)?.cgImage(forProposedRect: nil, context: nil,
-                                                        hints: nil) else { return [] }
+        let image = NSImage(contentsOf: out)?.cgImage(
+            forProposedRect: nil, context: nil,
+            hints: nil)
+    else { return [] }
     var px = [UInt8](repeating: 0, count: image.width * image.height * 4)
-    let ctx = CGContext(data: &px, width: image.width, height: image.height, bitsPerComponent: 8,
-                        bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    let ctx = CGContext(
+        data: &px, width: image.width, height: image.height, bitsPerComponent: 8,
+        bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
     ctx?.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
     return (0..<image.height).map { y in
         let i = (y * image.width + image.width / 2) * 4
@@ -163,13 +177,18 @@ func strip(graded: Bool, height: Int) -> [(CGFloat, CGFloat, CGFloat)] {
     }
 }
 
-func draw(size: Int, flat: [(CGFloat, CGFloat, CGFloat)],
-          graded: [(CGFloat, CGFloat, CGFloat)]) -> Data {
+func draw(
+    size: Int, flat: [(CGFloat, CGFloat, CGFloat)],
+    graded: [(CGFloat, CGFloat, CGFloat)]
+) -> Data {
     let s = CGFloat(size)
     let space = CGColorSpaceCreateDeviceRGB()
-    guard let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8,
-                              bytesPerRow: 0, space: space,
-                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+    guard
+        let ctx = CGContext(
+            data: nil, width: size, height: size, bitsPerComponent: 8,
+            bytesPerRow: 0, space: space,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else {
         fatalError("no context at \(size)")
     }
     ctx.setAllowsAntialiasing(true)
@@ -181,8 +200,10 @@ func draw(size: Int, flat: [(CGFloat, CGFloat, CGFloat)],
     let rect = CGRect(x: inset, y: inset, width: s - inset * 2, height: s - inset * 2)
     let radius = rect.width * 0.225
     ctx.saveGState()
-    ctx.addPath(CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius,
-                       transform: nil))
+    ctx.addPath(
+        CGPath(
+            roundedRect: rect, cornerWidth: radius, cornerHeight: radius,
+            transform: nil))
     ctx.clip()
 
     // ONE FIELD, NOT TWO PANELS. Down the icon it runs from light to black, which is the tone
@@ -191,11 +212,13 @@ func draw(size: Int, flat: [(CGFloat, CGFloat, CGFloat)],
     // that grading is a continuous move, and a line down the middle made it look like a comparison
     // slider instead.
     if !flat.isEmpty, !graded.isEmpty {
-        let w = Int(rect.width.rounded()), h = Int(rect.height.rounded())
+        let w = Int(rect.width.rounded())
+        let h = Int(rect.height.rounded())
         var px = [UInt8](repeating: 255, count: max(1, w * h * 4))
         for y in 0..<h {
             let row = min(flat.count - 1, y * flat.count / max(1, h))
-            let a = flat[row], b = graded[min(graded.count - 1, row)]
+            let a = flat[row]
+            let b = graded[min(graded.count - 1, row)]
             for x in 0..<w {
                 let t = CGFloat(x) / CGFloat(max(1, w - 1))
                 let i = (y * w + x) * 4
@@ -204,10 +227,12 @@ func draw(size: Int, flat: [(CGFloat, CGFloat, CGFloat)],
                 px[i + 2] = UInt8(max(0, min(255, (a.2 + (b.2 - a.2) * t) * 255)))
             }
         }
-        if let field = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8,
-                                 bytesPerRow: w * 4, space: space,
-                                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)?
-            .makeImage() {
+        if let field = CGContext(
+            data: &px, width: w, height: h, bitsPerComponent: 8,
+            bytesPerRow: w * 4, space: space,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)?
+            .makeImage()
+        {
             ctx.interpolationQuality = .high
             ctx.draw(field, in: rect)
         }
@@ -215,8 +240,10 @@ func draw(size: Int, flat: [(CGFloat, CGFloat, CGFloat)],
     ctx.restoreGState()
 
     // A hairline, so the shape still reads against a white background.
-    ctx.addPath(CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius,
-                       transform: nil))
+    ctx.addPath(
+        CGPath(
+            roundedRect: rect, cornerWidth: radius, cornerHeight: radius,
+            transform: nil))
     ctx.setStrokeColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.14))
     ctx.setLineWidth(max(1, s * 0.006))
     ctx.strokePath()
@@ -238,7 +265,8 @@ let iconset = URL(fileURLWithPath: "dist/AppIcon.iconset")
 try? FileManager.default.removeItem(at: iconset)
 try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
 for base in [16, 32, 128, 256, 512] {
-    try draw(size: base, flat: flat, graded: graded).write(to: iconset.appendingPathComponent("icon_\(base)x\(base).png"))
+    try draw(size: base, flat: flat, graded: graded).write(
+        to: iconset.appendingPathComponent("icon_\(base)x\(base).png"))
     try draw(size: base * 2, flat: flat, graded: graded)
         .write(to: iconset.appendingPathComponent("icon_\(base)x\(base)@2x.png"))
 }

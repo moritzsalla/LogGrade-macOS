@@ -22,7 +22,8 @@ final class LivePreview: ObservableObject {
     @Published var previous: NSImage?
     /// What an exact frame is, said beside it. Spelled once: the model says it when a render lands
     /// and the view shows it before any has, and two copies of a claim about the render drift.
-    static let exactFrameNote = "This is the grade. Grain, sharpening, denoise, the stabiliser "
+    static let exactFrameNote =
+        "This is the grade. Grain, sharpening, denoise, the stabiliser "
         + "and dither are added when you convert."
 
     @Published var status = ""

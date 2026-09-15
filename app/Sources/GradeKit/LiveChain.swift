@@ -64,7 +64,10 @@ public struct LiveChain {
         let cube: Cube3D
         let strength: Float
 
-        init(_ cube: Cube3D) { self.cube = cube; strength = 1 }
+        init(_ cube: Cube3D) {
+            self.cube = cube
+            strength = 1
+        }
 
         /// Nil for an absent cube or a strength of zero, which the engine leaves out of the graph.
         init?(_ cube: Cube3D?, _ strength: Float) {
@@ -80,12 +83,15 @@ public struct LiveChain {
         }
     }
 
-    public static func colourStages(correction: Cube3D?, halation: LiveHalation? = nil,
-                                    conversion: Cube3D, look: Cube3D?, lookStrength: Double = 1,
-                                    print: Cube3D? = nil, printStrength: Double = 1) -> ColourStages {
-        ColourStages(correction: correction, halation: halation, conversion: conversion, look: look,
-                     lookStrength: Float(lookStrength), print: print,
-                     printStrength: Float(printStrength))
+    public static func colourStages(
+        correction: Cube3D?, halation: LiveHalation? = nil,
+        conversion: Cube3D, look: Cube3D?, lookStrength: Double = 1,
+        print: Cube3D? = nil, printStrength: Double = 1
+    ) -> ColourStages {
+        ColourStages(
+            correction: correction, halation: halation, conversion: conversion, look: look,
+            lookStrength: Float(lookStrength), print: print,
+            printStrength: Float(printStrength))
     }
 
     /// The source through the colour stages only: correction, halation, conversion, look, print.
@@ -101,16 +107,21 @@ public struct LiveChain {
     /// Sixteen bits IN because the source is log — its shadows carry most of the information, and
     /// quantising them before the conversion stretches them is where a preview would visibly band.
     public static func converted(_ image: CGImage, through stages: ColourStages) -> Converted? {
-        let width = image.width, height = image.height
+        let width = image.width
+        let height = image.height
         guard width > 0, height > 0 else { return nil }
 
         var source = [UInt16](repeating: 0, count: width * height * 4)
-        let wide = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue
-            | CGBitmapInfo.byteOrder16Little.rawValue)
-        guard let readContext = CGContext(data: &source, width: width, height: height,
-                                          bitsPerComponent: 16, bytesPerRow: width * 8,
-                                          space: CGColorSpaceCreateDeviceRGB(),
-                                          bitmapInfo: wide.rawValue) else { return nil }
+        let wide = CGBitmapInfo(
+            rawValue: CGImageAlphaInfo.premultipliedLast.rawValue
+                | CGBitmapInfo.byteOrder16Little.rawValue)
+        guard
+            let readContext = CGContext(
+                data: &source, width: width, height: height,
+                bitsPerComponent: 16, bytesPerRow: width * 8,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: wide.rawValue)
+        else { return nil }
         readContext.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
 
         var rgb = [UInt8](repeating: 255, count: width * height * 4)
@@ -122,10 +133,13 @@ public struct LiveChain {
                 log.withUnsafeMutableBufferPointer { out in
                     Self.inBands(height: height) { rows in
                         for i in (rows.lowerBound * width)..<(rows.upperBound * width) {
-                            var c = SIMD3(Float(src[i * 4]) * scale, Float(src[i * 4 + 1]) * scale,
-                                          Float(src[i * 4 + 2]) * scale)
+                            var c = SIMD3(
+                                Float(src[i * 4]) * scale, Float(src[i * 4 + 1]) * scale,
+                                Float(src[i * 4 + 2]) * scale)
                             if let correction { c = correction.sample(c) }
-                            out[i * 3] = c.x; out[i * 3 + 1] = c.y; out[i * 3 + 2] = c.z
+                            out[i * 3] = c.x
+                            out[i * 3 + 1] = c.y
+                            out[i * 3 + 2] = c.z
                         }
                     }
                 }
@@ -156,8 +170,9 @@ public struct LiveChain {
                     for y in rows {
                         for x in 0..<width {
                             let s = (y * width + x) * 4
-                            var c = SIMD3(Float(src[s]) * scale, Float(src[s + 1]) * scale,
-                                          Float(src[s + 2]) * scale)
+                            var c = SIMD3(
+                                Float(src[s]) * scale, Float(src[s + 1]) * scale,
+                                Float(src[s + 2]) * scale)
                             for stage in cubes { c = stage.sample(c) }
                             Self.store(c, in: out, at: s)
                         }
@@ -169,8 +184,10 @@ public struct LiveChain {
     }
 
     @inline(__always)
-    private static func store(_ c: SIMD3<Float>, in out: UnsafeMutableBufferPointer<UInt8>,
-                              at offset: Int) {
+    private static func store(
+        _ c: SIMD3<Float>, in out: UnsafeMutableBufferPointer<UInt8>,
+        at offset: Int
+    ) {
         out[offset] = UInt8(min(255, max(0, c.x * 255)))
         out[offset + 1] = UInt8(min(255, max(0, c.y * 255)))
         out[offset + 2] = UInt8(min(255, max(0, c.z * 255)))
@@ -199,10 +216,13 @@ public struct LiveChain {
                     for y in rows {
                         for x in 0..<width {
                             let i = (y * width + x) * 4
-                            let r = buffer[i], g = buffer[i + 1], b = buffer[i + 2]
-                            let pixel = grade.merge(r: Double(r), g: Double(g), b: Double(b),
-                                                    lr: curve[Int(r)], lg: curve[Int(g)],
-                                                    lb: curve[Int(b)])
+                            let r = buffer[i]
+                            let g = buffer[i + 1]
+                            let b = buffer[i + 2]
+                            let pixel = grade.merge(
+                                r: Double(r), g: Double(g), b: Double(b),
+                                lr: curve[Int(r)], lg: curve[Int(g)],
+                                lb: curve[Int(b)])
                             buffer[i] = UInt8(pixel.0)
                             buffer[i + 1] = UInt8(pixel.1)
                             buffer[i + 2] = UInt8(pixel.2)
@@ -212,11 +232,13 @@ public struct LiveChain {
             }
         }
         return out.withUnsafeMutableBytes { buffer -> CGImage? in
-            guard let context = CGContext(data: buffer.baseAddress, width: converted.width,
-                                          height: converted.height, bitsPerComponent: 8,
-                                          bytesPerRow: converted.width * 4,
-                                          space: CGColorSpaceCreateDeviceRGB(),
-                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            guard
+                let context = CGContext(
+                    data: buffer.baseAddress, width: converted.width,
+                    height: converted.height, bitsPerComponent: 8,
+                    bytesPerRow: converted.width * 4,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
             else { return nil }
             return context.makeImage()
         }

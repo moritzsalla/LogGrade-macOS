@@ -39,8 +39,9 @@ public struct Scopes: Equatable {
 
     /// Named on its own because it is also the interface's accent, and an accent that drifted from
     /// the target it claims to be would be a colour the tool does not know the value of.
-    public static let plateYellow = Reference(name: "plate yellow", ral: "RAL 1021",
-                                              rgb: (0.953, 0.765, 0.000))
+    public static let plateYellow = Reference(
+        name: "plate yellow", ral: "RAL 1021",
+        rgb: (0.953, 0.765, 0.000))
 
     public static let references: [Reference] = [
         plateYellow,
@@ -55,7 +56,9 @@ public struct Scopes: Equatable {
     }
 
     /// Where a colour lands on the vectorscope, as a fraction of the grid in each axis.
-    public static func vectorPosition(_ r: Double, _ g: Double, _ b: Double) -> (x: Double, y: Double) {
+    public static func vectorPosition(_ r: Double, _ g: Double, _ b: Double) -> (
+        x: Double, y: Double
+    ) {
         let c = chroma(r, g, b)
         // Chroma runs -0.5...0.5 for legal colour, so the centre is neutral and the corners are
         // the most saturated a Rec.709 signal can be.
@@ -65,20 +68,25 @@ public struct Scopes: Equatable {
     /// Reads a rendered frame. Sampled rather than exhaustive: a 1440-tall still is two million
     /// pixels and a scope needs a shape, not a census. Every nth pixel, deterministically.
     public static func measure(_ image: CGImage, stride sampleStride: Int = 4) -> Scopes {
-        let width = image.width, height = image.height
+        let width = image.width
+        let height = image.height
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         let space = CGColorSpaceCreateDeviceRGB()
-        guard let context = CGContext(data: &pixels, width: width, height: height,
-                                      bitsPerComponent: 8, bytesPerRow: width * 4,
-                                      space: space,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard
+            let context = CGContext(
+                data: &pixels, width: width, height: height,
+                bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
         else {
             return Scopes(luma: [], red: [], green: [], blue: [], vector: [], sampleCount: 0)
         }
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
 
         var luma = [Int](repeating: 0, count: 256)
-        var red = luma, green = luma, blue = luma
+        var red = luma
+        var green = luma
+        var blue = luma
         var vector = [Int](repeating: 0, count: vectorSize * vectorSize)
         var count = 0
         var index = 0
@@ -99,8 +107,9 @@ public struct Scopes: Equatable {
             count += 1
             index += step
         }
-        return Scopes(luma: luma, red: red, green: green, blue: blue, vector: vector,
-                      sampleCount: count)
+        return Scopes(
+            luma: luma, red: red, green: green, blue: blue, vector: vector,
+            sampleCount: count)
     }
 
     /// The brightest level with anything in it, which is what tells you whether an image clips.

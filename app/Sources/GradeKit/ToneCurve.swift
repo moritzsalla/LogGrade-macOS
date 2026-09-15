@@ -46,8 +46,10 @@ public struct ToneCurve: Equatable {
     /// or previewing the slider value directly shows a curve nothing renders: on this footage the
     /// solve moves 2.02 by enough to be obvious in the shadows. This runs the engine's own solver;
     /// the in-process port below is what the interface calls, and this is what it is held to.
-    public static func solvedGamma(using solver: URL, clipYAVG: Double, referenceYAVG: Double,
-                                   referenceGamma: Double) -> Double {
+    public static func solvedGamma(
+        using solver: URL, clipYAVG: Double, referenceYAVG: Double,
+        referenceGamma: Double
+    ) -> Double {
         let process = Process()
         process.executableURL = solver
         process.arguments = [String(clipYAVG), String(referenceYAVG), String(referenceGamma)]
@@ -60,8 +62,9 @@ public struct ToneCurve: Equatable {
         let data = out.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard process.terminationStatus == 0,
-              let value = Double(String(decoding: data, as: UTF8.self)
-                  .trimmingCharacters(in: .whitespacesAndNewlines))
+            let value = Double(
+                String(decoding: data, as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines))
         else { return referenceGamma }
         return value
     }
@@ -108,8 +111,10 @@ public struct ToneCurve: Equatable {
     /// Ten lines of arithmetic that used to be a process launch on the drag path. The clamp and
     /// the two domain guards are the generator's, and `ToneCurvePortTests` holds the two against
     /// each other across the range including both guards.
-    public static func solvedGamma(clipYAVG: Double, referenceYAVG: Double,
-                                   referenceGamma: Double, peak: Double = 1023) -> Double {
+    public static func solvedGamma(
+        clipYAVG: Double, referenceYAVG: Double,
+        referenceGamma: Double, peak: Double = 1023
+    ) -> Double {
         let y = clipYAVG / peak
         let r = referenceYAVG / peak
         // Outside the open unit interval there is no solve: log(0) raises and y == 1 makes the
@@ -124,22 +129,26 @@ public struct ToneCurve: Equatable {
     public static func generate(using generator: URL, tone: Look.Tone) throws -> ToneCurve {
         let process = Process()
         process.executableURL = generator
-        process.arguments = ["--stdout",
-                             "--gamma", String(tone.gamma),
-                             "--pivot", String(tone.pivot),
-                             "--contrast", String(tone.contrast),
-                             "--toe", String(tone.toe),
-                             "--shoulder", String(tone.shoulder),
-                             "--black", String(tone.black)]
-        let out = Pipe(), err = Pipe()
+        process.arguments = [
+            "--stdout",
+            "--gamma", String(tone.gamma),
+            "--pivot", String(tone.pivot),
+            "--contrast", String(tone.contrast),
+            "--toe", String(tone.toe),
+            "--shoulder", String(tone.shoulder),
+            "--black", String(tone.black),
+        ]
+        let out = Pipe()
+        let err = Pipe()
         process.standardOutput = out
         process.standardError = err
         do { try process.run() } catch {
             throw Failure.generatorFailed(String(describing: error))
         }
         let data = out.fileHandleForReading.readDataToEndOfFile()
-        let errorText = String(decoding: err.fileHandleForReading.readDataToEndOfFile(),
-                               as: UTF8.self)
+        let errorText = String(
+            decoding: err.fileHandleForReading.readDataToEndOfFile(),
+            as: UTF8.self)
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { throw Failure.generatorFailed(errorText) }
 

@@ -52,15 +52,15 @@ public struct EngineLocation {
                 return "\(name) is not on any path this app knows about"
             case .pythonDoesNotRun(let u):
                 return """
-                python3 at \(u.path) does not run. On a Mac without the command line developer \
-                tools it is only a placeholder. Install them with: xcode-select --install
-                """
+                    python3 at \(u.path) does not run. On a Mac without the command line developer \
+                    tools it is only a placeholder. Install them with: xcode-select --install
+                    """
             case .appleCubeAbsent(let u):
                 return """
-                Apple's conversion LUT is missing: \(u.path)
-                It is deliberately not committed — Apple's licence does not permit \
-                redistributing it. See luts/apple/SOURCE.txt.
-                """
+                    Apple's conversion LUT is missing: \(u.path)
+                    It is deliberately not committed — Apple's licence does not permit \
+                    redistributing it. See luts/apple/SOURCE.txt.
+                    """
             }
         }
     }
@@ -78,9 +78,11 @@ public struct EngineLocation {
 
     /// Absolute path for a tool, or nil. Searched explicitly rather than by asking the shell,
     /// because the shell a GUI process would spawn has the same impoverished PATH it does.
-    public static func resolveTool(_ name: String,
-                                  extraPaths: [String] = [],
-                                  fileManager: FileManager = .default) -> URL? {
+    public static func resolveTool(
+        _ name: String,
+        extraPaths: [String] = [],
+        fileManager: FileManager = .default
+    ) -> URL? {
         var dirs = extraPaths + toolSearchPaths
         if let path = ProcessInfo.processInfo.environment["PATH"] {
             dirs += path.split(separator: ":").map(String.init)
@@ -103,8 +105,10 @@ public struct EngineLocation {
     }
 
     /// The cube for a look's stem, or nil for "none" and for a stem that is not on disk.
-    public func lookCube(named stem: String,
-                         fileManager: FileManager = .default) -> URL? {
+    public func lookCube(
+        named stem: String,
+        fileManager: FileManager = .default
+    ) -> URL? {
         guard stem != "none", !stem.isEmpty else { return nil }
         let url = lookCubes.appendingPathComponent("\(stem).cube")
         return fileManager.fileExists(atPath: url.path) ? url : nil
@@ -118,8 +122,10 @@ public struct EngineLocation {
     }
 
     /// The print-film cube for a stem, resolved exactly as a look's is but from `luts/print/`.
-    public func printCube(named stem: String,
-                          fileManager: FileManager = .default) -> URL? {
+    public func printCube(
+        named stem: String,
+        fileManager: FileManager = .default
+    ) -> URL? {
         guard stem != "none", !stem.isEmpty else { return nil }
         let url = printCubes.appendingPathComponent("\(stem).cube")
         return fileManager.fileExists(atPath: url.path) ? url : nil
@@ -130,8 +136,10 @@ public struct EngineLocation {
     }
 
     private func stems(in folder: URL, fileManager: FileManager) -> [String] {
-        let urls = (try? fileManager.contentsOfDirectory(at: folder,
-                                                         includingPropertiesForKeys: nil)) ?? []
+        let urls =
+            (try? fileManager.contentsOfDirectory(
+                at: folder,
+                includingPropertiesForKeys: nil)) ?? []
         return urls.filter { $0.pathExtension == "cube" }
             .map { $0.deletingPathExtension().lastPathComponent }
             .sorted()
@@ -195,25 +203,33 @@ public struct EngineLocation {
     /// 3. Upwards from the executable, which is how `swift run` inside the repo finds it.
     /// 4. Upwards from the working directory, last, because it is the one a launched app lies
     ///    about.
-    public static func locate(environment: [String: String] = ProcessInfo.processInfo.environment,
-                              executable: URL? = Bundle.main.executableURL,
-                              workingDirectory: URL = URL(fileURLWithPath:
-                                  FileManager.default.currentDirectoryPath),
-                              fileManager: FileManager = .default) -> EngineLocation? {
+    public static func locate(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        executable: URL? = Bundle.main.executableURL,
+        workingDirectory: URL = URL(
+            fileURLWithPath:
+                FileManager.default.currentDirectoryPath),
+        fileManager: FileManager = .default
+    ) -> EngineLocation? {
         if let override = environment["LOGGRADE_ENGINE"], !override.isEmpty {
             let candidate = EngineLocation(root: URL(fileURLWithPath: override))
             if candidate.looksLikeAnEngine(fileManager: fileManager) { return candidate }
         }
         if let executable {
             // Contents/MacOS/LogGrade -> Contents/Resources/engine
-            let bundled = executable
+            let bundled =
+                executable
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
                 .appendingPathComponent("Resources/engine")
             let candidate = EngineLocation(root: bundled)
             if candidate.looksLikeAnEngine(fileManager: fileManager) { return candidate }
-            if let up = discover(from: executable.deletingLastPathComponent(),
-                                 fileManager: fileManager) { return up }
+            if let up = discover(
+                from: executable.deletingLastPathComponent(),
+                fileManager: fileManager)
+            {
+                return up
+            }
         }
         return discover(from: workingDirectory, fileManager: fileManager)
     }
@@ -226,8 +242,10 @@ public struct EngineLocation {
 
     /// Walks up from a starting directory looking for the engine. Used by the tests to find the
     /// checkout they live in, and by a debug build pointed at a working copy.
-    public static func discover(from start: URL,
-                                fileManager: FileManager = .default) -> EngineLocation? {
+    public static func discover(
+        from start: URL,
+        fileManager: FileManager = .default
+    ) -> EngineLocation? {
         var dir = start.standardizedFileURL
         while dir.path != "/" {
             let candidate = EngineLocation(root: dir)

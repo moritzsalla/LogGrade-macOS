@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+
 @testable import GradeKit
 
 /// `Cube3D.sample` against ffmpeg's `lut3d`, on a cube chosen to make them disagree.
@@ -14,9 +15,11 @@ import XCTest
 final class Cube3DTests: XCTestCase {
     /// A fixed sequence, so a failure is reproducible and a rerun asks the same question.
     private struct Random {
-        var state: UInt64 = 0x2545F4914F6CDD1D
+        var state: UInt64 = 0x2545_F491_4F6C_DD1D
         mutating func next() -> Double {
-            state ^= state << 13; state ^= state >> 7; state ^= state << 17
+            state ^= state << 13
+            state ^= state >> 7
+            state ^= state << 17
             return Double(state % 1_000_000) / 1_000_000
         }
     }
@@ -55,18 +58,24 @@ final class Cube3DTests: XCTestCase {
             input[i * 4 + 1] = UInt16(rgb.y * 65535)
             input[i * 4 + 2] = UInt16(rgb.z * 65535)
             // Sampled at the QUANTISED value, so this measures interpolation and not rounding.
-            expected[i] = cube.sample(SIMD3(Float(UInt16(rgb.x * 65535)) / 65535,
-                                            Float(UInt16(rgb.y * 65535)) / 65535,
-                                            Float(UInt16(rgb.z * 65535)) / 65535))
+            expected[i] = cube.sample(
+                SIMD3(
+                    Float(UInt16(rgb.x * 65535)) / 65535,
+                    Float(UInt16(rgb.y * 65535)) / 65535,
+                    Float(UInt16(rgb.z * 65535)) / 65535))
         }
-        let wide = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue
-            | CGBitmapInfo.byteOrder16Little.rawValue)
-        let context = CGContext(data: &input, width: side, height: side, bitsPerComponent: 16,
-                                bytesPerRow: side * 8, space: CGColorSpaceCreateDeviceRGB(),
-                                bitmapInfo: wide.rawValue)
+        let wide = CGBitmapInfo(
+            rawValue: CGImageAlphaInfo.premultipliedLast.rawValue
+                | CGBitmapInfo.byteOrder16Little.rawValue)
+        let context = CGContext(
+            data: &input, width: side, height: side, bitsPerComponent: 16,
+            bytesPerRow: side * 8, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: wide.rawValue)
         guard let probe = context?.makeImage(),
-              let png = NSBitmapImageRep(cgImage: probe).representation(using: .png,
-                                                                       properties: [:]) else {
+            let png = NSBitmapImageRep(cgImage: probe).representation(
+                using: .png,
+                properties: [:])
+        else {
             return XCTFail("could not build the probe")
         }
         let probeFile = work.appendingPathComponent("probe.png")
@@ -75,21 +84,27 @@ final class Cube3DTests: XCTestCase {
 
         let run = Process()
         run.executableURL = ffmpeg
-        run.arguments = ["-v", "error", "-y", "-i", probeFile.path,
-                         "-vf", "lut3d=file='\(cubeFile.path)':interp=tetrahedral",
-                         "-pix_fmt", "rgb48be", outFile.path]
+        run.arguments = [
+            "-v", "error", "-y", "-i", probeFile.path,
+            "-vf", "lut3d=file='\(cubeFile.path)':interp=tetrahedral",
+            "-pix_fmt", "rgb48be", outFile.path,
+        ]
         run.standardError = Pipe()
-        try run.run(); run.waitUntilExit()
+        try run.run()
+        run.waitUntilExit()
         try XCTSkipIf(run.terminationStatus != 0, "this ffmpeg would not apply the cube")
 
-        guard let rendered = NSImage(contentsOf: outFile)?
-            .cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+        guard
+            let rendered = NSImage(contentsOf: outFile)?
+                .cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else {
             return XCTFail("could not read ffmpeg's output")
         }
         var out = [UInt16](repeating: 0, count: side * side * 4)
-        let readBack = CGContext(data: &out, width: side, height: side, bitsPerComponent: 16,
-                                 bytesPerRow: side * 8, space: CGColorSpaceCreateDeviceRGB(),
-                                 bitmapInfo: wide.rawValue)
+        let readBack = CGContext(
+            data: &out, width: side, height: side, bitsPerComponent: 16,
+            bytesPerRow: side * 8, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: wide.rawValue)
         readBack?.draw(rendered, in: CGRect(x: 0, y: 0, width: side, height: side))
 
         var worst = 0.0
@@ -107,8 +122,9 @@ final class Cube3DTests: XCTestCase {
     func testItReadsTheCubesTheRenderApplies() throws {
         let engine = try engineCheckout()
         // Apple's licence keeps this cube out of the repo, so a fresh clone does not have it.
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: engine.appleCube.path),
-                          "Apple's conversion cube is absent — see luts/apple/SOURCE.txt")
+        try XCTSkipUnless(
+            FileManager.default.fileExists(atPath: engine.appleCube.path),
+            "Apple's conversion cube is absent — see luts/apple/SOURCE.txt")
         let conversion = try Cube3D(contentsOf: engine.appleCube)
         XCTAssertEqual(conversion.size, 65)
         XCTAssertEqual(conversion.samples.count, 65 * 65 * 65)

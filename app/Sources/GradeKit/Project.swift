@@ -18,7 +18,10 @@ public struct Project: Equatable {
     public struct Preset: Equatable {
         public var name: String
         public var look: Look
-        public init(name: String, look: Look) { self.name = name; self.look = look }
+        public init(name: String, look: Look) {
+            self.name = name
+            self.look = look
+        }
     }
 
     /// What is decided per clip, and nowhere else.
@@ -40,8 +43,10 @@ public struct Project: Equatable {
         /// and the project reader each fell back to their own `true`.
         public static let stabilisesByDefault = true
 
-        public init(cropOffset: Int? = nil, previewSeconds: Double = 1,
-                    stabilise: Bool = stabilisesByDefault, lookOverride: Look? = nil) {
+        public init(
+            cropOffset: Int? = nil, previewSeconds: Double = 1,
+            stabilise: Bool = stabilisesByDefault, lookOverride: Look? = nil
+        ) {
             self.cropOffset = cropOffset
             self.previewSeconds = previewSeconds
             self.stabilise = stabilise
@@ -61,9 +66,13 @@ public struct Project: Equatable {
         /// warns about anything larger.
         public static let defaultHeight = 1920
 
-        public init(targets: [Deliverable] = [.reels], height: Int = defaultHeight,
-                    fps: Int? = nil) {
-            self.targets = targets; self.height = height; self.fps = fps
+        public init(
+            targets: [Deliverable] = [.reels], height: Int = defaultHeight,
+            fps: Int? = nil
+        ) {
+            self.targets = targets
+            self.height = height
+            self.fps = fps
         }
 
         /// Whether anything selected crops this clip, and so has a box to draw. Per clip, because
@@ -116,10 +125,11 @@ public struct Project: Equatable {
                 targets.append(deliverable)
                 return
             }
-            let insertAt = targets.firstIndex {
-                guard let other = Deliverable.presets.firstIndex(of: $0) else { return true }
-                return other > rank
-            } ?? targets.count
+            let insertAt =
+                targets.firstIndex {
+                    guard let other = Deliverable.presets.firstIndex(of: $0) else { return true }
+                    return other > rank
+                } ?? targets.count
             targets.insert(deliverable, at: insertAt)
         }
 
@@ -147,8 +157,10 @@ public struct Project: Equatable {
     public var clips: [String: ClipSettings]
     public var outputDirectory: URL?
 
-    public init(presets: [Preset], activePreset: String, delivery: Delivery = Delivery(),
-                clips: [String: ClipSettings] = [:], outputDirectory: URL? = nil) {
+    public init(
+        presets: [Preset], activePreset: String, delivery: Delivery = Delivery(),
+        clips: [String: ClipSettings] = [:], outputDirectory: URL? = nil
+    ) {
         self.presets = presets
         self.activePreset = activePreset
         self.delivery = delivery
@@ -255,15 +267,17 @@ extension Project.Delivery {
         if let raw = d["targets"] as? [[String: Any]] {
             let parsed: [Deliverable] = raw.compactMap {
                 guard let name = $0["name"] as? String,
-                      let w = ($0["aspect_width"] as? NSNumber)?.intValue,
-                      let h = ($0["aspect_height"] as? NSNumber)?.intValue,
-                      w > 0, h > 0 else { return nil }
+                    let w = ($0["aspect_width"] as? NSNumber)?.intValue,
+                    let h = ($0["aspect_height"] as? NSNumber)?.intValue,
+                    w > 0, h > 0
+                else { return nil }
                 // A file without the key was written before a shape could carry an offset, and
                 // every shape then followed the clip's offset, which is what nil still means.
                 let offset: DeliverableCropOffset? =
                     ($0["crop_offset"] as? String) == "centre" ? .centre : nil
-                return Deliverable(name: name, aspectWidth: w, aspectHeight: h,
-                                   cropOffset: offset)
+                return Deliverable(
+                    name: name, aspectWidth: w, aspectHeight: h,
+                    cropOffset: offset)
             }
             return parsed
         }
@@ -304,8 +318,10 @@ extension Project {
         }
         var deliveryBlock: [String: Any] = [
             "targets": delivery.targets.map { d in
-                var entry: [String: Any] = ["name": d.name, "aspect_width": d.aspectWidth,
-                                            "aspect_height": d.aspectHeight]
+                var entry: [String: Any] = [
+                    "name": d.name, "aspect_width": d.aspectWidth,
+                    "aspect_height": d.aspectHeight,
+                ]
                 if d.cropOffset == .centre { entry["crop_offset"] = "centre" }
                 return entry
             },
@@ -320,8 +336,9 @@ extension Project {
             "clips": clipMap,
         ]
         if let out = outputDirectory { root["output_directory"] = out.path }
-        return try JSONSerialization.data(withJSONObject: root,
-                                          options: [.prettyPrinted, .sortedKeys])
+        return try JSONSerialization.data(
+            withJSONObject: root,
+            options: [.prettyPrinted, .sortedKeys])
     }
 
     /// A look out of a project file, upgraded from the version that wrote it.
@@ -337,8 +354,10 @@ extension Project {
         if version < filmStagesVersion, var look = object as? [String: Any] {
             if look["halation"] == nil {
                 let neutral = Look.Halation()
-                look["halation"] = ["strength": 0.0, "threshold": neutral.threshold,
-                                    "radius": neutral.radius, "tint": neutral.tint]
+                look["halation"] = [
+                    "strength": 0.0, "threshold": neutral.threshold,
+                    "radius": neutral.radius, "tint": neutral.tint,
+                ]
             }
             if var film = look["look"] as? [String: Any], film["strength"] == nil {
                 film["strength"] = 1.0
@@ -381,15 +400,17 @@ extension Project {
                     ?? ClipSettings.stabilisesByDefault,
                 lookOverride: override)
         }
-        self.init(presets: loaded,
-                  activePreset: root["active_preset"] as? String ?? loaded.first?.name ?? "",
-                  delivery: Delivery(targets: targets,
-                                     height: (d["height"] as? NSNumber)?.intValue
-                                         ?? Delivery.defaultHeight,
-                                     fps: (d["fps"] as? NSNumber)?.intValue),
-                  clips: clipMap,
-                  outputDirectory: (root["output_directory"] as? String).map {
-                      URL(fileURLWithPath: $0)
-                  })
+        self.init(
+            presets: loaded,
+            activePreset: root["active_preset"] as? String ?? loaded.first?.name ?? "",
+            delivery: Delivery(
+                targets: targets,
+                height: (d["height"] as? NSNumber)?.intValue
+                    ?? Delivery.defaultHeight,
+                fps: (d["fps"] as? NSNumber)?.intValue),
+            clips: clipMap,
+            outputDirectory: (root["output_directory"] as? String).map {
+                URL(fileURLWithPath: $0)
+            })
     }
 }

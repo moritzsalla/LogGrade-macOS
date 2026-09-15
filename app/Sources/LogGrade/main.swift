@@ -40,11 +40,12 @@ struct RootView: View {
         // The startup screen stands in for the whole window until there is a clip. An empty
         // three-column layout with a dimmed inspector looks broken rather than empty.
         if clips.entries.isEmpty {
-            return AnyView(StartupView(
-                problems: problems,
-                recentProject: UserDefaults.standard.url(forKey: DefaultsKey.lastProject),
-                onOpenProject: actions.openProject(at:),
-                onChooseFiles: actions.chooseClips))
+            return AnyView(
+                StartupView(
+                    problems: problems,
+                    recentProject: UserDefaults.standard.url(forKey: DefaultsKey.lastProject),
+                    onOpenProject: actions.openProject(at:),
+                    onChooseFiles: actions.chooseClips))
         }
         return AnyView(columns)
     }
@@ -59,11 +60,13 @@ struct RootView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(engine == nil ? "no engine" : "no look").font(Type.heading)
                         .foregroundColor(Palette.ink)
-                    Text(engine == nil
-                         ? "point LOGGRADE_ENGINE at a checkout, or rebuild the bundle."
-                         : "The engine’s look.json could not be read. The reason is listed above "
-                           + "the clips.")
-                        .font(Type.label).foregroundColor(Palette.inkSecondary)
+                    Text(
+                        engine == nil
+                            ? "point LOGGRADE_ENGINE at a checkout, or rebuild the bundle."
+                            : "The engine’s look.json could not be read. The reason is listed above "
+                                + "the clips."
+                    )
+                    .font(Type.label).foregroundColor(Palette.inkSecondary)
                     Spacer()
                 }
                 .padding(18)
@@ -337,10 +340,17 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
     // and right on a landscape one.
     if grade.cropIsPerClip, let geometry = grade.cropGeometry {
         let step = event.modifierFlags.contains(.shift) ? 10 : 1
-        let (back, forward) = geometry.axis == .y
+        let (back, forward) =
+            geometry.axis == .y
             ? (KeyCode.upArrow, KeyCode.downArrow) : (KeyCode.leftArrow, KeyCode.rightArrow)
-        if event.keyCode == back { grade.nudgeCrop(by: -step); return nil }
-        if event.keyCode == forward { grade.nudgeCrop(by: step); return nil }
+        if event.keyCode == back {
+            grade.nudgeCrop(by: -step)
+            return nil
+        }
+        if event.keyCode == forward {
+            grade.nudgeCrop(by: step)
+            return nil
+        }
     }
     // ONLY WHAT A MENU CANNOT DO. Compare has to be HELD — pressed and released — and a menu item
     // fires once on selection, so it stays here. Everything else moved to the menu bar, where
@@ -368,8 +378,9 @@ let actions = AppActions(clips: clipList, grade: gradeModel, queue: renderQueue,
 // Reopen the last project, so a shoot in progress is still in progress tomorrow. Its crop offsets
 // are the part that cannot be recovered by guessing.
 if gradeModel != nil,
-   let remembered = UserDefaults.standard.url(forKey: DefaultsKey.lastProject),
-   FileManager.default.fileExists(atPath: remembered.path) {
+    let remembered = UserDefaults.standard.url(forKey: DefaultsKey.lastProject),
+    FileManager.default.fileExists(atPath: remembered.path)
+{
     actions.openProject(at: remembered)
 }
 
@@ -383,17 +394,21 @@ MainMenu.install(commands: commands)
 
 renderQueue.onFinished = { delivered, failed in
     if failed == 0 {
-        toaster.show("checkmark.circle.fill", "Export finished",
-                     delivered == 1 ? "1 clip delivered" : "\(delivered) clips delivered")
+        toaster.show(
+            "checkmark.circle.fill", "Export finished",
+            delivered == 1 ? "1 clip delivered" : "\(delivered) clips delivered")
     } else {
-        toaster.show("exclamationmark.triangle.fill", "Export finished with problems",
-                     "\(delivered) delivered, \(failed) not — see the queue")
+        toaster.show(
+            "exclamationmark.triangle.fill", "Export finished with problems",
+            "\(delivered) delivered, \(failed) not — see the queue")
     }
 }
-window.contentView = NSHostingView(rootView: RootView(engine: engine, problems: problems,
-                                                      clips: clipList, queue: renderQueue,
-                                                      grade: gradeModel, toaster: toaster,
-                                                      actions: actions))
+window.contentView = NSHostingView(
+    rootView: RootView(
+        engine: engine, problems: problems,
+        clips: clipList, queue: renderQueue,
+        grade: gradeModel, toaster: toaster,
+        actions: actions))
 // Wired after the model exists, since every one of them needs it.
 commands.addClips = { actions.chooseClips() }
 commands.openProject = { actions.openProject() }

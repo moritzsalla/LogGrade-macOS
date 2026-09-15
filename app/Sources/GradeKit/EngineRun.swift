@@ -52,7 +52,9 @@ public final class EngineRun {
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             probe.waitUntilExit()
             let children = String(decoding: data, as: UTF8.self)
-                .split(separator: "\n").compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
+                .split(separator: "\n").compactMap {
+                    Int32($0.trimmingCharacters(in: .whitespaces))
+                }
             found.append(contentsOf: children)
             frontier.append(contentsOf: children)
         }
@@ -94,10 +96,12 @@ public final class EngineRun {
     /// Spawns the engine and returns once it has exited. `onEvent` is called as the lines arrive,
     /// on an arbitrary queue, so a queue view can update while a render runs.
     @discardableResult
-    public func run(arguments: [String],
-                    environment: [String: String] = [:],
-                    onStart: ((Process) -> Void)? = nil,
-                    onEvent: ((EngineEvent) -> Void)? = nil) throws -> Outcome {
+    public func run(
+        arguments: [String],
+        environment: [String: String] = [:],
+        onStart: ((Process) -> Void)? = nil,
+        onEvent: ((EngineEvent) -> Void)? = nil
+    ) throws -> Outcome {
         let problems = engine.preflight()
         if let first = problems.first { throw Failure.cannotRun(first) }
 
@@ -106,10 +110,11 @@ public final class EngineRun {
         process.arguments = arguments
         process.currentDirectoryURL = engine.root
         var env = childEnvironment(extra: environment)
-        env["JSON"] = "1"     // the app always wants the machine-readable stream
+        env["JSON"] = "1"  // the app always wants the machine-readable stream
         process.environment = env
 
-        let out = Pipe(), err = Pipe()
+        let out = Pipe()
+        let err = Pipe()
         process.standardOutput = out
         process.standardError = err
 
@@ -134,16 +139,22 @@ public final class EngineRun {
                     buffer = String(buffer[buffer.index(after: nl)...])
                     do {
                         if let event = try EngineEvent.decode(line: line) {
-                            lock.lock(); events.append(event); lock.unlock()
+                            lock.lock()
+                            events.append(event)
+                            lock.unlock()
                             onEvent?(event)
                         }
                     } catch {
-                        lock.lock(); malformed.append(line); lock.unlock()
+                        lock.lock()
+                        malformed.append(line)
+                        lock.unlock()
                     }
                 }
             }
             if !buffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                lock.lock(); malformed.append(buffer); lock.unlock()
+                lock.lock()
+                malformed.append(buffer)
+                lock.unlock()
             }
         }
 
@@ -151,14 +162,18 @@ public final class EngineRun {
             var buffer = ""
             while let chunk = try? err.fileHandleForReading.read(upToCount: 4096), !chunk.isEmpty {
                 let text = String(decoding: chunk, as: UTF8.self)
-                lock.lock(); stderrText += text; lock.unlock()
+                lock.lock()
+                stderrText += text
+                lock.unlock()
                 buffer += text
                 while let nl = buffer.firstIndex(of: "\n") {
                     let line = String(buffer[buffer.startIndex..<nl])
                     buffer = String(buffer[buffer.index(after: nl)...])
                     if line.hasPrefix("GRADE_CODE=") {
                         let code = EngineCode(rawValue: String(line.dropFirst("GRADE_CODE=".count)))
-                        lock.lock(); codes.append(code); lock.unlock()
+                        lock.lock()
+                        codes.append(code)
+                        lock.unlock()
                     }
                 }
             }
@@ -184,8 +199,9 @@ public final class EngineRun {
         }
 
         lock.lock()
-        let outcome = Outcome(exitCode: process.terminationStatus, events: events, codes: codes,
-                              malformed: malformed, stderrText: stderrText)
+        let outcome = Outcome(
+            exitCode: process.terminationStatus, events: events, codes: codes,
+            malformed: malformed, stderrText: stderrText)
         lock.unlock()
         return outcome
     }

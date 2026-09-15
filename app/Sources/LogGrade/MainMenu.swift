@@ -23,22 +23,27 @@ enum MainMenu {
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
         let name = "LogGrade"
-        appMenu.addItem(withTitle: "About \(name)",
-                        action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
-                        keyEquivalent: "")
+        appMenu.addItem(
+            withTitle: "About \(name)",
+            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+            keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide \(name)", action: #selector(NSApplication.hide(_:)),
-                        keyEquivalent: "h")
-        let hideOthers = appMenu.addItem(withTitle: "Hide Others",
-                                         action: #selector(NSApplication.hideOtherApplications(_:)),
-                                         keyEquivalent: "h")
+        appMenu.addItem(
+            withTitle: "Hide \(name)", action: #selector(NSApplication.hide(_:)),
+            keyEquivalent: "h")
+        let hideOthers = appMenu.addItem(
+            withTitle: "Hide Others",
+            action: #selector(NSApplication.hideOtherApplications(_:)),
+            keyEquivalent: "h")
         hideOthers.keyEquivalentModifierMask = [.command, .option]
-        appMenu.addItem(withTitle: "Show All",
-                        action: #selector(NSApplication.unhideAllApplications(_:)),
-                        keyEquivalent: "")
+        appMenu.addItem(
+            withTitle: "Show All",
+            action: #selector(NSApplication.unhideAllApplications(_:)),
+            keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit \(name)", action: #selector(NSApplication.terminate(_:)),
-                        keyEquivalent: "q")
+        appMenu.addItem(
+            withTitle: "Quit \(name)", action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q")
         appItem.submenu = appMenu
         main.addItem(appItem)
 
@@ -49,8 +54,9 @@ enum MainMenu {
         file.addItem(action(commands, "Open Project…", "o", [.command, .shift], \.openProject))
         file.addItem(action(commands, "Save Project…", "s", [.command], \.saveProject))
         file.addItem(.separator())
-        file.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)),
-                     keyEquivalent: "w")
+        file.addItem(
+            withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)),
+            keyEquivalent: "w")
         fileItem.submenu = file
         main.addItem(fileItem)
 
@@ -66,8 +72,9 @@ enum MainMenu {
         edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)),
-                     keyEquivalent: "a")
+        edit.addItem(
+            withTitle: "Select All", action: #selector(NSText.selectAll(_:)),
+            keyEquivalent: "a")
         editItem.submenu = edit
         main.addItem(editItem)
 
@@ -87,10 +94,12 @@ enum MainMenu {
 
         let windowItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
-        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)),
-                           keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)),
-                           keyEquivalent: "")
+        windowMenu.addItem(
+            withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)),
+            keyEquivalent: "m")
+        windowMenu.addItem(
+            withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)),
+            keyEquivalent: "")
         windowItem.submenu = windowMenu
         main.addItem(windowItem)
 
@@ -112,9 +121,11 @@ enum MainMenu {
         }
     }
 
-    private static func action(_ commands: Commands, _ title: String, _ key: String,
-                               _ modifiers: NSEvent.ModifierFlags,
-                               _ which: KeyPath<Commands, () -> Void>) -> NSMenuItem {
+    private static func action(
+        _ commands: Commands, _ title: String, _ key: String,
+        _ modifiers: NSEvent.ModifierFlags,
+        _ which: KeyPath<Commands, () -> Void>
+    ) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: #selector(Commands.run(_:)), keyEquivalent: key)
         item.keyEquivalentModifierMask = modifiers
         item.target = commands

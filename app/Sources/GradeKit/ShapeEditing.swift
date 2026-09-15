@@ -39,7 +39,8 @@ extension EngineLocation {
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         let script = #"source "$0"; require_clip_name "$1" >/dev/null && deliverable_spec "$2""#
         process.arguments = ["-c", script, library.path, name, spec]
-        let out = Pipe(), err = Pipe()
+        let out = Pipe()
+        let err = Pipe()
         process.standardOutput = out
         process.standardError = err
         do { try process.run() } catch {
@@ -57,8 +58,10 @@ extension EngineLocation {
         guard fields.count == 5 else {
             return .refused("the engine resolved \(spec) as '\(stdout)', which is not five fields")
         }
-        return .resolved(.init(name: fields[0], aspectWidth: fields[1], aspectHeight: fields[2],
-                               offset: fields[3], suffix: fields[4]))
+        return .resolved(
+            .init(
+                name: fields[0], aspectWidth: fields[1], aspectHeight: fields[2],
+                offset: fields[3], suffix: fields[4]))
     }
 }
 
@@ -71,8 +74,10 @@ public struct ShapeDraft: Equatable {
     public var aspectHeight: String
     public var centre: Bool
 
-    public init(name: String = "", aspectWidth: String = "", aspectHeight: String = "",
-                centre: Bool = false) {
+    public init(
+        name: String = "", aspectWidth: String = "", aspectHeight: String = "",
+        centre: Bool = false
+    ) {
         self.name = name
         self.aspectWidth = aspectWidth
         self.aspectHeight = aspectHeight
@@ -80,9 +85,10 @@ public struct ShapeDraft: Equatable {
     }
 
     public init(_ deliverable: Deliverable) {
-        self.init(name: deliverable.name, aspectWidth: String(deliverable.aspectWidth),
-                  aspectHeight: String(deliverable.aspectHeight),
-                  centre: deliverable.cropOffset == .centre)
+        self.init(
+            name: deliverable.name, aspectWidth: String(deliverable.aspectWidth),
+            aspectHeight: String(deliverable.aspectHeight),
+            centre: deliverable.cropOffset == .centre)
     }
 
     public var spec: String {
@@ -148,9 +154,12 @@ extension Project.Delivery {
     /// preset everywhere a name is shown, and unticking the preset later would leave a shape that
     /// looks like it. The output file is compared too, with the engine's own suffix, because
     /// `reels-stories` at 9:16 is a different name that writes the preset's file.
-    public mutating func save(_ draft: ShapeDraft, replacing original: Deliverable?,
-                              resolve: (_ name: String, _ spec: String) -> DeliverableResolution)
-        -> ShapeRefusal? {
+    public mutating func save(
+        _ draft: ShapeDraft, replacing original: Deliverable?,
+        resolve: (_ name: String, _ spec: String) -> DeliverableResolution
+    )
+        -> ShapeRefusal?
+    {
         let fields: DeliverableResolution.Fields
         switch resolve(draft.name, draft.spec) {
         case .refused(let said): return .engine(said)
@@ -159,14 +168,17 @@ extension Project.Delivery {
         // The engine can accept what it read differently: `1:1` in one aspect box becomes an
         // aspect and a pixel offset, and a 20-digit term passes its `-le` test by erroring. Each
         // term has to come back as the digits typed, and survive Int unchanged, to be stored.
-        for (typed, read) in [(draft.aspectWidth, fields.aspectWidth),
-                              (draft.aspectHeight, fields.aspectHeight)] {
+        for (typed, read) in [
+            (draft.aspectWidth, fields.aspectWidth),
+            (draft.aspectHeight, fields.aspectHeight),
+        ] {
             guard typed == read, let n = Int(read), String(n) == read else {
                 return .notAsWritten(typed)
             }
         }
         guard fields.offset == (draft.centre ? "centre" : "-"),
-              let width = Int(fields.aspectWidth), let height = Int(fields.aspectHeight) else {
+            let width = Int(fields.aspectWidth), let height = Int(fields.aspectHeight)
+        else {
             return .notAsWritten(draft.spec)
         }
 
@@ -182,13 +194,16 @@ extension Project.Delivery {
         let suffix = Self.filenameKey(fields.suffix)
         for other in others {
             if case .resolved(let theirs) = resolve(other.name, other.spec),
-               Self.filenameKey(theirs.suffix) == suffix {
+                Self.filenameKey(theirs.suffix) == suffix
+            {
                 return .sameOutputFile(other: other.name, suffix: fields.suffix)
             }
         }
-        save(Deliverable(name: draft.name, aspectWidth: width, aspectHeight: height,
-                         cropOffset: draft.centre ? .centre : nil),
-             replacing: original)
+        save(
+            Deliverable(
+                name: draft.name, aspectWidth: width, aspectHeight: height,
+                cropOffset: draft.centre ? .centre : nil),
+            replacing: original)
         return nil
     }
 

@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import GradeKit
 
 /// Driven by a stand-in engine: these tests are about the queue, and real renders would make them
@@ -24,20 +25,23 @@ final class RenderQueueTests: XCTestCase {
         // The engine learned this the hard way: a two-clip run whose first render failed never
         // attempted the second. In a nineteen-clip run a failure at clip three costs the other
         // sixteen, silently.
-        let engine = try stubEngine(script: """
-        #!/bin/bash
-        case "$1" in
-          *BAD*) echo 'GRADE_CODE=RENDER_FAILED' >&2; exit 1;;
-          *) echo '{"event":"run_done","rendered":1,"skipped":0,"failed":0}'; exit 0;;
-        esac
-        """)
+        let engine = try stubEngine(
+            script: """
+                #!/bin/bash
+                case "$1" in
+                  *BAD*) echo 'GRADE_CODE=RENDER_FAILED' >&2; exit 1;;
+                  *) echo '{"event":"run_done","rendered":1,"skipped":0,"failed":0}'; exit 0;;
+                esac
+                """)
         defer { try? FileManager.default.removeItem(at: engine.root) }
 
         let queue = RenderQueue(engine: engine)
         queue.concurrency = 1
-        queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A", nil),
-                       (URL(fileURLWithPath: "/tmp/BAD.mov"), "BAD", nil),
-                       (URL(fileURLWithPath: "/tmp/C.mov"), "C", 48)])
+        queue.enqueue([
+            (URL(fileURLWithPath: "/tmp/A.mov"), "A", nil),
+            (URL(fileURLWithPath: "/tmp/BAD.mov"), "BAD", nil),
+            (URL(fileURLWithPath: "/tmp/C.mov"), "C", 48),
+        ])
         waitForQueue(queue)
 
         XCTAssertEqual(queue.jobs.map(\.stem), ["A", "BAD", "C"])
@@ -52,13 +56,14 @@ final class RenderQueueTests: XCTestCase {
     func testASkippedClipIsNotReportedAsDone() throws {
         // The engine exits 0 for a clip it refused. A queue that shows that as done is the
         // interface lying about what is on disk.
-        let engine = try stubEngine(script: """
-        #!/bin/bash
-        echo 'GRADE_CODE=REFUSE_UNMEASURED' >&2
-        echo '{"event":"clip_skipped","clip":"BROKEN","code":"REFUSE_UNMEASURED"}'
-        echo '{"event":"run_done","rendered":0,"skipped":1,"failed":0}'
-        exit 0
-        """)
+        let engine = try stubEngine(
+            script: """
+                #!/bin/bash
+                echo 'GRADE_CODE=REFUSE_UNMEASURED' >&2
+                echo '{"event":"clip_skipped","clip":"BROKEN","code":"REFUSE_UNMEASURED"}'
+                echo '{"event":"run_done","rendered":0,"skipped":1,"failed":0}'
+                exit 0
+                """)
         defer { try? FileManager.default.removeItem(at: engine.root) }
         let queue = RenderQueue(engine: engine)
         queue.enqueue([(URL(fileURLWithPath: "/tmp/BROKEN.mov"), "BROKEN", nil)])
@@ -67,13 +72,14 @@ final class RenderQueueTests: XCTestCase {
     }
 
     func testProgressAndOutputsAreRecordedPerClip() throws {
-        let engine = try stubEngine(script: """
-        #!/bin/bash
-        echo '{"event":"progress","label":"reels","state":"continue","frame":12}'
-        echo '{"event":"progress","label":"reels","state":"end","frame":48}'
-        echo '{"event":"output","clip":"A","deliverable":"reels","path":"/tmp/A_reels.mp4","bytes":10}'
-        echo '{"event":"run_done","rendered":1,"skipped":0,"failed":0}'
-        """)
+        let engine = try stubEngine(
+            script: """
+                #!/bin/bash
+                echo '{"event":"progress","label":"reels","state":"continue","frame":12}'
+                echo '{"event":"progress","label":"reels","state":"end","frame":48}'
+                echo '{"event":"output","clip":"A","deliverable":"reels","path":"/tmp/A_reels.mp4","bytes":10}'
+                echo '{"event":"run_done","rendered":1,"skipped":0,"failed":0}'
+                """)
         defer { try? FileManager.default.removeItem(at: engine.root) }
         let queue = RenderQueue(engine: engine)
         queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A", 48)])
@@ -100,11 +106,12 @@ final class RenderQueueTests: XCTestCase {
         // it dies with no help from `EngineRun.stop`'s walk of descendants. Written that way, this
         // test stayed green with the walk replaced by a no-op. `setpgrp` puts the grandchild where
         // only the walk can reach it, which is the case the walk exists for.
-        let engine = try stubEngine(script: """
-        #!/bin/bash
-        ( perl -e 'setpgrp(0, 0); exec "sleep", "30"' & echo $! > "\(pidFile.path)"; wait ) &
-        wait
-        """)
+        let engine = try stubEngine(
+            script: """
+                #!/bin/bash
+                ( perl -e 'setpgrp(0, 0); exec "sleep", "30"' & echo $! > "\(pidFile.path)"; wait ) &
+                wait
+                """)
         var pid: Int32 = 0
         defer {
             // A failure here would otherwise leave a sleep running for thirty seconds.
@@ -125,7 +132,8 @@ final class RenderQueueTests: XCTestCase {
         // the stub had not written its pid yet and the read threw before the cancel was reached.
         let deadline = Date().addingTimeInterval(15)
         while pid == 0 && Date() < deadline {
-            pid = (try? String(contentsOf: pidFile, encoding: .utf8))
+            pid =
+                (try? String(contentsOf: pidFile, encoding: .utf8))
                 .flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
             if pid == 0 { Thread.sleep(forTimeInterval: 0.05) }
         }
@@ -161,8 +169,9 @@ final class RenderQueueTests: XCTestCase {
         let swept = RenderQueue.sweepStagingFiles(in: work)
         XCTAssertEqual(swept.map(\.lastPathComponent), ["IMG_0609_reels.partial.mp4"])
         XCTAssertFalse(FileManager.default.fileExists(atPath: partial.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: keeper.path),
-                      "a finished deliverable is not litter")
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: keeper.path),
+            "a finished deliverable is not litter")
     }
 
     func testConcurrencyIsBoundedAndNeverZero() throws {
@@ -187,16 +196,18 @@ final class ProgressTests: XCTestCase {
     }
 
     func testTheFrameCountComesFromTheMeasuredClip() {
-        let fields = ClipProbe.Fields(codec: "prores", pixelFormat: "yuv422p10le",
-                                      primaries: "bt2020", transfer: "unknown",
-                                      width: 3840, height: 2160,
-                                      duration: 26.5, frameRate: 24)
+        let fields = ClipProbe.Fields(
+            codec: "prores", pixelFormat: "yuv422p10le",
+            primaries: "bt2020", transfer: "unknown",
+            width: 3840, height: 2160,
+            duration: 26.5, frameRate: 24)
         XCTAssertEqual(fields.frameCount, 636)
         // And it says nothing rather than guessing when ffprobe did not answer.
-        let unmeasured = ClipProbe.Fields(codec: "prores", pixelFormat: "yuv422p10le",
-                                          primaries: "bt2020", transfer: "unknown",
-                                          width: 3840, height: 2160,
-                                          duration: nil, frameRate: 24)
+        let unmeasured = ClipProbe.Fields(
+            codec: "prores", pixelFormat: "yuv422p10le",
+            primaries: "bt2020", transfer: "unknown",
+            width: 3840, height: 2160,
+            duration: nil, frameRate: 24)
         XCTAssertNil(unmeasured.frameCount)
     }
 }
@@ -211,8 +222,9 @@ extension RenderQueueTests {
         let queue = RenderQueue(engine: EngineLocation(root: URL(fileURLWithPath: "/nowhere")))
         queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A", nil)])
         let id = try XCTUnwrap(queue.jobs.first?.id)
-        queue.setOutcome(id, state: .failed("disk full"), outputs: [URL(fileURLWithPath: "/x")],
-                         frame: 12)
+        queue.setOutcome(
+            id, state: .failed("disk full"), outputs: [URL(fileURLWithPath: "/x")],
+            frame: 12)
 
         queue.retry(id)
         XCTAssertEqual(queue.jobs.first?.state, .waiting)
@@ -224,8 +236,10 @@ extension RenderQueueTests {
 
     func testRetryLeavesAFinishedSuccessAlone() throws {
         let queue = RenderQueue(engine: EngineLocation(root: URL(fileURLWithPath: "/nowhere")))
-        queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A", nil),
-                       (URL(fileURLWithPath: "/tmp/B.mov"), "B", nil)])
+        queue.enqueue([
+            (URL(fileURLWithPath: "/tmp/A.mov"), "A", nil),
+            (URL(fileURLWithPath: "/tmp/B.mov"), "B", nil),
+        ])
         let a = try XCTUnwrap(queue.jobs.first?.id)
         let b = try XCTUnwrap(queue.jobs.last?.id)
         queue.setOutcome(a, state: .done, outputs: [URL(fileURLWithPath: "/a.mp4")], frame: 90)

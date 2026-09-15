@@ -97,6 +97,35 @@ else
 fi
 
 echo
+echo "== swift-format =="
+# PINNED, because the formatter's output follows the swift-syntax it was built on: two Macs with
+# different versions would reformat each other's files forever. A different version fails rather
+# than skips. Xcode 15.2 does not bundle swift-format (16 is the first that does) and Homebrew
+# builds from source on this macOS, so build the release tag:
+#   git clone --depth 1 --branch 510.1.0 https://github.com/swiftlang/swift-format.git
+#   swift build -c release --product swift-format --package-path swift-format
+#   cp swift-format/.build/release/swift-format ~/.local/bin/
+SWIFT_FORMAT_VERSION=510.1.0
+if command -v swift-format >/dev/null; then
+	have="$(swift-format --version)"
+	if [ "$have" != "$SWIFT_FORMAT_VERSION" ]; then
+		echo "swift-format is $have, this repo pins $SWIFT_FORMAT_VERSION (build steps in scripts/check.sh)" >&2
+		exit 1
+	fi
+	# Not `lint && echo clean`: errexit ignores a failure on the left of &&, and the run went on.
+	if swift-format lint --strict --recursive app; then
+		echo "clean"
+	else
+		# Some findings the formatter cannot fix, e.g. an end-of-line comment past the line length.
+		echo "swift-format FAILED — run: swift-format format --in-place --recursive app, then fix what lint still reports" >&2
+		exit 1
+	fi
+else
+	echo "swift-format NOT INSTALLED (build steps in scripts/check.sh)"
+	SKIPPED="$SKIPPED swift-format"
+fi
+
+echo
 echo "== swift (GradeKit) =="
 # The app's package is part of this repo, so the one command that checks the repo has to check it.
 # A missing toolchain is a SKIP under the same contract as every other tool here: recorded, and

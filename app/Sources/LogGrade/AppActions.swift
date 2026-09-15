@@ -53,8 +53,9 @@ final class AppActions {
         } catch {
             // SAID, not beeped. A beep is indistinguishable from a key the window refused, and a
             // shoot's crop decisions that were not saved are the one loss this panel exists to stop.
-            toaster.show("exclamationmark.triangle.fill", "Project not saved",
-                         String(describing: error))
+            toaster.show(
+                "exclamationmark.triangle.fill", "Project not saved",
+                String(describing: error))
         }
     }
 
@@ -74,8 +75,9 @@ final class AppActions {
         do {
             try grade.openProject(at: url)
         } catch {
-            toaster.show("exclamationmark.triangle.fill",
-                         "Couldn’t open \(url.lastPathComponent)", String(describing: error))
+            toaster.show(
+                "exclamationmark.triangle.fill",
+                "Couldn’t open \(url.lastPathComponent)", String(describing: error))
         }
     }
 

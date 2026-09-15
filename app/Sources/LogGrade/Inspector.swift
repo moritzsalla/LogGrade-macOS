@@ -29,11 +29,13 @@ struct InspectorView: View {
     }
 
     private var convertStage: some View {
-        stage("Convert",
-              help: "Apple Log to Rec.709, using Apple's own conversion. It is always "
-                  + "applied and cannot be adjusted: its colour is more accurate than "
-                  + "anything this app could do instead, and the cube carries a display "
-                  + "rendering Apple has not published.") {
+        stage(
+            "Convert",
+            help: "Apple Log to Rec.709, using Apple's own conversion. It is always "
+                + "applied and cannot be adjusted: its colour is more accurate than "
+                + "anything this app could do instead, and the cube carries a display "
+                + "rendering Apple has not published."
+        ) {
             Text("Apple Log to Rec.709")
                 .font(Type.caption)
                 .foregroundColor(Palette.inkTertiary)
@@ -41,129 +43,166 @@ struct InspectorView: View {
     }
 
     private var correctStage: some View {
-        stage("Correct", bypass: .correct,
-              help: "Exposure, white balance and the three wheels run before the "
-                  + "conversion, on the log picture, where the highlights above white "
-                  + "still exist. Brightening here keeps the highlights instead of "
-                  + "flattening them against a ceiling.\n\nLuminance mix decides how much "
-                  + "of a wheel move lands on brightness against colour. At 0 the move is "
-                  + "colour only, because separating channels shifts saturation whether "
-                  + "you meant it to or not.") {
-            control("Exposure", $model.look.correct.exposure, -3...3, format: "%+.2f",
-                    default: model.defaultLook.correct.exposure)
-            control("Temperature", $model.look.correct.temp, -1...1,
-                    default: model.defaultLook.correct.temp)
-            control("Tint", $model.look.correct.tint, -1...1,
-                    default: model.defaultLook.correct.tint)
+        stage(
+            "Correct", bypass: .correct,
+            help: "Exposure, white balance and the three wheels run before the "
+                + "conversion, on the log picture, where the highlights above white "
+                + "still exist. Brightening here keeps the highlights instead of "
+                + "flattening them against a ceiling.\n\nLuminance mix decides how much "
+                + "of a wheel move lands on brightness against colour. At 0 the move is "
+                + "colour only, because separating channels shifts saturation whether "
+                + "you meant it to or not."
+        ) {
+            control(
+                "Exposure", $model.look.correct.exposure, -3...3, format: "%+.2f",
+                default: model.defaultLook.correct.exposure)
+            control(
+                "Temperature", $model.look.correct.temp, -1...1,
+                default: model.defaultLook.correct.temp)
+            control(
+                "Tint", $model.look.correct.tint, -1...1,
+                default: model.defaultLook.correct.tint)
             wheel(.offset, "Lift")
             wheel(.power, "Gamma")
             wheel(.slope, "Gain")
-            control("Luminance", $model.look.correct.lumMix, 0...1,
-                    default: model.defaultLook.correct.lumMix)
+            control(
+                "Luminance", $model.look.correct.lumMix, 0...1,
+                default: model.defaultLook.correct.lumMix)
         }
     }
 
     private var halationStage: some View {
-        stage("Halation", bypass: .halation,
-              help: "The warm glow film grows around bright things, where light reflects "
-                  + "off the film base and exposes the red layer a second time.\n\nIt is "
-                  + "added in linear light before the conversion, and only past edges: a "
-                  + "bright field does not glow onto itself. Threshold is in scene light, "
-                  + "where 1 is diffuse white. Radius is a fraction of the frame's height. "
-                  + "Strength 0 leaves the stage out entirely.") {
-            control("Strength", $model.look.halation.strength, 0...1.5,
-                    default: model.defaultLook.halation.strength)
-            control("Threshold", $model.look.halation.threshold, 0.25...6,
-                    format: "%.2f", default: model.defaultLook.halation.threshold)
-            control("Radius", $model.look.halation.radius, 0.001...0.03, format: "%.4f",
-                    default: model.defaultLook.halation.radius)
+        stage(
+            "Halation", bypass: .halation,
+            help: "The warm glow film grows around bright things, where light reflects "
+                + "off the film base and exposes the red layer a second time.\n\nIt is "
+                + "added in linear light before the conversion, and only past edges: a "
+                + "bright field does not glow onto itself. Threshold is in scene light, "
+                + "where 1 is diffuse white. Radius is a fraction of the frame's height. "
+                + "Strength 0 leaves the stage out entirely."
+        ) {
+            control(
+                "Strength", $model.look.halation.strength, 0...1.5,
+                default: model.defaultLook.halation.strength)
+            control(
+                "Threshold", $model.look.halation.threshold, 0.25...6,
+                format: "%.2f", default: model.defaultLook.halation.threshold)
+            control(
+                "Radius", $model.look.halation.radius, 0.001...0.03, format: "%.4f",
+                default: model.defaultLook.halation.radius)
             ForEach(Array(["R", "G", "B"].enumerated()), id: \.offset) { channel, name in
-                control("Tint \(name)", Binding(
-                    get: { model.look.halation.tint(channel) },
-                    set: { model.look.halation.setTint(channel, $0) }),
-                        0...1, format: "%.2f",
-                        default: model.defaultLook.halation.tint(channel))
+                control(
+                    "Tint \(name)",
+                    Binding(
+                        get: { model.look.halation.tint(channel) },
+                        set: { model.look.halation.setTint(channel, $0) }),
+                    0...1, format: "%.2f",
+                    default: model.defaultLook.halation.tint(channel))
             }
         }
     }
 
     private var filmLookStage: some View {
-        stage("Film look", bypass: .filmLook,
-              help: "A film-emulation lookup, applied after the conversion.\n\nThe tone "
-                  + "curve below was set with this cube already in the chain, so changing "
-                  + "one without the other is a different grade rather than another "
-                  + "stock. Switch them together using a preset.") {
+        stage(
+            "Film look", bypass: .filmLook,
+            help: "A film-emulation lookup, applied after the conversion.\n\nThe tone "
+                + "curve below was set with this cube already in the chain, so changing "
+                + "one without the other is a different grade rather than another "
+                + "stock. Switch them together using a preset."
+        ) {
             cubePicker($model.look.lookLUT, options: model.availableLooks)
-            control("Strength", $model.look.lookStrength, 0...1, format: "%.2f",
-                    default: model.defaultLook.lookStrength)
+            control(
+                "Strength", $model.look.lookStrength, 0...1, format: "%.2f",
+                default: model.defaultLook.lookStrength)
         }
     }
 
     private var printStage: some View {
-        stage("Print", bypass: .print,
-              help: "A print-film emulation — Kodak 2383 is the cinema print stock — "
-                  + "applied after the film look, the way a negative is printed.\n\nIt "
-                  + "adds the print's contrast and colour, which at full strength over a "
-                  + "tuned tone curve is usually too much. Strength blends it back toward "
-                  + "the picture it was given.") {
+        stage(
+            "Print", bypass: .print,
+            help: "A print-film emulation — Kodak 2383 is the cinema print stock — "
+                + "applied after the film look, the way a negative is printed.\n\nIt "
+                + "adds the print's contrast and colour, which at full strength over a "
+                + "tuned tone curve is usually too much. Strength blends it back toward "
+                + "the picture it was given."
+        ) {
             cubePicker($model.look.printLUT, options: model.availablePrints)
-            control("Strength", $model.look.printStrength, 0...1, format: "%.2f",
-                    default: model.defaultLook.printStrength)
+            control(
+                "Strength", $model.look.printStrength, 0...1, format: "%.2f",
+                default: model.defaultLook.printStrength)
         }
     }
 
     private var toneStage: some View {
-        stage("Tone", bypass: .tone,
-              help: "Brightness and contrast, applied to the luma plane only so the "
-                  + "colour is untouched. Applying a curve per channel crushes a "
-                  + "saturated colour's two low channels harder than its high one, which "
-                  + "is what makes signage glow.\n\nMidtone is a gamma, so higher is "
-                  + "darker. The graph beside the picture is this curve.") {
-            control("Midtone", $model.look.tone.gamma, 1...2.6,
-                    default: model.defaultLook.tone.gamma)
+        stage(
+            "Tone", bypass: .tone,
+            help: "Brightness and contrast, applied to the luma plane only so the "
+                + "colour is untouched. Applying a curve per channel crushes a "
+                + "saturated colour's two low channels harder than its high one, which "
+                + "is what makes signage glow.\n\nMidtone is a gamma, so higher is "
+                + "darker. The graph beside the picture is this curve."
+        ) {
+            control(
+                "Midtone", $model.look.tone.gamma, 1...2.6,
+                default: model.defaultLook.tone.gamma)
             appliedGammaNote
-            control("Contrast", $model.look.tone.contrast, 0.8...1.8,
-                    default: model.defaultLook.tone.contrast)
-            control("Pivot", $model.look.tone.pivot, 0.25...0.65,
-                    default: model.defaultLook.tone.pivot)
-            control("Shoulder", $model.look.tone.shoulder, 0...0.8,
-                    default: model.defaultLook.tone.shoulder)
-            control("Toe", $model.look.tone.toe, 0...0.8,
-                    default: model.defaultLook.tone.toe)
-            control("Black", $model.look.tone.black, -0.08...0.08, format: "%+.3f",
-                    default: model.defaultLook.tone.black)
+            control(
+                "Contrast", $model.look.tone.contrast, 0.8...1.8,
+                default: model.defaultLook.tone.contrast)
+            control(
+                "Pivot", $model.look.tone.pivot, 0.25...0.65,
+                default: model.defaultLook.tone.pivot)
+            control(
+                "Shoulder", $model.look.tone.shoulder, 0...0.8,
+                default: model.defaultLook.tone.shoulder)
+            control(
+                "Toe", $model.look.tone.toe, 0...0.8,
+                default: model.defaultLook.tone.toe)
+            control(
+                "Black", $model.look.tone.black, -0.08...0.08, format: "%+.3f",
+                default: model.defaultLook.tone.black)
         }
     }
 
     private var trimsStage: some View {
-        stage("Trims", bypass: .trims,
-              help: "The last small moves, after the curve. Warmth acts on the midtones "
-                  + "only, so it barely moves a bright sky or a deep shadow.") {
-            control("Saturation", $model.look.colour.saturation, 0.6...1.6,
-                    default: model.defaultLook.colour.saturation)
-            control("Warmth", $model.look.colour.warmth, -0.12...0.12, format: "%+.3f",
-                    default: model.defaultLook.colour.warmth)
+        stage(
+            "Trims", bypass: .trims,
+            help: "The last small moves, after the curve. Warmth acts on the midtones "
+                + "only, so it barely moves a bright sky or a deep shadow."
+        ) {
+            control(
+                "Saturation", $model.look.colour.saturation, 0.6...1.6,
+                default: model.defaultLook.colour.saturation)
+            control(
+                "Warmth", $model.look.colour.warmth, -0.12...0.12, format: "%+.3f",
+                default: model.defaultLook.colour.warmth)
         }
     }
 
     private var deliveryStage: some View {
-        stage("Delivery", bypass: .grain,
-              help: "Grain and stabilisation are applied to the video, never to the "
-                  + "preview. Both need moving footage to judge, so a still leaves them "
-                  + "out rather than showing a version that is not what renders.\n\n"
-                  + "Grain shadows and highlights set how much grain reaches black and "
-                  + "white, as film prints do: most in the midtones, less at either end. "
-                  + "Both at 1 is flat grain.\n\nThe switch turns grain off; the stabiliser "
-                  + "is switched per clip.",
-              last: true) {
-            control("Grain", $model.look.grainStrength, 0...20, format: "%.0f",
-                    default: model.defaultLook.grainStrength)
-            control("Grain shadows", $model.look.grainShadows, 0...1, format: "%.2f",
-                    default: model.defaultLook.grainShadows)
-            control("Grain highs", $model.look.grainHighlights, 0...1, format: "%.2f",
-                    default: model.defaultLook.grainHighlights)
-            control("Stabiliser", $model.look.stabilisationSmoothing, 0...60, format: "%.0f",
-                    default: model.defaultLook.stabilisationSmoothing)
+        stage(
+            "Delivery", bypass: .grain,
+            help: "Grain and stabilisation are applied to the video, never to the "
+                + "preview. Both need moving footage to judge, so a still leaves them "
+                + "out rather than showing a version that is not what renders.\n\n"
+                + "Grain shadows and highlights set how much grain reaches black and "
+                + "white, as film prints do: most in the midtones, less at either end. "
+                + "Both at 1 is flat grain.\n\nThe switch turns grain off; the stabiliser "
+                + "is switched per clip.",
+            last: true
+        ) {
+            control(
+                "Grain", $model.look.grainStrength, 0...20, format: "%.0f",
+                default: model.defaultLook.grainStrength)
+            control(
+                "Grain shadows", $model.look.grainShadows, 0...1, format: "%.2f",
+                default: model.defaultLook.grainShadows)
+            control(
+                "Grain highs", $model.look.grainHighlights, 0...1, format: "%.2f",
+                default: model.defaultLook.grainHighlights)
+            control(
+                "Stabiliser", $model.look.stabilisationSmoothing, 0...60, format: "%.0f",
+                default: model.defaultLook.stabilisationSmoothing)
         }
     }
 
@@ -179,11 +218,13 @@ struct InspectorView: View {
     @ViewBuilder private func wheel(_ which: Look.Correct.Wheel, _ title: String) -> some View {
         let range: ClosedRange<Double> = which == .offset ? -0.2...0.2 : 0.5...2
         ForEach(Array(["R", "G", "B"].enumerated()), id: \.offset) { channel, name in
-            control("\(title) \(name)", Binding(
-                get: { model.look.correct.value(which, channel) },
-                set: { model.look.correct.setValue(which, channel, $0) }),
-                    range, format: which == .offset ? "%+.3f" : "%.3f",
-                    default: which.neutral)
+            control(
+                "\(title) \(name)",
+                Binding(
+                    get: { model.look.correct.value(which, channel) },
+                    set: { model.look.correct.setValue(which, channel, $0) }),
+                range, format: which == .offset ? "%+.3f" : "%.3f",
+                default: which.neutral)
         }
     }
 
@@ -192,11 +233,15 @@ struct InspectorView: View {
     /// that every clip in a shoot gets the same look instead of the same curve.
     @ViewBuilder private var appliedGammaNote: some View {
         if !model.bypassed.contains(.tone), let applied = model.appliedGamma,
-           abs(applied - model.look.tone.gamma) > Self.appliedGammaTolerance {
-            Text(String(format: "This clip renders at %.3f. The slider sets the midtone for the "
+            abs(applied - model.look.tone.gamma) > Self.appliedGammaTolerance
+        {
+            Text(
+                String(
+                    format: "This clip renders at %.3f. The slider sets the midtone for the "
                         + "shoot; each clip is solved from its own brightness so they match.",
-                        applied))
-                .modifier(Note())
+                    applied)
+            )
+            .modifier(Note())
         }
     }
 
@@ -208,9 +253,12 @@ struct InspectorView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Text("preset").font(Type.label).foregroundColor(Palette.inkSecondary)
-                Picker("", selection: Binding(
-                    get: { model.project.activePreset },
-                    set: { model.apply(preset: $0) })) {
+                Picker(
+                    "",
+                    selection: Binding(
+                        get: { model.project.activePreset },
+                        set: { model.apply(preset: $0) })
+                ) {
                     ForEach(model.project.presets.map(\.name), id: \.self) { Text($0).tag($0) }
                 }
                 .labelsHidden().frame(width: 150)
@@ -223,10 +271,15 @@ struct InspectorView: View {
                     .textFieldStyle(.roundedBorder)
                     .font(Type.label)
                     .frame(width: 160)
-                    .onSubmit { model.savePreset(named: newPresetName); newPresetName = "" }
+                    .onSubmit {
+                        model.savePreset(named: newPresetName)
+                        newPresetName = ""
+                    }
                 Button("save") {
-                    model.savePreset(named: newPresetName.isEmpty ? model.project.activePreset
-                                                                  : newPresetName)
+                    model.savePreset(
+                        named: newPresetName.isEmpty
+                            ? model.project.activePreset
+                            : newPresetName)
                     newPresetName = ""
                 }
                 .buttonStyle(.borderless).font(Type.label)
@@ -252,11 +305,14 @@ struct InspectorView: View {
     ///
     /// SWITCHED OFF, THE CONTROLS DIM BUT KEEP THEIR VALUES, so switching back is the grade you
     /// had. A slider left live while its stage is off moves nothing, which reads as broken.
-    private func stage<Content: View>(_ title: String, bypass: Look.Stage? = nil,
-                                      help: String? = nil, last: Bool = false,
-                                      @ViewBuilder content: @escaping () -> Content) -> some View {
-        let open = Binding(get: { model.openStages.contains(title) },
-                           set: { model.setStage(title, open: $0) })
+    private func stage<Content: View>(
+        _ title: String, bypass: Look.Stage? = nil,
+        help: String? = nil, last: Bool = false,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        let open = Binding(
+            get: { model.openStages.contains(title) },
+            set: { model.setStage(title, open: $0) })
         let enabled = bypass.map { !model.bypassed.contains($0) } ?? true
         return DisclosureGroup(isExpanded: open) {
             VStack(alignment: .leading, spacing: Space.s) { content() }
@@ -276,14 +332,21 @@ struct InspectorView: View {
                 if let help { HelpButton(text: help) }
                 Spacer(minLength: 0)
                 if let bypass {
-                    Toggle("", isOn: Binding(get: { enabled },
-                                             set: { model.setEnabled(bypass, $0) }))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        // Neutral, not the accent (docs/APP_DESIGN.md).
-                        .tint(Palette.inkSecondary)
-                        .help(enabled ? "Switch \(title.lowercased()) off" : "Switch \(title.lowercased()) on")
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { enabled },
+                            set: { model.setEnabled(bypass, $0) })
+                    )
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    // Neutral, not the accent (docs/APP_DESIGN.md).
+                    .tint(Palette.inkSecondary)
+                    .help(
+                        enabled
+                            ? "Switch \(title.lowercased()) off" : "Switch \(title.lowercased()) on"
+                    )
                 }
             }
             .contentShape(Rectangle())
@@ -301,19 +364,23 @@ struct InspectorView: View {
         }
         .labelsHidden()
         .onChange(of: selection.wrappedValue) { _ in
-            model.liveUpdate()      // instantly, from the cubes already in memory
-            model.renderPreview()   // then the exact frame, as with every control
+            model.liveUpdate()  // instantly, from the cubes already in memory
+            model.renderPreview()  // then the exact frame, as with every control
         }
     }
 
     /// A label, a track, and a readout you can type into. Dragging finds a value; typing repeats
     /// one, and a grading tool needs both.
-    private func control(_ label: String, _ value: Binding<Double>,
-                         _ range: ClosedRange<Double>, format: String = "%.3f",
-                         default original: Double? = nil) -> some View {
-        ControlRow(label: label, value: value.wrappedValue, range: range, format: format,
-                   original: original, model: model, set: { value.wrappedValue = $0 })
-            .equatable()
+    private func control(
+        _ label: String, _ value: Binding<Double>,
+        _ range: ClosedRange<Double>, format: String = "%.3f",
+        default original: Double? = nil
+    ) -> some View {
+        ControlRow(
+            label: label, value: value.wrappedValue, range: range, format: format,
+            original: original, model: model, set: { value.wrappedValue = $0 }
+        )
+        .equatable()
     }
 
     /// EQUATABLE, SO A DRAG UPDATES ONE ROW. The inspector rebuilds on every look write, and
@@ -359,7 +426,8 @@ struct InspectorView: View {
                         model.beginDrag()
                     } else {
                         model.refreshCurve()
-                        model.renderPreview()   // on release: the exact render confirms the live one
+                        // On release: the exact render confirms the live one.
+                        model.renderPreview()
                     }
                 }
                 .controlSize(.mini)
@@ -404,7 +472,10 @@ struct InspectorView: View {
                         // Only for a changed value: clicking a readout to look at it is not
                         // worth a three-second render.
                         .onDisappear { if value != valueWhenOpened { commit() } }
-                        .onAppear { valueWhenOpened = value; focused = true }
+                        .onAppear {
+                            valueWhenOpened = value
+                            focused = true
+                        }
                 } else {
                     Text(String(format: format, value))
                         .contentShape(Rectangle())
@@ -436,7 +507,8 @@ struct InspectorView: View {
         f.locale = Locale(identifier: "en_US_POSIX")
         // FROM THE FORMAT'S OWN PRECISION, so typing into a field keeps as many digits as its
         // readout shows. A fixed maximum of three rounded Radius ("%.4f") on every edit.
-        let precision = format.split(separator: ".").last
+        let precision =
+            format.split(separator: ".").last
             .flatMap { Int($0.prefix(while: \.isNumber)) } ?? 3
         f.minimumFractionDigits = min(precision, 2)
         f.maximumFractionDigits = precision
@@ -473,8 +545,9 @@ struct CurveView: View {
                         let steps = 128
                         for i in 0...steps {
                             let x = Double(i) / Double(steps)
-                            let point = CGPoint(x: x * geo.size.width,
-                                                y: (1 - curve.value(at: x)) * geo.size.height)
+                            let point = CGPoint(
+                                x: x * geo.size.width,
+                                y: (1 - curve.value(at: x)) * geo.size.height)
                             if i == 0 { p.move(to: point) } else { p.addLine(to: point) }
                         }
                     }.stroke(Palette.plate, lineWidth: 1.4)

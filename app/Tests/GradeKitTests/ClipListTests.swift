@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import GradeKit
 
 final class ClipListTests: XCTestCase {
@@ -26,8 +27,9 @@ final class ClipListTests: XCTestCase {
         let list = ClipList(probe: nil)
         let url = URL(fileURLWithPath: "/tmp/IMG_0609.mov")
         list.add([url])
-        XCTAssertEqual(list.entries.map(\.stem), ["IMG_0609"],
-                       "the stem is the join key back to the footage and the project file")
+        XCTAssertEqual(
+            list.entries.map(\.stem), ["IMG_0609"],
+            "the stem is the join key back to the footage and the project file")
         // Adding the same file twice is not two clips.
         list.add([url])
         XCTAssertEqual(list.entries.count, 1)
@@ -46,8 +48,10 @@ final class ClipListTests: XCTestCase {
 
     func testRealFootageIsUsableAndGetsAThumbnail() throws {
         let engine = try engineCheckout()
-        let clips = (try? FileManager.default.contentsOfDirectory(
-            at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil)) ?? []
+        let clips =
+            (try? FileManager.default.contentsOfDirectory(
+                at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil))
+            ?? []
         guard let clip = clips.first(where: { $0.pathExtension.lowercased() == "mov" }) else {
             throw XCTSkip("no footage in src/")
         }
@@ -72,8 +76,9 @@ final class ClipListTests: XCTestCase {
         if let image {
             // appliesPreferredTrackTransform honours the display matrix, so the thumbnail is
             // vertical even though the container's dimensions are not.
-            XCTAssertGreaterThan(image.height, image.width,
-                                 "the thumbnail should be the right way up")
+            XCTAssertGreaterThan(
+                image.height, image.width,
+                "the thumbnail should be the right way up")
         }
     }
 }
