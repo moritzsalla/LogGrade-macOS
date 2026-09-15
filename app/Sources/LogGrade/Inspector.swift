@@ -29,9 +29,15 @@ struct InspectorView: View {
             }
             .padding(.vertical, 18)
             .padding(.trailing, 16)
-            .contentShape(Rectangle())
-            .onTapGesture { presetNameFocused = false }
+            .frame(maxWidth: .infinity, alignment: .top)
         }
+        // ON THE SCROLL VIEW, not its content. Most stages start collapsed (`openStages`
+        // defaults to only Tone), so the content is far shorter than the panel; a gesture on the
+        // content alone misses every tap below the last row. The scroll view's own frame already
+        // fills the column, and giving its CONTENT `maxHeight: .infinity` instead would collapse
+        // scrolling to the viewport rather than the stages' true height.
+        .contentShape(Rectangle())
+        .onTapGesture { presetNameFocused = false }
         .background(Palette.panel)
     }
 
@@ -269,9 +275,11 @@ struct InspectorView: View {
                     ForEach(model.project.presets.map(\.name), id: \.self) { Text($0).tag($0) }
                 }
                 .labelsHidden().frame(width: 150)
+                // BORDERED, NOT TINTED. The accent is spent on the picture only — the selected
+                // clip's edge and the curve, not a control (docs/APP_DESIGN.md) — so prominence
+                // here comes from shape against "save"'s plain text, not colour.
                 Button("auto") { model.autoTone() }
-                    .buttonStyle(.borderedProminent).controlSize(.small)
-                    .tint(Palette.plate).font(Type.label)
+                    .buttonStyle(.bordered).controlSize(.small).font(Type.label)
                     .disabled(model.selectedClip == nil)
                 if model.hasUnsavedChanges {
                     Text("adjusted").font(Type.caption).foregroundColor(Palette.plate)

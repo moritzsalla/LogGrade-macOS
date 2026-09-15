@@ -403,6 +403,7 @@ final class GradeModel: ObservableObject {
             // NOT A TOAST. The controls becoming live IS the notification — the picture and the
             // sliders respond, right where you're looking — and a toast in the top-right corner
             // only sat on top of them.
+
             // The probe this render paid for. It is what the gamma solve needs, and recording it
             // here means the curve is the rendered one from the first drag rather than from the
             // first render.
