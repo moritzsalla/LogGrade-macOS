@@ -262,6 +262,9 @@ struct InspectorView: View {
                     ForEach(model.project.presets.map(\.name), id: \.self) { Text($0).tag($0) }
                 }
                 .labelsHidden().frame(width: 150)
+                Button("auto") { model.autoTone() }
+                    .buttonStyle(.borderless).font(Type.label)
+                    .disabled(model.selectedClip == nil)
                 if model.hasUnsavedChanges {
                     Text("adjusted").font(Type.caption).foregroundColor(Palette.plate)
                 }

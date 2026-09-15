@@ -554,6 +554,59 @@ final class GradeModel: ObservableObject {
         renderPreview()
     }
 
+    /// One press, a starting exposure, black point and contrast. `AutoTone.solve` is the maths;
+    /// this only measures for it and applies the result.
+    ///
+    /// THE LIVE TIER, TWICE, NOT AN ENGINE RENDER. `grade(_:source:conversion:measuredYAVG:)` is
+    /// the same in-process chain a drag already pays for, so a trial costs milliseconds rather than
+    /// the three seconds of an ffmpeg render. A baseline read with the tone fields neutral gives
+    /// the raw histogram to solve from; a second read against the solved values catches contrast
+    /// having moved the white point, and corrects exposure and contrast once more. Bounded at two
+    /// measurements — this is a starting point, not a converged solve.
+    func autoTone() {
+        guard let source = sourceImage, let conversion = conversionCube else { return }
+        let base = effectiveLook
+        let measuredYAVG = matchedYAVG
+        liveQueue.async { [weak self] in
+            guard let self else { return }
+
+            var baseline = base
+            baseline.correct.exposure = 0
+            baseline.tone.black = 0
+            baseline.tone.contrast = 1
+            guard
+                case .graded(_, let histogram?, _, _) = self.grade(
+                    baseline, source: source, conversion: conversion, measuredYAVG: measuredYAVG),
+                let solved = AutoTone.solve(histogram: histogram)
+            else { return }
+
+            var candidate = base
+            candidate.correct.exposure = solved.exposure
+            candidate.tone.black = solved.black
+            candidate.tone.contrast = solved.contrast
+            var final = solved
+            if case .graded(_, let verify?, _, _) = self.grade(
+                candidate, source: source, conversion: conversion, measuredYAVG: measuredYAVG),
+                let corrected = AutoTone.solve(
+                    histogram: verify, baseExposure: solved.exposure,
+                    baseContrast: solved.contrast)
+            {
+                final = AutoTone.Solved(
+                    exposure: corrected.exposure, black: solved.black,
+                    contrast: corrected.contrast)
+            }
+
+            DispatchQueue.main.async {
+                self.look.correct.exposure = final.exposure
+                self.look.tone.black = final.black
+                self.look.tone.contrast = final.contrast
+                self.refreshCurve()
+                self.liveUpdate()
+                self.renderPreview()
+            }
+        }
+    }
+
     /// Keeps the current grade under a name. The rule is `Project.savePreset`, where it is tested.
     func savePreset(named name: String) {
         project.savePreset(named: name, look: look)
