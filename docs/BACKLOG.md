@@ -23,7 +23,6 @@ non-technical photographer could use the result.
 - **An auto button:** one press gives a good starting grade.
 - **Export is slow on the Intel Mac.** Measure where the time goes first.
 - **Control sections in a logical order.**
-- **Remove the time-progression UI** next to the control sections.
 - **The print stage:** the user doesn't see why to add a print look to video. Explain it plainly or
   hide it; the engine keeps it.
 - **A brief splash instead of the startup screen,** like Photoshop's licence splash.
