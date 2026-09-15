@@ -580,6 +580,16 @@ correction_state() {  # correction_state  -> neutral|active
 	"$LIB_ROOT/scripts/make-correct-lut.py" --check-neutral $args
 }
 
+# Gamma is an argument because it is the one tone term solved per clip: under exposure matching the
+# curve a clip gets is not look.json's.
+tone_state() {  # tone_state <gamma>  -> neutral|active
+	local gamma shape
+	gamma="$(require_number gamma "$1")" || return 1
+	shape="$(tone_shape_args)" || return 1
+	# shellcheck disable=SC2086
+	"$LIB_ROOT/scripts/make-tone-lut.py" --check-neutral --gamma "$gamma" $shape
+}
+
 halation_state() {  # halation_state  -> neutral|active
 	local strength
 	strength="$(require_number halation.strength "$(look .halation.strength)")" || return 1
@@ -1056,6 +1066,7 @@ load_delivery_look() {
 	GRAIN_HIGHLIGHTS="$(require_unit grain.highlights "$(look .grain.highlights)")" || return 1
 	AUDIO_HIGHPASS_HZ="$(require_hz AUDIO_HIGHPASS_HZ \
 		"${AUDIO_HIGHPASS_HZ:-$DELIVERY_AUDIO_HIGHPASS_HZ}")" || return 1
+	FINISH="${FINISH:-1}"
 }
 
 # THE GRADE ITSELF, as a spliceable filter chain: look LUT, tone curve, saturation, warmth. Both
@@ -1083,16 +1094,26 @@ load_delivery_look() {
 # that an absent one leaves no trace: head is the camera CST for the one-pass path (the staged path
 # applied it back in stage 01), and tag is DELIVERY_SETPARAMS wherever the result feeds filters
 # that negotiate a colourspace.
-grade_chain() {  # grade_chain <tone-lut> <sat> <warm> [head-prefix] [tag-prefix]
-	local tone="$1" sat="$2" warm="$3" head="${4:-}" tag="${5:-}"
+#
+# A NEUTRAL STAGE IS ABSENT, as in film_lut_stage: an empty <tone-lut> leaves out the whole luma
+# branch (whether a curve is neutral is the caller's `tone_state`), saturation 1 leaves out `hue`,
+# and warmth 0 leaves out `colorbalance`, which would otherwise round-trip every pixel through RGB.
+# With every stage neutral the grade is the head and the tag, which is what makes "everything off"
+# a plain CST export. With nothing at all it is `null`, so a caller's `[0:v]...[o]` stays a graph.
+grade_chain() {  # grade_chain <tone-lut|empty> <sat> <warm> [head-prefix] [tag-prefix]
+	local tone="$1" sat="$2" warm="$3" head="${4:-}" tag="${5:-}" chain
 	# Two callers sourced lib.sh, called this function without loading the look, and received a
 	# chain with no look filter in it. Both looked correct; the golden's freshness guard is what
 	# caught it. So a look nobody loaded is loaded here, by the same function the scripts call.
 	load_film_look || return 1
-	printf "%s%s%sformat=yuv444p10le,split=2[gc_y][gc_c];[gc_y]lut1d=file='%s':interp=linear,format=yuv444p10le[gc_t];[gc_t][gc_c]mergeplanes=0x001112:yuv444p10le,%shue=s=%s,colorbalance=rm=%s:bm=-%s" \
-		"$head" "$(film_lut_stage "${LOOK_LUT:-}" "$LOOK_STRENGTH" gc_look)" \
-		"$(film_lut_stage "${PRINT_LUT:-}" "$PRINT_STRENGTH" gc_print)" \
-		"$tone" "$tag" "$sat" "$warm" "$warm"
+	chain="$head$(film_lut_stage "${LOOK_LUT:-}" "$LOOK_STRENGTH" gc_look)"
+	chain="$chain$(film_lut_stage "${PRINT_LUT:-}" "$PRINT_STRENGTH" gc_print)"
+	[ -z "$tone" ] || chain="${chain}format=yuv444p10le,split=2[gc_y][gc_c];[gc_y]lut1d=file='$tone':interp=linear,format=yuv444p10le[gc_t];[gc_t][gc_c]mergeplanes=0x001112:yuv444p10le,"
+	chain="$chain$tag"
+	[ "$(awk -v k="$sat" 'BEGIN { print (k == 1) }')" = 1 ] || chain="${chain}hue=s=$sat,"
+	[ "$(awk -v k="$warm" 'BEGIN { print (k == 0) }')" = 1 ] || chain="${chain}colorbalance=rm=$warm:bm=-$warm,"
+	chain="${chain%,}"
+	printf '%s' "${chain:-null}"
 }
 
 # One film cube — the look or the print — at a strength, as a prefix with its own trailing comma.
@@ -1252,7 +1273,10 @@ stab_prefix() {  # stab_prefix <trf> <smoothing>
 # The dither happens HERE, at the reduction, and not after the blend: the grey plate carries no
 # colourspace metadata, so a zscale placed after `blend` has no input space to convert from and
 # dies with "code 3074". The plate is already 8-bit, so dithering it again bought nothing anyway.
-delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-prefix>
+#
+# <finish> 0 leaves out the chroma denoise and the sharpener, for a plain export. What remains is the
+# stabiliser the caller chose, the crop and the dithered reduction, none of which is a look.
+delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-prefix> <finish 0|1>
 	# The sharpener's 5x5 was measured at 1080x1920, and its radius is in PIXELS — so at another
 	# output height it sharpens a different real-world detail size and the look changes. The radius
 	# scales with height and the amount does not, which is an ASSUMPTION rather than a measurement:
@@ -1267,6 +1291,10 @@ delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-pre
 	r=$(( 5 * $2 / 1920 ))
 	[ "$r" -ge 3 ] || r=3
 	[ $(( r % 2 )) -eq 1 ] || r=$(( r + 1 ))
+	if [ "$5" = 0 ]; then
+		printf '%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=yuv420p' "$3" "$4" "$1" "$2"
+		return
+	fi
 	printf '%s%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=yuv420p,unsharp=%s:%s:0.4:5:5:0.0' \
 		"$3" "$DELIVERY_CHROMA" "$4" "$1" "$2" "$r" "$r"
 }
@@ -1355,6 +1383,12 @@ render_deliverable() {  # render_deliverable <final-out> <label> <input> <w> <h>
 	[ "$AUDIO_HIGHPASS_HZ" -eq 0 ] || af="highpass=f=$AUDIO_HIGHPASS_HZ"
 	# `${af:+-af "$af"}` is zero words when the filter is off and exactly two when it is on. An
 	# array would be the obvious spelling, but an empty one under `set -u` is "unbound" on bash 3.2.
+	# Strength 0 is no plate and no merge: absent rather than idle, like a neutral grade stage.
+	if [ "$(awk -v k="$GRAIN_STRENGTH" 'BEGIN { print (k == 0) }')" = 1 ]; then
+		render_delivery "$out" "$label" -y -i "$in" -filter_complex "[0:v]${chain}[o]" \
+			"${DELIVERY_ENCODE[@]}" ${af:+-af "$af"} "$@"
+		return
+	fi
 	render_delivery "$out" "$label" \
 		-y -i "$in" -f lavfi -i "$(grain_plate "$w" "$h" "$fps")" \
 		-filter_complex "[0:v]${chain}[b];[1:v]$(delivery_grain_branch "$w" "$h" "$GRAIN_STRENGTH")[g];$(delivery_grain_merge b g o "$GRAIN_SHADOWS" "$GRAIN_HIGHLIGHTS")" \

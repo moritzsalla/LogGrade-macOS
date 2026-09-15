@@ -149,6 +149,10 @@ final class LookTests: XCTestCase {
         XCTAssertFalse(
             Look.matchesExposure(bypassing: [.tone]),
             "matching would re-solve the identity gamma into a curve")
+        XCTAssertFalse(
+            Look.finishes(bypassing: [.delivery]),
+            "the sharpener and denoise are not look values, so zero grain alone still finishes")
+        XCTAssertTrue(Look.finishes(bypassing: [.tone]))
         XCTAssertEqual(look.bypassing([]), look)
     }
 }

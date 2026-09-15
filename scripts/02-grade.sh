@@ -78,6 +78,9 @@ check_disk_space "$WORK/dist" 10
 # is wrong the moment a work dir is set: the marker was in the repo and the output was not.
 mkdir -p "$(dirname "$OUT")"
 ensure_tone_lut "$ROOT"
+TONE_GAMMA="$(look .tone.gamma)" || exit 1
+TONE_STATE="$(tone_state "$TONE_GAMMA")" || exit 1
+[ "$TONE_STATE" != neutral ] || TONE=""
 
 ffmpeg -y -i "$BASELINE" \
 	-filter_complex "[0:v]$(grade_chain "$TONE" "$SAT" "$WARM")[o]" \

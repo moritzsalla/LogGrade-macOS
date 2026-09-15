@@ -565,11 +565,17 @@ for SRC in "${CLIPS[@]}"; do
 	# Generated AFTER the dry-run exit, not before: DRY=1 is documented as "plan only, render
 	# nothing", and this was writing a 4096-entry cube per clip on a run that renders nothing. The
 	# probe and the solve still happen above, because the solved gamma IS the plan.
-	_t=$(now_ms)
-	# shellcheck disable=SC2086  # deliberate split: a flag list of validated values
-	"$SCRIPT_DIR/make-tone-lut.py" "$TONE" --gamma "$GAMMA" $TONE_SHAPE_ARGS >/dev/null
-	_t=$(( $(now_ms) - _t )); T_TONE=$(( T_TONE + _t ))
-	report_line "      tone cube took $(fmt_ms "$_t")"
+	# A neutral curve is no cube and no luma branch; see grade_chain.
+	TONE_STATE="$(tone_state "$GAMMA")" || exit 1
+	if [ "$TONE_STATE" = neutral ]; then
+		TONE=""
+	else
+		_t=$(now_ms)
+		# shellcheck disable=SC2086  # deliberate split: a flag list of validated values
+		"$SCRIPT_DIR/make-tone-lut.py" "$TONE" --gamma "$GAMMA" $TONE_SHAPE_ARGS >/dev/null
+		_t=$(( $(now_ms) - _t )); T_TONE=$(( T_TONE + _t ))
+		report_line "      tone cube took $(fmt_ms "$_t")"
+	fi
 
 	# The preview stops here: same chain head, same tone cube, no delivery stage. It goes through
 	# grade_chain like everything else, so it cannot drift from what the render does — the suite's
@@ -635,7 +641,7 @@ for SRC in "${CLIPS[@]}"; do
 		render_deliverable "$out" "$suffix encode" "$SRC" "$w" "$h" "$FPS" \
 "$(grade_chain "$TONE" "$SAT" "$WARM" \
   "${CORRECT_PREFIX}${HALATION_PREFIX}lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},"),\
-$(delivery_image_chain "$w" "$h" "$SFX" "$crop")${FPS_FILTER}" \
+$(delivery_image_chain "$w" "$h" "$SFX" "$crop" "$FINISH")${FPS_FILTER}" \
 			$LIMIT || return 1
 		# `|| return 1` above is load-bearing now that the caller invokes render() inside an `if`:
 		# that suppresses `set -e` for this whole body, so without it a failed render would fall

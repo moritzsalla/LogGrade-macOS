@@ -123,5 +123,5 @@ FPS="$(source_fps "$IN")"
 # the approved deliverable it was overwriting. It also handles the non-empty check and the tag
 # verification, because a file that lands must be one that was checked. See lib.sh.
 render_deliverable "$OUT" "$SUFFIX encode" "$IN" "$W" "$H" "$FPS" \
-	"$(delivery_image_chain "$W" "$H" "$STAB_PREFIX" "$CROP")"
+	"$(delivery_image_chain "$W" "$H" "$STAB_PREFIX" "$CROP" "$FINISH")"
 echo "done: $OUT"

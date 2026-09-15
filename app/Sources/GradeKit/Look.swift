@@ -374,7 +374,7 @@ public struct Look: Equatable {
         case print = "Print"
         case tone = "Tone"
         case trims = "Trims"
-        case grain = "Delivery"
+        case delivery = "Delivery"
     }
 
     /// This look with the given stages written as the values the engine leaves out, so a bypass
@@ -384,7 +384,9 @@ public struct Look: Equatable {
     /// clamps it to at least 1.2, so an identity curve here still renders a curve unless the
     /// render also runs with `MATCH=0` — see `matchesExposure(bypassing:)`.
     ///
-    /// Grain only, for Delivery: the stabiliser has its own per-clip switch, and a second one
+    /// DELIVERY IS NOT OFF THROUGH THE LOOK ALONE either: grain is a look value, but the chroma
+    /// denoise and the sharpener are not, so the render also runs with `FINISH=0` — see
+    /// `finishes(bypassing:)`. The stabiliser has its own per-clip switch, and a second one
     /// fighting it is worse than none.
     public func bypassing(_ stages: Set<Stage>) -> Look {
         var out = self
@@ -399,7 +401,7 @@ public struct Look: Equatable {
                     gamma: 1, pivot: tone.pivot, contrast: 1, toe: 0, shoulder: 0,
                     black: 0)
             case .trims: out.colour = Colour(saturation: 1, warmth: 0)
-            case .grain: out.grainStrength = 0
+            case .delivery: out.grainStrength = 0
             }
         }
         return out
@@ -407,6 +409,10 @@ public struct Look: Equatable {
 
     public static func matchesExposure(bypassing stages: Set<Stage>) -> Bool {
         !stages.contains(.tone)
+    }
+
+    public static func finishes(bypassing stages: Set<Stage>) -> Bool {
+        !stages.contains(.delivery)
     }
 
     /// Writes a complete look.json somewhere the engine can be pointed at with LOOK_FILE, so a
