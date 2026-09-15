@@ -50,11 +50,16 @@ public struct LiveChain {
         /// The print follows the look, as it does in the engine's `grade_chain`.
         public let print: Cube3D?
         public let printStrength: Float
+        /// The hue curves follow the print, as in `grade_chain`.
+        public let hue: Cube3D?
 
         var cubes: [StageCube] { (correction.map { [StageCube($0)] } ?? []) + afterHalation }
         var afterHalation: [StageCube] {
-            [StageCube(conversion), StageCube(look, lookStrength), StageCube(print, printStrength)]
-                .compactMap { $0 }
+            [
+                StageCube(conversion), StageCube(look, lookStrength),
+                StageCube(print, printStrength), StageCube(hue, 1),
+            ]
+            .compactMap { $0 }
         }
     }
 
@@ -86,12 +91,12 @@ public struct LiveChain {
     public static func colourStages(
         correction: Cube3D?, halation: LiveHalation? = nil,
         conversion: Cube3D, look: Cube3D?, lookStrength: Double = 1,
-        print: Cube3D? = nil, printStrength: Double = 1
+        print: Cube3D? = nil, printStrength: Double = 1, hue: Cube3D? = nil
     ) -> ColourStages {
         ColourStages(
             correction: correction, halation: halation, conversion: conversion, look: look,
             lookStrength: Float(lookStrength), print: print,
-            printStrength: Float(printStrength))
+            printStrength: Float(printStrength), hue: hue)
     }
 
     /// The source through the colour stages only: correction, halation, conversion, look, print.

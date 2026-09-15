@@ -113,6 +113,9 @@ final class GradeModel: ObservableObject {
     /// 60 times a second.
     private var correctionCube: Cube3D?
     private var correctionFor: Look.Correct?
+    /// The hue curves' cube and the curves it was built from, rebuilt only when a knot moves.
+    private var hueCube: Cube3D?
+    private var hueFor: Look.Hue?
     private var gradeCurve: ToneCurve?
     private var gradeCurveFor: Look.Tone?
     /// The engine's own default (`CORRECT_SIZE` in grade.sh), because the live picture has to be
@@ -138,6 +141,7 @@ final class GradeModel: ObservableObject {
         let lookStrength: Double
         let printLUT: String
         let printStrength: Double
+        let hue: Look.Hue
 
         /// `look`'s correction is the one the frame was converted with, metering included.
         init(_ look: Look) {
@@ -148,6 +152,7 @@ final class GradeModel: ObservableObject {
             lookStrength = look.lookStrength
             printLUT = look.printLUT
             printStrength = look.printStrength
+            hue = look.hue
         }
     }
 
@@ -345,6 +350,16 @@ final class GradeModel: ObservableObject {
             return .refused("The print “\(wanted.printLUT)” couldn’t be read.")
         }
 
+        if hueFor != wanted.hue {
+            hueCube =
+                wanted.hue.isNeutral
+                ? nil : HueCube.cube(for: wanted.hue, size: Self.correctionCubeSize)
+            hueFor = wanted.hue
+        }
+        if !wanted.hue.isNeutral && hueCube == nil {
+            return .refused("Those hue curves aren’t values the engine accepts.")
+        }
+
         let tone = Self.appliedTone(wanted, measuredYAVG: measuredYAVG)
         if gradeCurveFor != tone {
             gradeCurve = ToneCurve.generated(tone: tone)
@@ -363,7 +378,8 @@ final class GradeModel: ObservableObject {
                 look: lookStage,
                 lookStrength: wanted.lookStrength,
                 print: printStage,
-                printStrength: wanted.printStrength)
+                printStrength: wanted.printStrength,
+                hue: hueCube)
             converted = LiveChain.converted(source, through: stages)
             if let converted {
                 convertedFrame = converted

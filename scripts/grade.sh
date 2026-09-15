@@ -190,7 +190,7 @@ CACHE="$WORK/dist/.grade-work"
 # LOOK=<name|none|path> and PRINT= override the film cubes for one run; the app sets them per
 # render. The loaders keep a value that is already set, which is for callers that source lib.sh —
 # so the names are cleared first, or a stray SAT in someone's environment would become the grade.
-unset LOOK_LUT PRINT_LUT LOOK_STRENGTH PRINT_STRENGTH SAT WARM
+unset LOOK_LUT PRINT_LUT LOOK_STRENGTH PRINT_STRENGTH SAT WARM HUE_LUT
 load_grade_look || exit 1
 load_delivery_look || exit 1
 
@@ -398,6 +398,8 @@ if [ "$CORRECT_STATE" = "active" ]; then
 	"$SCRIPT_DIR/make-correct-lut.py" "$CORRECT_LUT" $CORRECT_ARGS --size "$CORRECT_SIZE" >/dev/null
 	CORRECT_PREFIX="lut3d=file='${CORRECT_LUT}':interp=tetrahedral,"
 fi
+# The hue curves' cube, once per run; grade_chain splices it in after the print.
+ensure_hue_lut "$CACHE" || exit 1
 # The cubes depend only on the threshold, so they are made once per run. The prefix itself is built
 # per clip below, because its radius is a fraction of each clip's own frame.
 if [ "$HAL_STATE" = "active" ]; then

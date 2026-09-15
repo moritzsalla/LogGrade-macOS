@@ -237,6 +237,77 @@ public struct Look: Equatable {
         }
     }
 
+    /// The hue curves: per-colour hue, saturation and lightness, twelve knots each at every 30
+    /// degrees of Oklab hue. `scripts/make-hue-lut.py` carries what they do and why. Kept as the
+    /// engine's comma-separated text, for the reason `Correct` keeps its wheels as text.
+    public struct Hue: Equatable {
+        public enum Curve: String, CaseIterable {
+            case rot, sat, lum
+
+            /// The generator's bound on a knot, which the interface's range follows.
+            public var limit: Double {
+                switch self {
+                case .rot: return 60
+                case .sat: return 1
+                case .lum: return 0.5
+                }
+            }
+        }
+
+        public var rot: String
+        public var sat: String
+        public var lum: String
+
+        public static let flat = Array(repeating: "0", count: HueCube.knots).joined(separator: ",")
+
+        public init(rot: String = flat, sat: String = flat, lum: String = flat) {
+            self.rot = rot
+            self.sat = sat
+            self.lum = lum
+        }
+
+        private func text(_ curve: Curve) -> String {
+            switch curve {
+            case .rot: return rot
+            case .sat: return sat
+            case .lum: return lum
+            }
+        }
+
+        /// The twelve knots, or nil where the generator would refuse the text: a wrong count, a
+        /// non-number, or a knot past its bound.
+        public func values(_ curve: Curve) -> [Double]? {
+            guard let v = numbers(in: text(curve)), v.count == HueCube.knots,
+                v.allSatisfy({ $0.isFinite && abs($0) <= curve.limit })
+            else { return nil }
+            return v
+        }
+
+        public func value(_ curve: Curve, _ knot: Int) -> Double {
+            values(curve)?[knot] ?? 0
+        }
+
+        public mutating func setValue(_ curve: Curve, _ knot: Int, _ value: Double) {
+            var v = values(curve) ?? Array(repeating: 0, count: HueCube.knots)
+            v[knot] = min(curve.limit, max(-curve.limit, value))
+            let written = v.map { String(format: "%g", $0) }.joined(separator: ",")
+            switch curve {
+            case .rot: rot = written
+            case .sat: sat = written
+            case .lum: lum = written
+            }
+        }
+
+        /// Parsed, as the generator decides it: "0.0,..." is as neutral as "0,...".
+        public var isNeutral: Bool {
+            Curve.allCases.allSatisfy { values($0)?.allSatisfy { $0 == 0 } ?? false }
+        }
+
+        public func generatorArguments(size: Int) -> [String] {
+            ["--stdout", "--rot", rot, "--sat", sat, "--lum", lum, "--size", String(size)]
+        }
+    }
+
     /// Apple's own conversion, as `convert.cube` names it.
     public static let appleConversion = "apple"
     /// What an older project's looks are given for `match.reference_stops`: look.json's value, which
@@ -256,6 +327,7 @@ public struct Look: Equatable {
     /// The print-film cube's stem in `luts/print/`, or "none". It follows the look.
     public var printLUT: String
     public var printStrength: Double
+    public var hue: Hue
     public var tone: Tone
     public var colour: Colour
     public var grainStrength: Double
@@ -275,7 +347,7 @@ public struct Look: Equatable {
         a.convertCube == b.convertCube && a.correct == b.correct && a.halation == b.halation
             && a.lookLUT == b.lookLUT
             && a.lookStrength == b.lookStrength && a.printLUT == b.printLUT
-            && a.printStrength == b.printStrength && a.tone == b.tone
+            && a.printStrength == b.printStrength && a.hue == b.hue && a.tone == b.tone
             && a.colour == b.colour && a.grainStrength == b.grainStrength
             && a.grainShadows == b.grainShadows && a.grainHighlights == b.grainHighlights
             && a.stabilisationSmoothing == b.stabilisationSmoothing
@@ -336,6 +408,10 @@ public struct Look: Equatable {
         let printBlock = try block("print")
         printLUT = try text(printBlock, "lut", "print.lut")
         printStrength = try number(printBlock, "strength", "print.strength")
+        let hueBlock = try block("hue")
+        hue = Hue(
+            rot: try text(hueBlock, "rot", "hue.rot"), sat: try text(hueBlock, "sat", "hue.sat"),
+            lum: try text(hueBlock, "lum", "hue.lum"))
         let toneBlock = try block("tone")
         tone = Tone(
             gamma: try number(toneBlock, "gamma", "tone.gamma"),
@@ -366,7 +442,7 @@ public struct Look: Equatable {
 
         var extra = root
         for known in [
-            "convert", "correct", "halation", "look", "print", "tone", "colour", "grain",
+            "convert", "correct", "halation", "look", "print", "hue", "tone", "colour", "grain",
             "stabilisation", "match", "finish",
         ] {
             extra.removeValue(forKey: known)
@@ -388,6 +464,7 @@ public struct Look: Equatable {
         ]
         root["look"] = ["lut": lookLUT, "strength": lookStrength]
         root["print"] = ["lut": printLUT, "strength": printStrength]
+        root["hue"] = ["rot": hue.rot, "sat": hue.sat, "lum": hue.lum]
         root["tone"] = [
             "gamma": tone.gamma, "pivot": tone.pivot, "contrast": tone.contrast,
             "toe": tone.toe, "shoulder": tone.shoulder, "black": tone.black,
@@ -416,6 +493,7 @@ public struct Look: Equatable {
         case halation = "Halation"
         case filmLook = "Film look"
         case print = "Print"
+        case hue = "Hue curves"
         case tone = "Tone"
         case trims = "Trims"
         case delivery = "Delivery"
@@ -443,6 +521,7 @@ public struct Look: Equatable {
                 out.lookLUT = "none"
                 out.convertCube = Self.appleConversion
             case .print: out.printLUT = "none"
+            case .hue: out.hue = Hue()
             case .tone:
                 out.tone = Tone(
                     gamma: 1, pivot: tone.pivot, contrast: 1, toe: 0, shoulder: 0,

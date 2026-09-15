@@ -48,7 +48,7 @@ TONE="$ROOT/luts/tone/shipped.cube"
 # LOOK=<name|none|path> and PRINT= override the film cubes for one run, as they do for grade.sh.
 # The names are cleared first: the loader keeps a value already set, and a stray SAT in someone's
 # environment must not become the grade.
-unset LOOK_LUT PRINT_LUT LOOK_STRENGTH PRINT_STRENGTH SAT WARM
+unset LOOK_LUT PRINT_LUT LOOK_STRENGTH PRINT_STRENGTH SAT WARM HUE_LUT
 load_grade_look || exit 1
 OUT="$(graded_master_path "$WORK" "$CLIP")"
 
@@ -79,6 +79,7 @@ check_disk_space "$WORK/dist" 10
 # is wrong the moment a work dir is set: the marker was in the repo and the output was not.
 mkdir -p "$(dirname "$OUT")"
 ensure_tone_lut "$ROOT"
+ensure_hue_lut "$WORK/dist/.grade-work" || exit 1
 TONE_GAMMA="$(look .tone.gamma)" || exit 1
 TONE_STATE="$(tone_state "$TONE_GAMMA")" || exit 1
 [ "$TONE_STATE" != neutral ] || TONE=""

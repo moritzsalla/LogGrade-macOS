@@ -30,7 +30,7 @@ _Avoid_: format, cut, version
 _Avoid_: draft, test render
 
 **Preview**: the still the app shows while a control moves. It covers the grade only (correction,
-halation, CST, look, print, tone, trims), not grain, sharpening, denoise, stabilisation or dither.
+halation, CST, look, print, hue curves, tone, trims), not grain, sharpening, denoise, stabilisation or dither.
 A proof answers "is this deliverable"; a preview answers "is this the grade".
 
 ## The grade
@@ -50,12 +50,15 @@ stock's negative and scan scene-referred, in place of the CST, look, print and t
 **Print**: the print-film LUT (Kodak 2383 and kin), after the look and before the tone, with a
 strength. _Avoid_: second look, output LUT
 
+**Hue curves**: per-colour hue, saturation and lightness, twelve knots on Oklab hue, after the print
+and before the tone (`make-hue-lut.py`). Distinct from the trims' global saturation.
+
 **Tone**: the generated luma curve that gives density. _Avoid_: S-curve, tone map, grade
 
 **Correction**: the input stage: exposure, white balance and wheels, applied in Apple Log before the
 CST. Left out of the graph when neutral. _Avoid_: colour correction, input LUT
 
-**Grade**: correction + halation + look + print + tone + trims: the whole creative transform.
+**Grade**: correction + halation + look + print + hue curves + tone + trims: the whole creative transform.
 _Avoid_: look, edit
 
 **Colour correction**: moving colour toward its measured spec. Not the correction stage.

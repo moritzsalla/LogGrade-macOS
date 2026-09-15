@@ -139,7 +139,8 @@ final class LiveChainTests: XCTestCase {
                 lookStrength: look.lookStrength,
                 print: rig.engine.printCube(named: look.printLUT)
                     .flatMap { try? Cube3D(contentsOf: $0) },
-                printStrength: look.printStrength),
+                printStrength: look.printStrength,
+                hue: look.hue.isNeutral ? nil : HueCube.cube(for: look.hue, size: 33)),
             grade: LiveGrade(
                 curve: ToneCurve.generated(tone: tone),
                 saturation: look.colour.saturation, warmth: look.colour.warmth))
@@ -186,6 +187,10 @@ final class LiveChainTests: XCTestCase {
         let filmPreset = try XCTUnwrap(
             rig.engine.shippedPresets().first { $0.look.convertCube == "rz67_portra400" }
         ).look
+        var withHue = filmPreset
+        withHue.hue = Look.Hue(
+            rot: "30,30,0,-20,-20,-20,0,0,0,0,30,30", sat: "1,1,0,-1,-1,-1,0,0,-1,-1,1,1",
+            lum: "0,0,0,-0.4,-0.4,-0.4,0,0,0,0,0,0")
 
         // The percentile each case is held to; see above for why a print needs more.
         let edgeBound = 24.0
@@ -206,6 +211,10 @@ final class LiveChainTests: XCTestCase {
             // The conversion swapped for a film cube, with the engine's metered exposure and white
             // balance in the correction.
             ("a film preset", filmPreset, edgeBound),
+            // Every curve pushed hard, so edges are graded through steep moves, as through a
+            // print: measured percentile 25. With the live hue stage dropped the same case read
+            // mean 13.2, percentile 91, worst 137.
+            ("hue curves", withHue, printedEdgeBound),
         ]
         for (name, look, percentileBound) in cases {
             let (mean, p999, worst) = try compare(rig, look: look)

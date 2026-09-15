@@ -641,6 +641,35 @@ tone_state() {  # tone_state <gamma>  -> neutral|active
 	"$LIB_ROOT/scripts/make-tone-lut.py" --check-neutral --gamma "$gamma" $shape
 }
 
+hue_args() {  # hue_args  -> "--rot R --sat S --lum L"
+	local rot sat lum
+	rot="$(require_numbers hue.rot "$(look .hue.rot)")" || return 1
+	sat="$(require_numbers hue.sat "$(look .hue.sat)")" || return 1
+	lum="$(require_numbers hue.lum "$(look .hue.lum)")" || return 1
+	printf -- '--rot %s --sat %s --lum %s\n' "$rot" "$sat" "$lum"
+}
+
+hue_state() {  # hue_state  -> neutral|active
+	local args
+	args="$(hue_args)" || return 1
+	# shellcheck disable=SC2086
+	"$LIB_ROOT/scripts/make-hue-lut.py" --check-neutral $args
+}
+
+# The hue curves' cube, generated into <dir> and named in HUE_LUT, or HUE_LUT empty when the curves
+# are flat. A global, so call it at the top level: `ensure_hue_lut "$CACHE" || exit 1`.
+ensure_hue_lut() {  # ensure_hue_lut <dir>
+	local args state
+	args="$(hue_args)" || return 1
+	state="$(hue_state)" || return 1
+	HUE_LUT=""
+	[ "$state" = active ] || return 0
+	mkdir -p "$1"
+	HUE_LUT="$1/hue.cube"
+	# shellcheck disable=SC2086
+	"$LIB_ROOT/scripts/make-hue-lut.py" "$HUE_LUT" $args >/dev/null
+}
+
 halation_state() {  # halation_state  -> neutral|active
 	local strength
 	strength="$(require_number halation.strength "$(look .halation.strength)")" || return 1
@@ -1188,6 +1217,18 @@ grade_chain() {  # grade_chain <tone-lut|empty> <sat> <warm> [head-prefix] [tag-
 	load_film_look || return 1
 	chain="$head$(film_lut_stage "${LOOK_LUT:-}" "$LOOK_STRENGTH" gc_look)"
 	chain="$chain$(film_lut_stage "${PRINT_LUT:-}" "$PRINT_STRENGTH" gc_print)"
+	# THE HUE CURVES follow the print, so they act on the colours the stock rendered, and precede
+	# the tone curve, which is luma-only and keeps their chroma. A caller that never generated the
+	# cube gets flat curves left out, and active ones refused rather than dropped in silence.
+	if [ -z "${HUE_LUT+set}" ]; then
+		local hue_state_now
+		hue_state_now="$(hue_state)" || return 1
+		if [ "$hue_state_now" = active ]; then
+			echo "hue curves are set but no cube was generated: call ensure_hue_lut first" >&2
+			return 1
+		fi
+	fi
+	[ -z "${HUE_LUT:-}" ] || chain="${chain}lut3d=file='${HUE_LUT}':interp=tetrahedral,"
 	[ -z "$tone" ] || chain="${chain}format=yuv444p10le,split=2[gc_y][gc_c];[gc_y]lut1d=file='$tone':interp=linear,format=yuv444p10le[gc_t];[gc_t][gc_c]mergeplanes=0x001112:yuv444p10le,"
 	chain="$chain$tag"
 	[ "$(awk -v k="$sat" 'BEGIN { print (k == 1) }')" = 1 ] || chain="${chain}hue=s=$sat,"
