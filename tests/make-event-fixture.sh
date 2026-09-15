@@ -29,16 +29,14 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/src"
 
-# A portrait clip and a landscape one, so the stream carries a planned clip AND a refused one, from
-# the builder the bats suite uses.
+# A clip and a file that is not a video, so the stream carries a planned clip AND a skipped one,
+# from the builder the bats suite uses.
 # shellcheck source=tests/fixture-clip.sh
 source "$ROOT/tests/fixture-clip.sh"
-# 72x128 IS 9:16 EXACTLY, and 128x72 is its landscape counterpart. These were 64x128 and 128x64,
-# i.e. 1:2, which was invisible for as long as the 9:16 deliverable took no crop. Once a deliverable
-# became an aspect, a 1:2 source had to be cropped to reach 9:16, and a two-clip run with no offset
-# is refused — so the generator exited non-zero and produced nothing.
+# 72x128 IS 9:16 EXACTLY, so reels takes it whole: a source that crops is refused without an offset,
+# and the generator would exit non-zero and produce nothing.
 make_tagged_clip 72 128 bt709 bt709 bt709 "$WORK/src/TALL.mov"
-make_tagged_clip 128 72 bt709 bt709 bt709 "$WORK/src/WIDE.mov"
+printf 'not a video\n' > "$WORK/src/BROKEN.mov"
 
 STREAM="$(JSON=1 DRY=1 MATCH=0 GRADE_WORK_DIR="$WORK" "$ROOT/scripts/grade.sh" "$WORK/src" 2>/dev/null \
 	| sed -e "s|$WORK|<WORK>|g" \

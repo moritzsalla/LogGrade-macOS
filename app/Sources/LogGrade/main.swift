@@ -249,6 +249,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 private enum KeyCode {
     static let upArrow: UInt16 = 126
     static let downArrow: UInt16 = 125
+    static let leftArrow: UInt16 = 123
+    static let rightArrow: UInt16 = 124
 }
 
 // A bare executable rather than a bundle, so `swift run` works from a terminal and the build stays
@@ -316,10 +318,14 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
     // The crop, by the pixel. Arrow keys only mean the crop while something that crops is asked
     // for; otherwise they belong to whatever has focus. Shift moves by ten, the way a nudge does
     // everywhere else on this platform.
-    if grade.cropIsPerClip, grade.cropGeometry != nil {
+    // Only the two arrows along the axis the window moves: up and down on a portrait clip, left
+    // and right on a landscape one.
+    if grade.cropIsPerClip, let geometry = grade.cropGeometry {
         let step = event.modifierFlags.contains(.shift) ? 10 : 1
-        if event.keyCode == KeyCode.upArrow { grade.nudgeCrop(by: -step); return nil }
-        if event.keyCode == KeyCode.downArrow { grade.nudgeCrop(by: step); return nil }
+        let (back, forward) = geometry.axis == .y
+            ? (KeyCode.upArrow, KeyCode.downArrow) : (KeyCode.leftArrow, KeyCode.rightArrow)
+        if event.keyCode == back { grade.nudgeCrop(by: -step); return nil }
+        if event.keyCode == forward { grade.nudgeCrop(by: step); return nil }
     }
     // ONLY WHAT A MENU CANNOT DO. Compare has to be HELD — pressed and released — and a menu item
     // fires once on selection, so it stays here. Everything else moved to the menu bar, where

@@ -45,17 +45,33 @@ final class DeliverableTests: XCTestCase {
         XCTAssertEqual(square.spec, "square:1:1")
     }
 
-    func testWhetherAShapeCropsIsDecidedByRatioNotByName() throws {
-        XCTAssertFalse(Deliverable.reels.cropsPortraitMaster)
-        XCTAssertTrue(Deliverable.feed.cropsPortraitMaster)
+    func testWhetherAShapeCropsIsDecidedByTheClipNotByName() throws {
+        let portrait = FrameSize(width: 2160, height: 3840)
+        let landscape = FrameSize(width: 3840, height: 2160)
+        let wide = Deliverable(name: "wide", aspectWidth: 16, aspectHeight: 9)
+        XCTAssertFalse(Deliverable.reels.crops(portrait))
+        XCTAssertTrue(Deliverable.feed.crops(portrait))
+        XCTAssertTrue(wide.crops(portrait))
+        XCTAssertTrue(Deliverable.reels.crops(landscape), "9:16 is a crop of a landscape clip")
+        XCTAssertFalse(wide.crops(landscape))
         // 18:32 IS 9:16. A name-based test would call this a crop and make the interface demand a
         // crop offset for a shape that takes the whole frame, which blocks Convert on a question
         // with no answer.
         let sameRatio = Deliverable(name: "tall", aspectWidth: 18, aspectHeight: 32)
-        XCTAssertFalse(sameRatio.cropsPortraitMaster,
-                       "18:32 is 9:16, so it takes the whole frame")
-        let landscape = Deliverable(name: "wide", aspectWidth: 16, aspectHeight: 9)
-        XCTAssertTrue(landscape.cropsPortraitMaster)
+        XCTAssertFalse(sameRatio.crops(portrait), "18:32 is 9:16, so it takes the whole frame")
+        // Unmeasured is answered as a 9:16 master, so an unpreviewed clip does not block reels.
+        XCTAssertFalse(Deliverable.reels.crops(nil))
+        XCTAssertTrue(Deliverable.feed.crops(nil))
+    }
+
+    func testALandscapeClipBlocksReelsUntilItHasAnOffset() throws {
+        let project = Project(presets: [.init(name: "p", look: try lookFixture())],
+                              activePreset: "p", delivery: .init(targets: [.reels]))
+        let sizes = ["WIDE": FrameSize(width: 3840, height: 2160),
+                     "TALL": FrameSize(width: 2160, height: 3840)]
+        XCTAssertEqual(project.blockers(for: ["WIDE", "TALL"], sizes: sizes),
+                       [.cropWithoutOffset(deliverables: [.reels], clips: ["WIDE"])],
+                       "only the landscape clip has a window to place")
     }
 
     func testTheEnvironmentNamesEveryDeliverableAndNoLongerNamesFEED() throws {
@@ -154,7 +170,7 @@ final class DeliverableTests: XCTestCase {
                        "square:1:1")
     }
 
-    /// The engine lets a deliverable's own offset beat `CROP_Y`, so a `centre` shape has nothing
+    /// The engine lets a deliverable's own offset beat `CROP_OFFSET`, so a `centre` shape has nothing
     /// for a clip to decide, while one without an offset still takes the clip's.
     func testOnlyAShapeWithoutItsOwnOffsetWaitsForTheClip() throws {
         let centred = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
@@ -189,7 +205,7 @@ final class DeliverableTests: XCTestCase {
         let reread = try Project(data: try project.serialised())
         XCTAssertEqual(reread.delivery.targets, [.reels, centred, plain])
 
-        // Written before a shape could carry an offset: every shape then followed CROP_Y.
+        // Written before a shape could carry an offset: every shape then followed the clip's offset.
         let older = """
         {"version": 2, "presets": [], "active_preset": "",
          "delivery": {"targets": [{"name": "square", "aspect_width": 1, "aspect_height": 1}]},

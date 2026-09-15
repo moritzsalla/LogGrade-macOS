@@ -17,8 +17,9 @@ public struct LiveHalation {
     let strength: Float
     let threshold: Double
     let tint: SIMD3<Float>
-    /// In pixels of the frame being graded. The look stores a fraction of the frame's height, so
-    /// a 480-line preview and a 3840-line render blur the same part of the picture.
+    /// In pixels of the frame being graded. The look stores a fraction of the frame's long edge,
+    /// as `halation_sigma` in scripts/lib.sh reads it, so a 480-line preview and a 3840-line render
+    /// blur the same part of the picture in either orientation.
     let sigma: Float
 
     /// BT.2020, because Apple Log's primaries are BT.2020. The same weights the engine writes into
@@ -27,12 +28,12 @@ public struct LiveHalation {
 
     /// Nil when the stage would do nothing, or when the tint is not a value the engine accepts —
     /// a live picture of something the render refuses is worse than none.
-    public init?(_ halation: Look.Halation, frameHeight: Int) {
+    public init?(_ halation: Look.Halation, frameLongEdge: Int) {
         guard !halation.isNeutral, let t = halation.tintValues else { return nil }
         strength = Float(halation.strength)
         threshold = halation.threshold
         tint = SIMD3(Float(t.0), Float(t.1), Float(t.2))
-        sigma = Float(halation.radius) * Float(frameHeight)
+        sigma = Float(halation.radius) * Float(frameLongEdge)
     }
 
     /// `halation-threshold.cube`, one entry.

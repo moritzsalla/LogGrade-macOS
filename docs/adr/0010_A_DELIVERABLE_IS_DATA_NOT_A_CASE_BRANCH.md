@@ -25,12 +25,11 @@ printed per clip, because rounding in silence is this project's oldest failure c
   9:16.
 - **The crop offset has no default, and centre is not one.** The old default of 750 was one clip's
   framing. A batch centred by default gives files that all look finished and are framed wrong. A
-  cropping deliverable without an offset is refused (`REFUSE_CROP_NO_OFFSET`). `CROP_Y=centre` is
+  cropping deliverable without an offset is refused (`REFUSE_CROP_NO_OFFSET`). `CROP_OFFSET=centre` is
   accepted as an explicit choice and resolved per clip against the measured frame.
 - **Names reach a filename and an ffmpeg argument,** so they go through `require_clip_name`.
-- **The crop window is still full source width with a vertical offset only.** Once landscape
-  sources are accepted, this needs a horizontal offset too, a 2D crop (`docs/BACKLOG.md`). The
-  width anchor and "crop, don't squash" hold for landscape unchanged.
+- **The crop window fills one source axis and moves along the other** (`crop_window`), so one offset
+  is enough: vertical on a portrait source, horizontal on a landscape one.
 - **Untuned away from 1080x1920.** The sharpener's radius follows output height but its amount
   does not, and the grain was sized at 1080. `delivery_image_chain` says which number has evidence
   behind it.

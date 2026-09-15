@@ -8,8 +8,8 @@ final class EngineRunTests: XCTestCase {
         let engine = try stubEngine(script: """
         #!/bin/bash
         echo '{"event":"run_start","clips":1}'
-        echo 'GRADE_CODE=REFUSE_NOT_PORTRAIT' >&2
-        echo '{"event":"clip_skipped","clip":"WIDE","code":"REFUSE_NOT_PORTRAIT"}'
+        echo 'GRADE_CODE=REFUSE_UNMEASURED' >&2
+        echo '{"event":"clip_skipped","clip":"BROKEN","code":"REFUSE_UNMEASURED"}'
         echo '{"event":"run_done","rendered":0,"skipped":1,"failed":0}'
         exit 0
         """)
@@ -22,7 +22,7 @@ final class EngineRunTests: XCTestCase {
         XCTAssertEqual(outcome.events.map(\.name), ["run_start", "clip_skipped", "run_done"])
         XCTAssertEqual(streamed, ["run_start", "clip_skipped", "run_done"],
                        "events must arrive as they happen, not only at the end")
-        XCTAssertEqual(outcome.codes, [.notPortrait])
+        XCTAssertEqual(outcome.codes, [.unmeasured])
         XCTAssertTrue(outcome.malformed.isEmpty)
     }
 

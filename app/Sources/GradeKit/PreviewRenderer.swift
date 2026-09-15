@@ -27,6 +27,8 @@ public final class PreviewRenderer {
         /// the SOLVED one, or they describe a render that never happens.
         public let yavg: Double?
         public let gamma: Double?
+        /// The decoded frame, which is how the app learns a clip's orientation.
+        public let sourceSize: FrameSize?
     }
 
     /// The clip's post-CST mean, measured once by the engine and remembered here. It does not
@@ -95,7 +97,11 @@ public final class PreviewRenderer {
                      clip: event.clip ?? clip.deletingPathExtension().lastPathComponent,
                      seconds: seconds,
                      yavg: planned?.double("yavg"),
-                     gamma: planned?.double("gamma"))
+                     gamma: planned?.double("gamma"),
+                     sourceSize: planned.flatMap { p in
+                         p.int("width").flatMap { w in
+                             p.int("height").map { FrameSize(width: w, height: $0) } }
+                     })
     }
 
     public enum Failure: Error, CustomStringConvertible {

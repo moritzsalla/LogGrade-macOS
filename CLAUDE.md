@@ -58,7 +58,7 @@ Query one field at a time with `-of default=nw=1:nk=1`, and validate the answer 
 - Take a generator's verdict first: `state="$(correction_state)" || exit 1`.
 - Never point `ffmpeg -y` at a delivery path; use `render_delivery`.
 - Never re-grade from a delivered MP4. A lost master is regenerated from the source.
-- No rotation logic in the pipeline. The guard measures a decoded frame (ADR 0005). Media layout is ADR 0006.
+- No rotation logic in the pipeline. Orientation is measured from a decoded frame (ADR 0005). Media layout is ADR 0006.
 - The app builds release by default (`make-app.sh --debug` for debug). Debug makes the live preview about 100× slower.
 - The live preview (`LiveChain`) runs the whole chain in-process, and `LiveChainTests` holds it to the render (ADR 0009).
 - A second implementation of the image (`CorrectionCube`, `ToneCurve`) needs an exact-equivalence test against the generator it replaced, not a tolerance.
@@ -68,7 +68,6 @@ Query one field at a time with `-of default=nw=1:nk=1`, and validate the answer 
 
 These were "settled", and the user has reopened them.
 
-- Landscape footage must work, which reverses the portrait-only guard.
 - The look: the Portra LUT is not the reference, the partner's analog scans are. The off-spec saturation and "tone, not colour" were judged on one shoot's road signs.
 - ADR 0011's `MATCH=1` default.
 - The tests feel too heavy: keep the silent-failure guards, thin out the rest.

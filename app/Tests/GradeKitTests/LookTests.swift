@@ -189,7 +189,7 @@ final class ProjectTests: XCTestCase {
         project.clips["IMG_0609"] = .init(cropOffset: 600, stabilise: false)
         let env = project.environment(for: "IMG_0609",
                                       lookFile: URL(fileURLWithPath: "/tmp/look.json"))
-        XCTAssertEqual(env["CROP_Y"], "600")
+        XCTAssertEqual(env["CROP_OFFSET"], "600")
         XCTAssertEqual(env["HEIGHT"], "1080")
         XCTAssertEqual(env["FPS_OUT"], "12")
         XCTAssertEqual(env["STAB"], "0")

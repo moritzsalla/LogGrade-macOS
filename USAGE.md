@@ -28,7 +28,7 @@ Apple's conversion LUT is not in the repo; see [`luts/apple/SOURCE.txt`](luts/ap
 | `DELIVERABLES=<list>` | presets or `name:aw:ah[:offset\|centre]`, comma separated. Default `reels` |
 | `WIDTH=<px>` | shared delivery width. Default: `HEIGHT`'s 9:16 width |
 | `HEIGHT=<px>` | 9:16 reference height, default 1920 |
-| `CROP_Y=<px\|centre>` | offset for cropping deliverables without their own. No default |
+| `CROP_OFFSET=<px\|centre>` | offset for cropping deliverables without their own: from the top, or from the left on a frame wider than the window. No default |
 | `FPS_OUT=<n>` | output rate; integer relations only |
 | `AUDIO_HIGHPASS_HZ=<hz\|0>` | delivered-audio high-pass, default 60; 0 off. Never applied to the master |
 | `LOOK=<name\|none>` | film cube from `luts/looks/` |
@@ -67,6 +67,7 @@ Printed on stderr as `GRADE_CODE=<NAME>`. The code is the contract; the sentence
 | `REFUSE_MATCH_MODE` | `MATCH` is not `0`, `1` or `batch` |
 | `REFUSE_BATCH_NO_PROBE` | `MATCH=batch`, and no clip could be measured |
 | `REFUSE_FPS_RETIME` | `FPS_OUT` would need retiming |
+| `REFUSE_UNMEASURED` | a clip's decoded frame could not be measured; the clip is skipped |
 | `REFUSE_PROOF_AND_FRAME` | both set |
 | `REFUSE_FRAME_STAGE` | `FRAME_STAGE` is neither `graded` nor `source` |
 | `REFUSE_STAGED_PRE_CONVERSION` | `02-grade.sh` was given a correction or halation |

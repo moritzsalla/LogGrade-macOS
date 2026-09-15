@@ -54,16 +54,16 @@ final class RenderQueueTests: XCTestCase {
         // interface lying about what is on disk.
         let engine = try stubEngine(script: """
         #!/bin/bash
-        echo 'GRADE_CODE=REFUSE_NOT_PORTRAIT' >&2
-        echo '{"event":"clip_skipped","clip":"WIDE","code":"REFUSE_NOT_PORTRAIT"}'
+        echo 'GRADE_CODE=REFUSE_UNMEASURED' >&2
+        echo '{"event":"clip_skipped","clip":"BROKEN","code":"REFUSE_UNMEASURED"}'
         echo '{"event":"run_done","rendered":0,"skipped":1,"failed":0}'
         exit 0
         """)
         defer { try? FileManager.default.removeItem(at: engine.root) }
         let queue = RenderQueue(engine: engine)
-        queue.enqueue([(URL(fileURLWithPath: "/tmp/WIDE.mov"), "WIDE", nil)])
+        queue.enqueue([(URL(fileURLWithPath: "/tmp/BROKEN.mov"), "BROKEN", nil)])
         waitForQueue(queue)
-        XCTAssertEqual(queue.jobs[0].state, .skipped(.notPortrait))
+        XCTAssertEqual(queue.jobs[0].state, .skipped(.unmeasured))
     }
 
     func testProgressAndOutputsAreRecordedPerClip() throws {
@@ -229,7 +229,7 @@ extension RenderQueueTests {
         let a = try XCTUnwrap(queue.jobs.first?.id)
         let b = try XCTUnwrap(queue.jobs.last?.id)
         queue.setOutcome(a, state: .done, outputs: [URL(fileURLWithPath: "/a.mp4")], frame: 90)
-        queue.setOutcome(b, state: .skipped(.notPortrait), outputs: [], frame: nil)
+        queue.setOutcome(b, state: .skipped(.unmeasured), outputs: [], frame: nil)
 
         queue.retryAllFailed()
         XCTAssertEqual(queue.jobs.first?.state, .done, "a delivered clip was queued again")

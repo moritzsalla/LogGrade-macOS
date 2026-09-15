@@ -603,8 +603,8 @@ resolve_work_dir() {
 	printf '%s\n' "$w"
 }
 
-# Decodes one frame and measures it. Separated out of require_portrait because the crop bounds
-# need the same two numbers, and the alternative is decoding a second frame to ask again.
+# Decodes one frame and measures it. The crop bounds and the halation radius both need these two
+# numbers, and grade.sh measures each clip once up front and reuses them.
 #
 # It measures a DECODED frame rather than the container's dimensions, deliberately: this camera
 # stores rotation as a display-matrix flag and ffmpeg autorotates on decode, so the container says
@@ -668,52 +668,71 @@ fps_filter() {  # fps_filter <source-rate> <target-rate>  -> ",fps=N" or "" or r
 # both the source width and one aspect — true of this camera and of one deliverable, and wrong the
 # moment either changes.
 #
-# Bounds are checked HERE because the alternative is ffmpeg failing several seconds into a render
-# with a filter error, after the graph has already been built. An offset past the frame edge was
-# unvalidated and 03-final.sh claimed the portrait guard covered it; it does not, it only compares
-# width against height.
-crop_prefix() {  # crop_prefix <src-w> <src-h> <aspect-w> <aspect-h> <offset|centre>  -> "crop=...,"
-	local sw="$1" sh="$2" aw="$3" ah="$4" y="$5" ch max
+# The largest window of the deliverable's aspect that fits. It always fills one source axis, so it
+# has slack on at most one: a 9:16 window on a portrait frame moves up and down, on a landscape
+# frame left and right. That is why one offset is enough, and why there is no two-offset crop.
+# The y axis is tried first so a portrait source resolves exactly as it did before landscape was
+# accepted; tests/render-golden.sh holds that.
+crop_window() {  # crop_window <src-w> <src-h> <aspect-w> <aspect-h>  -> "<cw> <ch> <x|y>"
+	local sw="$1" sh="$2" aw="$3" ah="$4" ch cw
 	ch="$(deliverable_height "$sw" "$aw" "$ah")"
-	if [ "$ch" -gt "$sh" ]; then
-		echo "crop window ${sw}x${ch} is taller than the source ${sw}x${sh}" >&2
-		return 1
-	fi
-	# A deliverable that is already the source's OWN shape gets no crop filter, and its offset is
-	# not an error — there is exactly one window, so there is nothing to place. This is what keeps
-	# the 9:16 deliverable byte-identical now that EVERY deliverable resolves its crop through
-	# here: it used to be the one whose case branch handed the chain a literal empty string, and a
-	# no-op `crop=2160:3840:0:0` in the graph is a change tests/render-golden.sh would see.
-	if [ "$ch" -eq "$sh" ]; then
+	if [ "$ch" -le "$sh" ]; then
+		printf '%s %s y\n' "$sw" "$ch"
 		return 0
 	fi
-	max=$(( sh - ch ))
+	cw=$(( sh * aw / ah ))
+	printf '%s %s x\n' "$(( cw - cw % 2 ))" "$sh"
+}
+
+# Bounds are checked HERE because the alternative is ffmpeg failing several seconds into a render
+# with a filter error, after the graph has already been built.
+crop_prefix() {  # crop_prefix <src-w> <src-h> <aspect-w> <aspect-h> <offset|centre>  -> "crop=...,"
+	local sw="$1" sh="$2" aw="$3" ah="$4" off="$5" cw ch axis max
+	read -r cw ch axis <<< "$(crop_window "$sw" "$sh" "$aw" "$ah")"
+	# A deliverable that is already the source's OWN shape gets no crop filter, and its offset is
+	# not an error — there is exactly one window, so there is nothing to place. A no-op
+	# `crop=2160:3840:0:0` in the graph is a change tests/render-golden.sh would see.
+	if [ "$cw" -eq "$sw" ] && [ "$ch" -eq "$sh" ]; then
+		return 0
+	fi
+	if [ "$axis" = y ]; then max=$(( sh - ch )); else max=$(( sw - cw )); fi
 	# NO DEFAULT. This used to fall back to 750, which is one clip's composition and nobody else's;
 	# a caller that has not decided must be told, not guessed for. Reachable even when the run's
-	# up-front check passed, because that check reads the first renderable clip and a later one can
-	# be a different shape.
-	if [ -z "$y" ]; then
-		echo "REFUSING: a ${aw}:${ah} window on ${sw}x${sh} needs a vertical offset, and none was given." >&2
-		echo "  Where the window sits is a composition call. Pass CROP_Y=<0..$max>, or CROP_Y=centre" >&2
-		echo "  to say explicitly that this clip does not need one." >&2
+	# up-front check passed, because a clip can change between that check and its render.
+	if [ -z "$off" ]; then
+		echo "REFUSING: a ${aw}:${ah} window on ${sw}x${sh} needs an offset, and none was given." >&2
+		echo "  Where the window sits is a composition call. Pass CROP_OFFSET=<0..$max>, or" >&2
+		echo "  CROP_OFFSET=centre to say explicitly that this clip does not need one." >&2
 		return 1
 	fi
 	# `centre` is resolved PER CLIP, against the frame that was actually measured — which is the
 	# thing a fixed pixel offset cannot be. It is spelled out by the caller rather than assumed:
 	# defaulting to centre gives a batch of files that all look finished and are all framed wrong,
 	# and saying "centre" is a decision someone made.
-	case "$y" in
+	case "$off" in
 		centre|center)
-			y=$(( max / 2 ))
-			# Even, because an odd vertical crop offset shifts the chroma siting on 4:2:0.
-			y=$(( y - y % 2 ));;
+			off=$(( max / 2 ))
+			# Even, because an odd crop offset shifts the chroma siting on 4:2:0.
+			off=$(( off - off % 2 ));;
 	esac
-	if [ "$y" -lt 0 ] || [ "$y" -gt "$max" ]; then
-		echo "REFUSING: crop offset $y is outside 0..$max for a ${sw}x${ch} window on ${sw}x${sh}." >&2
+	if [ "$off" -lt 0 ] || [ "$off" -gt "$max" ]; then
+		echo "REFUSING: crop offset $off is outside 0..$max for a ${cw}x${ch} window on ${sw}x${sh}." >&2
 		echo "  Past the edge ffmpeg fails mid-render, seconds in, with a filter error." >&2
 		return 1
 	fi
-	printf 'crop=%s:%s:0:%s,\n' "$sw" "$ch" "$y"
+	if [ "$axis" = y ]; then
+		printf 'crop=%s:%s:0:%s,\n' "$cw" "$ch" "$off"
+	else
+		printf 'crop=%s:%s:%s:0,\n' "$cw" "$ch" "$off"
+	fi
+}
+
+# A crop_prefix filter as a person reads it, e.g. "cropped 1214x2160 at 1312,0". Read back out of
+# the filter rather than rebuilt from the request, so it says what will actually run.
+crop_description() {  # crop_description "crop=W:H:X:Y,"  -> text
+	local cw ch x y
+	IFS=: read -r cw ch x y <<< "${1#crop=}"
+	printf 'cropped %sx%s at %s,%s\n' "$cw" "$ch" "$x" "${y%,}"
 }
 
 # The clip's post-CST luma mean, from ONE decoded frame rather than a pass. It is what the exposure
@@ -745,8 +764,8 @@ probe_yavg() {  # probe_yavg <src> <cst-cube>  -> the mean, or empty
 # reaches the output filename. Instagram's two shapes survive as presets rather than as the only
 # options. See docs/adr/0010.
 #
-# WHY WIDTH IS THE ANCHOR, not height. Every deliverable is the same portrait master scaled to the
-# same horizontal resolution: the platform re-encodes to a fixed width, so two deliverables that
+# WHY WIDTH IS THE ANCHOR, not height. Every deliverable is scaled to the same horizontal
+# resolution, whatever the source's orientation: the platform re-encodes to a fixed width, so two deliverables that
 # differed in width would be re-encoded differently for no reason anyone chose. Height follows from
 # the aspect. It is also what makes the old numbers fall out unchanged rather than by coincidence —
 # 1080 wide is 1920 tall at 9:16 and 1350 at 4:5, which is exactly what the two branches hardcoded.
@@ -802,21 +821,21 @@ deliverable_spec() {  # deliverable_spec <spec>  -> "<name> <aw> <ah> <offset|->
 
 # Whether this deliverable takes a crop out of a source of the given size, which is a fact about
 # the SOURCE's shape rather than about the deliverable's name: 4:5 is a crop of a 9:16 master and
-# the whole frame of a 4:5 one. It answers the same question crop_prefix answers by returning an
-# empty string, and it exists separately because the refusal that needs it has to fire before any
-# clip is opened, where there is no offset to validate yet.
+# the whole frame of a 4:5 one, and 9:16 is a crop of a landscape one. It exists beside crop_prefix
+# because the refusal that needs it has to fire before any clip is opened, where there is no offset
+# to validate yet.
 #
 # An UNMEASURABLE source counts as cropping. The caller's guard then fires when it may not have
 # needed to, which costs a re-run; the other way costs a batch of silently reframed deliverables.
 deliverable_crops() {  # deliverable_crops "<src-w> <src-h>" <aw> <ah>  -> 0 if it crops
-	local size="$1" aw="$2" ah="$3" sw sh ch
+	local size="$1" aw="$2" ah="$3" sw sh cw ch axis
 	case "$size" in
 		*' '*) ;;
 		*) return 0;;
 	esac
 	sw="${size% *}"; sh="${size#* }"
-	ch="$(deliverable_height "$sw" "$aw" "$ah")"
-	[ "$ch" -ne "$sh" ]
+	read -r cw ch axis <<< "$(crop_window "$sw" "$sh" "$aw" "$ah")"
+	[ "$cw" -ne "$sw" ] || [ "$ch" -ne "$sh" ]
 }
 
 # Height follows the aspect off a width. Even, because libx264 rejects an odd dimension and does it
@@ -867,41 +886,21 @@ median() {  # median  (values on stdin, one per line)  -> the middle one
 	printf '%s\n' "$sorted" | sed -n "$(( (n + 1) / 2 ))p"
 }
 
-# Portrait means strictly taller than wide; a square frame is refused with the landscape ones. The
-# rule is here once because the up-front crop probe has to skip exactly the clips this refuses, or
-# a clip that will never render decides whether the run's deliverables crop.
-size_is_portrait() {  # size_is_portrait "<w> <h>"  -> 0 if portrait
-	case "$1" in
-		*' '*) [ "${1#* }" -gt "${1% *}" ];;
-		*) return 1;;
-	esac
-}
-
-# The shoot this was written for was MIXED ORIENTATION: of 19 clips, 11 had no rotation matrix
-# (landscape 3840x2160), 7 were -90 and IMG_0609 alone +90 (both presenting as 2160x3840 portrait).
-# A vertical deliverable handed a landscape master will happily scale 3840x2160 into 1080x1920 — no
-# error, no warning, just a badly squashed file that looks "done". That is the dangerous failure in
-# a batch run, so refuse it here instead.
+# Refuses a clip whose decoded frame cannot be measured: every crop and the halation radius are
+# computed from those two numbers, and a guess at either renders a confidently wrong file.
 #
-# There is deliberately NO rotation logic in this pipeline — orientation is an ingest concern and
-# the source is trusted. This guard exists for that one silent squash and nothing else.
-require_portrait() {
-	local file="$1" size w h
+# Any orientation is accepted. A deliverable of another shape is cropped to it (crop_window), never
+# scaled into it, so nothing is squashed. There is deliberately NO rotation logic — orientation is
+# an ingest concern and the source is trusted (docs/adr/0005). A portrait shot stored lying on its
+# side renders sideways, and the preview is where that shows.
+require_frame_size() {  # require_frame_size <file>  -> "W H"
+	local file="$1" size
 	if ! size="$(source_frame_size "$file")"; then
 		echo "REFUSING: could not measure a decoded frame from $file." >&2
-		echo "  Refusing rather than guessing — a wrong guess here squashes the delivery." >&2
+		echo "  Refusing rather than guessing — a wrong guess here misframes the delivery." >&2
 		return 1
 	fi
-	w="${size% *}"; h="${size#* }"
-
-	if ! size_is_portrait "$size"; then
-		echo "REFUSING: $file decodes as ${w}x${h}, not portrait." >&2
-		echo "  Vertical delivery would squash it. Fix the source orientation, then retry." >&2
-		return 1
-	fi
-	# Hand the measurement back: the crop bounds need exactly these two numbers, and the
-	# alternative is decoding the frame again to ask the same question.
-	printf '%s %s\n' "$w" "$h"
+	printf '%s\n' "$size"
 }
 
 require_nonempty() {
@@ -1185,10 +1184,12 @@ halation_prefix() {  # halation_prefix <lut-dir> <sigma-px at full resolution> <
 	printf "lut1d=file='%s/linear-to-applelog.cube':interp=linear," "$dir"
 }
 
-# The glow's radius is a fraction of the frame's height, so it covers the same part of the picture
-# at any source resolution. This camera's frame is 3840 tall, where 0.006 is 23 pixels.
-halation_sigma() {  # halation_sigma <frame-height> <radius>  -> sigma in pixels
-	awk -v h="$1" -v r="$2" 'BEGIN { printf "%.2f", h * r }'
+# The glow's radius is a fraction of the frame's LONG edge, so it covers the same part of the
+# picture at any source resolution, and a landscape clip glows as far in sensor pixels as a portrait
+# one from the same camera. The short edge would shrink it by 2160/3840 for landscape. This camera's
+# long edge is 3840, where 0.006 is 23 pixels. LiveHalation takes the same edge.
+halation_sigma() {  # halation_sigma <width> <height> <radius>  -> sigma in pixels
+	awk -v w="$1" -v h="$2" -v r="$3" 'BEGIN { printf "%.2f", (w > h ? w : h) * r }'
 }
 
 # Camera-motion analysis into a transform, staged. Both entry points write the same cache path, so
