@@ -690,6 +690,7 @@ final class GradeModel: ObservableObject {
         guard let clips = clipEntries, let destination = outputDirectory else { return }
         let project = self.project
         let match = Look.matchesExposure(bypassing: bypassed)
+        let finish = Look.finishes(bypassing: bypassed)
         // The look file is scratch and stays in the scratch directory; the RENDER goes where the
         // person said, or beside their footage.
         let lookFile = workDirectory.appendingPathComponent("render-look.json")
@@ -718,6 +719,7 @@ final class GradeModel: ObservableObject {
                 var env = project.environment(for: stem, lookFile: lookFile)
                 env["GRADE_WORK_DIR"] = destination.path
                 if !match { env["MATCH"] = "0" }
+                if !finish { env["FINISH"] = "0" }
                 return env
             })
         }

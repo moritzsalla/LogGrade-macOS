@@ -39,6 +39,7 @@ Apple's conversion LUT is not in the repo; see [`luts/apple/SOURCE.txt`](luts/ap
 | `MATCH=1\|batch\|0` | exposure match to `match.reference_yavg`, to the run's median, or off. Default `1` (ADR 0011) |
 | `YAVG_IN=<n>` | pre-measured post-CST mean; skips the probe |
 | `STAB=0` | skip stabilisation |
+| `FINISH=0` | skip the delivery sharpener and chroma denoise. With a neutral look, `MATCH=0` and `STAB=0`, a final is the CST alone |
 | `SMOOTHING=<n>` | stabiliser lowpass, in frames |
 | `PROOF=<seconds>` | render seconds through the real chain into `dist/proofs/` |
 | `FRAME=<seconds>` | one graded still (the app's preview) |

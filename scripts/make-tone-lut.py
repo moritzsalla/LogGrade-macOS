@@ -25,6 +25,7 @@ USAGE
     ./make-tone-lut.py OUT.cube --gamma G --pivot P --contrast C
                                 --toe T --shoulder S --black B
     ./make-tone-lut.py --stdout --gamma G ...      same curve, written to stdout
+    ./make-tone-lut.py --check-neutral --gamma G ...  print neutral or active, write nothing
 
     All six tone flags are required. They used to default to 0.42/1.25/0.30/0.30, which is a
     different look from look.json's: a caller that forgot one got a plausible curve nobody chose.
@@ -84,6 +85,14 @@ def fingerprint(a):
     )
 
 
+def is_neutral(a):
+    """Whether the curve is the identity, by the generator's own arithmetic: gamma 1 skips the
+    power, contrast 1 leaves the pivot line alone, `soft` with k <= 0 only clamps, and black 0
+    lifts nothing. Pivot then cannot move anything, so it is not part of the answer."""
+    return (a.gamma == 1.0 and a.contrast == 1.0 and a.toe <= 0.0 and a.shoulder <= 0.0
+            and a.black == 0.0)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -95,7 +104,17 @@ def main():
     ap.add_argument("--toe", type=float, help="shadow roll-off; 0 is hard into black (required)")
     ap.add_argument("--shoulder", type=float, help="highlight roll-off (required)")
     ap.add_argument("--black", type=float, help="black lift (>0) or crush (<0), last (required)")
+    ap.add_argument("--check-neutral", action="store_true",
+                    help="print neutral or active for these parameters and exit, writing nothing")
     a = ap.parse_args()
+    # A neutral curve must be absent from the graph, not a lookup that returns its input, and the
+    # rule lives here with the arithmetic rather than as a second copy in shell.
+    if a.check_neutral:
+        missing = ["--" + k for k in TONE_FLAGS if getattr(a, k) is None]
+        if missing:
+            ap.error("missing %s" % " ".join(missing))
+        print("neutral" if is_neutral(a) else "active")
+        return
     # Exactly one destination. Both together would be ambiguous about which one the caller reads,
     # and neither is the no-argument case that used to die on a bare positional.
     if a.stdout == bool(a.out):

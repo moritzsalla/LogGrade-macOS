@@ -1316,6 +1316,30 @@ PY
 	grep -qE '^  encode +[0-9]+\.[0-9]{3}s$' "$report" || fail "no phase summary: $(cat "$report")"
 }
 
+# Every stage off must be the CST and the delivery shape, with nothing idle left in: an identity
+# lut1d, hue=s=1 and a zero colorbalance each still move pixels through a conversion. The whole
+# graph is compared, not a list of absent words, because a leftover format= is a stage too.
+# bats test_tags=slow
+@test "a look with every stage off renders the CST and nothing else" {
+	local work="$BATS_TEST_TMPDIR/all-off" look="$BATS_TEST_TMPDIR/all-off.json"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/probe_mid.mov" "$work/src/CLIP.mov"
+	jq '.correct = {exposure: 0, temp: 0, tint: 0, slope: "1,1,1", offset: "0,0,0", power: "1,1,1", lum_mix: 1}
+		| .halation.strength = 0 | .look.lut = "none" | .print.lut = "none"
+		| .tone += {gamma: 1, contrast: 1, toe: 0, shoulder: 0, black: 0}
+		| .colour = {saturation: 1, warmth: 0} | .grain.strength = 0' \
+		"$BATS_TEST_DIRNAME/../look.json" > "$look"
+	LOOK_FILE="$look" MATCH=0 FINISH=0 STAB=0 HEIGHT=128 PROOF=0.5 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || fail "render failed: $output"
+	local report expected
+	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
+	[ -n "$report" ] || fail "no run report was written: $output"
+	expected="[0:v]lut3d=file='${APPLE_CST}':interp=tetrahedral,${DELIVERY_SETPARAMS},zscale=w=72:h=128:f=lanczos:d=error_diffusion,format=yuv420p[o]"
+	grep -qxF -- "$expected" "$report" \
+		|| fail "the all-off graph is not the CST alone: $(grep -F '[0:v]' "$report")"
+}
+
 @test "the run report times a preview frame and records its graph" {
 	local work="$BATS_TEST_TMPDIR/report-frame"
 	mkdir -p "$work/src"
@@ -1746,12 +1770,12 @@ PY
 @test "the sharpener's radius follows the output height" {
 	# Its 5x5 was measured at 1080x1920 and the radius is in PIXELS, so at another height it
 	# sharpens a different real-world detail size.
-	run delivery_image_chain 1080 1920 "" ""
+	run delivery_image_chain 1080 1920 "" "" 1
 	[[ "$output" == *"unsharp=5:5:0.4"* ]] || fail "1920 should be the measured radius: $output"
-	run delivery_image_chain 2160 3840 "" ""
+	run delivery_image_chain 2160 3840 "" "" 1
 	[[ "$output" == *"unsharp=11:11:0.4"* ]] || fail "radius did not scale: $output"
 	# unsharp rejects a radius below 3, so a small output must not ask for one.
-	run delivery_image_chain 360 640 "" ""
+	run delivery_image_chain 360 640 "" "" 1
 	[[ "$output" == *"unsharp=3:3:0.4"* ]] || fail "radius went below the floor: $output"
 }
 
@@ -2710,6 +2734,17 @@ sys.exit("; ".join(problems) or None)
 	[ "$(delivery_grain_merge b g o 1.0 1.00)" = "[b][g]${DELIVERY_BLEND}[o]" ] \
 		|| fail "1.0 was read as a different number from 1"
 	[[ "$(delivery_grain_merge b g o 0.9 1)" == *maskedmerge* ]] || fail "a weight of 0.9 built no mask"
+}
+
+@test "a FINISH that is not 0 or 1 is refused before anything renders" {
+	local work="$BATS_TEST_TMPDIR/bad-finish"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	FINISH=no FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -ne 0 ] || fail "rendered with FINISH=no"
+	[[ "$output" == *"FINISH must be 0 or 1"* ]] || fail "refused without naming FINISH: $output"
+	[ ! -d "$work/dist/frames" ] || fail "FINISH=no got as far as rendering"
 }
 
 @test "a grain weight outside 0 to 1 is refused before anything renders" {

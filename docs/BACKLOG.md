@@ -16,7 +16,6 @@ non-technical photographer could use the result.
    LogGrade and ffmpeg; one render with stabilisation; how far it differs from this Mac's render
    (arm64 ffmpeg is OSXExperts 9.0, x86 is evermeet 9.0.1); jq 1.8.2 (minos 14) runs if that Mac is
    on macOS 13. `docs/UNIVERSAL_APP_PLAN.md`.
-3. **Every film stage switchable off,** down to a plain CST export. Check what already works first.
 
 ## The app, as it feels to use
 

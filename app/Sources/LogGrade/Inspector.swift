@@ -181,14 +181,15 @@ struct InspectorView: View {
 
     private var deliveryStage: some View {
         stage(
-            "Delivery", bypass: .grain,
+            "Delivery", bypass: .delivery,
             help: "Grain and stabilisation are applied to the video, never to the "
                 + "preview. Both need moving footage to judge, so a still leaves them "
                 + "out rather than showing a version that is not what renders.\n\n"
                 + "Grain shadows and highlights set how much grain reaches black and "
                 + "white, as film prints do: most in the midtones, less at either end. "
-                + "Both at 1 is flat grain.\n\nThe switch turns grain off; the stabiliser "
-                + "is switched per clip.",
+                + "Both at 1 is flat grain.\n\nThe switch turns off grain, sharpening and "
+                + "chroma denoise; the stabiliser is switched per clip. With every stage "
+                + "off, the export is Apple's conversion alone.",
             last: true
         ) {
             control(
