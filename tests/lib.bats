@@ -2696,6 +2696,35 @@ sys.exit(None if 0 <= look < print_ < tone else "order is look@%d print@%d tone@
 ' "$chain" || fail "the film cubes are out of order: $chain"
 }
 
+@test "hue curves: flat is absent, active follows the print, and an ungenerated cube is refused" {
+	local root="$BATS_TEST_DIRNAME/.." chain look="$BATS_TEST_TMPDIR/hue-look.json"
+	# The shipped look's curves are flat: no cube, nothing to generate.
+	chain="$(LOOK_LUT="" PRINT_LUT="" LOOK_STRENGTH=1 PRINT_STRENGTH=1 grade_chain "" 1 0)"
+	[[ "$chain" != *hue* ]] || fail "flat curves left a stage in: $chain"
+	jq '.hue.sat="0,0,0,0,-0.5,0,0,0,0,0,0,0"' "$root/look.json" > "$look"
+	# Active, but nobody called ensure_hue_lut: refused, not silently rendered without.
+	LOOK_FILE="$look" run grade_chain "" 1 0
+	[ "$status" -ne 0 ] || fail "active curves rendered without their cube: $output"
+	[[ "$output" == *"call ensure_hue_lut first"* ]] || fail "$output"
+	chain="$(LOOK_FILE="$look" PRINT_LUT="$root/luts/print/kodak_2383_constlmap.cube" \
+		LOOK_LUT="" LOOK_STRENGTH=1 PRINT_STRENGTH=1 \
+		bash -c 'source "$1"; ensure_hue_lut "$2" && grade_chain t.cube 1 0' _ "$root/scripts/lib.sh" "$BATS_TEST_TMPDIR")"
+	python3 -c '
+import sys
+c = sys.argv[1]
+print_, hue, tone = c.find("kodak_2383_constlmap"), c.find("hue.cube"), c.find("lut1d")
+sys.exit(None if 0 <= print_ < hue < tone else "order is print@%d hue@%d tone@%d" % (print_, hue, tone))
+' "$chain" || fail "the hue stage is out of order: $chain"
+	head -1 "$BATS_TEST_TMPDIR/hue.cube" | grep -q 'sat=0.0,0.0,0.0,0.0,-0.5,' || fail "the cube is not the look's curves"
+}
+
+@test "the hue generator refuses a curve it cannot mean" {
+	run "$LIB_ROOT/scripts/make-hue-lut.py" --stdout --sat "0,0,0"
+	[ "$status" -ne 0 ] && [[ "$output" == *"wants 12 values"* ]] || fail "a short curve: $output"
+	run "$LIB_ROOT/scripts/make-hue-lut.py" --stdout --rot "90,0,0,0,0,0,0,0,0,0,0,0"
+	[ "$status" -ne 0 ] && [[ "$output" == *"outside -60..60"* ]] || fail "a knot past its bound: $output"
+}
+
 @test "a film cube's strength blends toward its input by exactly that amount" {
 	# A cube that sends everything to 0.8, at strength 0.25, on an input of 0.2: 0.35. Swapping the
 	# two weights gives 0.65, which is the mistake this exists to catch.

@@ -24,6 +24,7 @@ struct InspectorView: View {
                 toneStage
                 trimsStage
                 filmLookStage
+                hueStage
                 halationStage
                 deliveryStage
             }
@@ -100,6 +101,32 @@ struct InspectorView: View {
             control(
                 "Luminance", $model.look.correct.lumMix, 0...1,
                 default: model.defaultLook.correct.lumMix)
+        }
+    }
+
+    @State private var hueCurve: Look.Hue.Curve = .sat
+
+    /// Three curves in one space, switched, because they share an axis: the hue strip under them.
+    private var hueStage: some View {
+        stage(
+            "Hue curves", bypass: .hue,
+            help: "Move one colour without the others: its hue, its saturation or its "
+                + "lightness. The strip along the bottom is the colour each point acts on; "
+                + "drag a point up or down.\n\nThey act on the colours after the film "
+                + "look, so the greens here are the greens on screen. Grey and near-grey "
+                + "are left alone, so skin and sky do not tint when a neighbouring colour "
+                + "moves. Double-click a curve to reset it."
+        ) {
+            Picker("", selection: $hueCurve) {
+                Text("Saturation").tag(Look.Hue.Curve.sat)
+                Text("Hue").tag(Look.Hue.Curve.rot)
+                Text("Lightness").tag(Look.Hue.Curve.lum)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+            HueCurveEditor(model: model, curve: hueCurve)
+                .padding(.trailing, Space.xs)
         }
     }
 

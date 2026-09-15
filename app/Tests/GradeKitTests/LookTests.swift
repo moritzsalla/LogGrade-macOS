@@ -214,7 +214,7 @@ final class ProjectTests: XCTestCase {
         let written =
             try JSONSerialization.jsonObject(with: try opened.serialised())
             as? [String: Any]
-        XCTAssertEqual(written?["version"] as? Int, 3)
+        XCTAssertEqual(written?["version"] as? Int, 4)
     }
 
     /// A project saved before the conversion and finish existed rendered through Apple's cube with

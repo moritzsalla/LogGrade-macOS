@@ -99,6 +99,7 @@ func lookFixture(gamma: Double = 2.02, lut: String = "kodak_portra_400_nc") thro
          "look":{"lut":"\(lut)","strength":1},"print":{"lut":"none","strength":1},
          "tone":{"gamma":\(gamma),"pivot":0.39,"contrast":1.09,"toe":0,"shoulder":0.1,"black":0.025},
          "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8,"shadows":1,"highlights":1},
+         "hue":{"rot":"0,0,0,0,0,0,0,0,0,0,0,0","sat":"0,0,0,0,0,0,0,0,0,0,0,0","lum":"0,0,0,0,0,0,0,0,0,0,0,0"},
          "stabilisation":{"smoothing":30},"match":{"reference_yavg":609,"reference_stops":-0.4},
          "convert":{"cube":"apple"},"finish":{"denoise":0,"sharpen":0.6,"gauge":"none"}}
         """

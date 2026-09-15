@@ -300,8 +300,10 @@ extension Project {
     static let filmStagesVersion = 2
     /// The first version whose looks carry a conversion, a finish and a film exposure reference.
     static let conversionVersion = 3
+    /// The first version whose looks carry hue curves.
+    static let hueVersion = 4
     /// The format this build writes.
-    static let fileVersion = conversionVersion
+    static let fileVersion = hueVersion
 
     public func serialised() throws -> Data {
         var presetList: [[String: Any]] = []
@@ -394,6 +396,12 @@ extension Project {
                 match["reference_stops"] = Look.defaultReferenceStops
                 look["match"] = match
             }
+            upgraded = look
+        }
+        // Before version 4 there were no hue curves: flat ones render the same picture.
+        if version < hueVersion, var look = upgraded as? [String: Any], look["hue"] == nil {
+            let flat = Look.Hue()
+            look["hue"] = ["rot": flat.rot, "sat": flat.sat, "lum": flat.lum]
             upgraded = look
         }
         return try Look(data: try JSONSerialization.data(withJSONObject: upgraded))
