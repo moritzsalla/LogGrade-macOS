@@ -1,0 +1,24 @@
+{
+  "configurations": [
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:ffgrade-macOS}/app",
+      "name": "Debug LogGrade (app)",
+      "target": "LogGrade",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug LogGrade (app)"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:ffgrade-macOS}/app",
+      "name": "Release LogGrade (app)",
+      "target": "LogGrade",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release LogGrade (app)"
+    }
+  ]
+}
