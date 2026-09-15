@@ -996,9 +996,15 @@ DELIVERY_BLEND="blend=all_mode=grainmerge:shortest=1"
 # directory would otherwise expand it. An array, and never empty, so bash 3.2's empty-array trap
 # under `set -u` does not apply.
 DELIVERY_ENCODE=(-map "[o]" -map "0:a:0?" -shortest
-	-c:v libx264 -profile:v high -preset slow -crf 18
 	-color_primaries bt709 -color_trc bt709 -colorspace bt709
 	-c:a aac -b:a 192k -movflags +faststart)
+# The video encoder, by DELIVERY_BITS. 10 keeps the grade's 10 bits to the file for a destination
+# that plays them (a Mac, a phone, an editor) rather than recompressing to 8-bit: no dither noise in a
+# sky, and no banding under it. HEVC because H.264 High 10 does not play in QuickTime or on iOS.
+# `hvc1`, not ffmpeg's default `hev1`, or QuickTime refuses the file.
+DELIVERY_VIDEO_8=(-c:v libx264 -profile:v high -preset slow -crf 18)
+DELIVERY_VIDEO_10=(-c:v libx265 -preset slow -crf 18 -pix_fmt yuv420p10le -tag:v hvc1
+	-x265-params log-level=error)
 
 # Delivery only; the master keeps its audio. 60, not 80: the filter is -3 dB at its cutoff, and 80
 # cut the peak less (1.3 dB against 1.8) and cost 1.8 dB at 80-120 Hz. docs/PIPELINE.md, "Encode".
@@ -1072,6 +1078,17 @@ load_delivery_look() {
 		0|1) ;;
 		*) echo "FINISH must be 0 or 1: got '$FINISH'" >&2; return 1;;
 	esac
+	DELIVERY_BITS="${DELIVERY_BITS:-8}"
+	case "$DELIVERY_BITS" in
+		8|10) ;;
+		*) echo "DELIVERY_BITS must be 8 or 10: got '$DELIVERY_BITS'" >&2; return 1;;
+	esac
+}
+
+# The delivered pixel format and the numbers the grain mask is written in, which follow it: an 8-bit
+# expression on a 10-bit plane puts mid-grey at 128 of 1023, and the grain merge turns every frame dark.
+delivery_pix_fmt() {  # delivery_pix_fmt  -> yuv420p|yuv420p10le, from DELIVERY_BITS
+	[ "${DELIVERY_BITS:-8}" = 10 ] && printf 'yuv420p10le\n' || printf 'yuv420p\n'
 }
 
 # THE GRADE ITSELF, as a spliceable filter chain: look LUT, tone curve, saturation, warmth. Both
@@ -1297,11 +1314,11 @@ delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-pre
 	[ "$r" -ge 3 ] || r=3
 	[ $(( r % 2 )) -eq 1 ] || r=$(( r + 1 ))
 	if [ "$5" = 0 ]; then
-		printf '%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=yuv420p' "$3" "$4" "$1" "$2"
+		printf '%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=%s' "$3" "$4" "$1" "$2" "$(delivery_pix_fmt)"
 		return
 	fi
-	printf '%s%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=yuv420p,unsharp=%s:%s:0.4:5:5:0.0' \
-		"$3" "$DELIVERY_CHROMA" "$4" "$1" "$2" "$r" "$r"
+	printf '%s%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=%s,unsharp=%s:%s:0.4:5:5:0.0' \
+		"$3" "$DELIVERY_CHROMA" "$4" "$1" "$2" "$(delivery_pix_fmt)" "$r" "$r"
 }
 
 # CLUSTERED grain, not per-pixel, generated on a half-resolution plate and blended. Measured:
@@ -1334,8 +1351,10 @@ grain_plate() {  # grain_plate <w> <h> <fps>
 }
 
 delivery_grain_branch() {  # delivery_grain_branch <w> <h> <strength>
-	printf 'noise=c0s=%s:c0f=t,scale=%s:%s:flags=bilinear,format=yuv420p,%s' \
-		"$3" "$1" "$2" "$DELIVERY_SETPARAMS"
+	# The plate stays 8-bit through `noise` and is raised here: 128 converts to exactly 512, the
+	# 10-bit grainmerge's zero, and the noise keeps its size relative to the picture.
+	printf 'noise=c0s=%s:c0f=t,scale=%s:%s:flags=bilinear,format=%s,%s' \
+		"$3" "$1" "$2" "$(delivery_pix_fmt)" "$DELIVERY_SETPARAMS"
 }
 
 # The grain merge, WEIGHTED BY THE PICTURE'S OWN BRIGHTNESS. On a print, grain is most visible in
@@ -1360,18 +1379,19 @@ delivery_grain_merge() {  # delivery_grain_merge <image-label> <grain-label> <ou
 		printf '[%s][%s]%s[%s]' "$1" "$2" "$DELIVERY_BLEND" "$3"
 		return
 	fi
-	local shadows="$4" highlights="$5" expr
+	local shadows="$4" highlights="$5" expr black=16 span=219 full=255 mid=128
+	[ "$(delivery_pix_fmt)" = yuv420p ] || { black=64; span=876; full=1023; mid=512; }
 	# ld(0) is luma out of limited range as 0..1; ld(1) runs 0..1 across the shadow ramp below 0.45
 	# and ld(2) across the highlight ramp above 0.55. Each ramp is eased by a smoothstep.
-	local level='st(0,clip((val-16)/219,0,1))'
+	local level="st(0,clip((val-$black)/$span,0,1))"
 	local shadow_ramp='st(1,clip(ld(0)/0.45,0,1))'
 	local highlight_ramp='st(2,clip((ld(0)-0.55)/0.45,0,1))'
 	local shadow_ease='ld(1)*ld(1)*(3-2*ld(1))'
 	local highlight_ease='ld(2)*ld(2)*(3-2*ld(2))'
 	# Quoted, because the expression holds both of the graph's own separators, `,` and `;`.
-	expr="$level;$shadow_ramp;$highlight_ramp;255*(($shadows+(1-$shadows)*$shadow_ease)+($highlights-1)*$highlight_ease)"
-	printf "[%s]split=2[gw_image][gw_luma];[gw_luma]lutyuv=y='%s':u=128:v=128[gw_mask];" "$1" "$expr"
-	printf '[%s]split=2[gw_noise][gw_level];[gw_level]lutyuv=y=128[gw_flat];' "$2"
+	expr="$level;$shadow_ramp;$highlight_ramp;$full*(($shadows+(1-$shadows)*$shadow_ease)+($highlights-1)*$highlight_ease)"
+	printf "[%s]split=2[gw_image][gw_luma];[gw_luma]lutyuv=y='%s':u=%s:v=%s[gw_mask];" "$1" "$expr" "$mid" "$mid"
+	printf '[%s]split=2[gw_noise][gw_level];[gw_level]lutyuv=y=%s[gw_flat];' "$2" "$mid"
 	printf '[gw_flat][gw_noise][gw_mask]maskedmerge=planes=1[gw_grain];'
 	printf '[gw_image][gw_grain]%s[%s]' "$DELIVERY_BLEND" "$3"
 }
@@ -1386,6 +1406,11 @@ render_deliverable() {  # render_deliverable <final-out> <label> <input> <w> <h>
 	shift 7
 	local af=""
 	[ "$AUDIO_HIGHPASS_HZ" -eq 0 ] || af="highpass=f=$AUDIO_HIGHPASS_HZ"
+	if [ "$DELIVERY_BITS" = 10 ]; then
+		set -- "${DELIVERY_VIDEO_10[@]}" "$@"
+	else
+		set -- "${DELIVERY_VIDEO_8[@]}" "$@"
+	fi
 	# `${af:+-af "$af"}` is zero words when the filter is off and exactly two when it is on. An
 	# array would be the obvious spelling, but an empty one under `set -u` is "unbound" on bash 3.2.
 	# Strength 0 is no plate and no merge: absent rather than idle, like a neutral grade stage.

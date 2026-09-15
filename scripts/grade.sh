@@ -428,7 +428,7 @@ say "film: look=${LOOK_LUT:-none}@$LOOK_STRENGTH print=${PRINT_LUT:-none}@$PRINT
 [ -n "$FRAME" ] || report_environment "$ROOT"
 # The EFFECTIVE values, after defaults and look.json, which is what a report read weeks later needs:
 # the environment that launched the run is gone by then.
-report_line "knobs:   deliverables=$(IFS=,; printf '%s' "${D_NAME[*]}") width=$WIDTH height=$HEIGHT crop_offset=${CROP_OFFSET_OK:--} match=$MATCH reference_yavg=$Y_REF stab=$STAB smoothing=$SMOOTHING grain=$GRAIN_STRENGTH fps_out=${FPS_OUT:--} proof=${PROOF:--} frame=${FRAME:--} frame_height=$FRAME_HEIGHT frame_stage=$FRAME_STAGE look_lut=${LOOK_LUT:-none}@$LOOK_STRENGTH print_lut=${PRINT_LUT:-none}@$PRINT_STRENGTH halation=${HAL_STRENGTH}/${HAL_THRESHOLD}/${HAL_RADIUS}/${HAL_TINT} grain_weights=${GRAIN_SHADOWS}/${GRAIN_HIGHLIGHTS} audio_highpass=${AUDIO_HIGHPASS_HZ} correct_size=$CORRECT_SIZE dry=$DRY json=$JSON"
+report_line "knobs:   deliverables=$(IFS=,; printf '%s' "${D_NAME[*]}") width=$WIDTH height=$HEIGHT crop_offset=${CROP_OFFSET_OK:--} match=$MATCH reference_yavg=$Y_REF stab=$STAB smoothing=$SMOOTHING grain=$GRAIN_STRENGTH fps_out=${FPS_OUT:--} proof=${PROOF:--} frame=${FRAME:--} frame_height=$FRAME_HEIGHT frame_stage=$FRAME_STAGE look_lut=${LOOK_LUT:-none}@$LOOK_STRENGTH print_lut=${PRINT_LUT:-none}@$PRINT_STRENGTH halation=${HAL_STRENGTH}/${HAL_THRESHOLD}/${HAL_RADIUS}/${HAL_TINT} grain_weights=${GRAIN_SHADOWS}/${GRAIN_HIGHLIGHTS} audio_highpass=${AUDIO_HIGHPASS_HZ} bits=$DELIVERY_BITS correct_size=$CORRECT_SIZE dry=$DRY json=$JSON"
 report_line "work:    $WORK"
 report_line "preflight took $(fmt_ms "$T_PREFLIGHT")"
 say ""
