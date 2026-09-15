@@ -26,9 +26,8 @@ bats_require_minimum_version 1.5.0
 # TWO TAGS, and scripts/check.sh is what reads them.
 #
 #   slow    left out by `check.sh --fast`. A test measured at three seconds or more on this machine:
-#           the app builds, and renders or probes of real footage. The ranking is in
-#           docs/adr/0013_A_PARALLEL_SUITE_WITH_A_FAST_TIER.md. Tag a new test that renders
-#           real footage or builds the app.
+#           the app builds, and renders or probes of real footage. Time a new one with
+#           `bats --timing -f '<name>' tests/` rather than guessing.
 #   serial  kept out of the parallel pass, because it writes a path another test writes too. The two
 #           make-app.sh tests both rebuild dist/LogGrade.app, and one asserts on its contents while
 #           the other can be halfway through replacing it. The two 02-grade.sh tests regenerate the
@@ -39,6 +38,9 @@ bats_require_minimum_version 1.5.0
 # A serial test runs alongside the parallel pass, one at a time, not after it: those tests
 # conflict with each other, not with the rest, and waiting for the builds would give back most of
 # what the parallel pass saves.
+#
+# WAIT FOR A CONDITION, NEVER A DURATION. A fixed 1.5s sleep held serially and failed the first
+# parallel run, under load.
 
 # Fails unless every non-blank line on stdin parses as JSON on its own. python3 rather than a grep
 # for braces: a shape test would pass on `{"event":"x",}`.
@@ -712,8 +714,8 @@ PY
 	# `ffmpeg -y` pointed at the delivery path truncates the existing file before it knows whether
 	# the graph even initialises. Measured on this repo: an approved mp4 re-rendered with a broken
 	# graph was left at 0 bytes, ffmpeg exiting 234. require_nonempty reported the failure loudly
-	# and the deliverable was already gone — and per docs/adr/0004, getting it back means
-	# regenerating the baseline and the master first.
+	# and the deliverable was already gone, and getting it back means regenerating the baseline and
+	# the master first.
 	local out="$BATS_TEST_TMPDIR/approved.mp4" before
 	ffmpeg -y -f lavfi -i "color=c=gray:s=72x128:d=0.1:r=24" -frames:v 1 \
 		-c:v libx264 -pix_fmt yuv420p "$out" -v error
@@ -1115,7 +1117,7 @@ JSON
 # from the camera or from whoever handed over the card. Nothing on the read side checked either one.
 #
 # Ported from a branch of the precursor that never landed, because it predates the chain dedupe and
-# would have reinstated an inlined copy of the graph. See PROVENANCE.md.
+# would have reinstated an inlined copy of the graph.
 
 @test "require_number accepts a number and rejects a filter fragment" {
 	run require_number SAT 1.27

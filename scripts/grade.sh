@@ -88,8 +88,8 @@ RUN_T0="$(now_ms)"
 
 CST="$APPLE_CST"
 # PROOF=<seconds> renders that many seconds through the REAL chain, into dist/proofs/ rather than
-# dist/03-final/. Two reasons it exists. docs/BATCH_RUNBOOK.md makes a proof a required sign-off
-# before committing to the slow render, and until then that recipe lived only in shell history. And
+# dist/03-final/. Two reasons it exists. A proof is the sign-off before committing to the slow
+# render. And
 # nothing in the suite executed this filter graph at all: shellcheck cannot see inside the string
 # (it reported clean on both previously shipped load-bearing bugs), the parity check touches only
 # the tone curve, and every other test stopped at DRY=1 — so a dropped label went green and failed

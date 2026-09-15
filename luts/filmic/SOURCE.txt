@@ -1,8 +1,8 @@
 Filmic route LUTs — generated, and NOT in use
 =============================================
 
-These are the output of a rejected approach. They are kept as the evidence behind
-ADR-0002 (docs/adr/0002_KEEP_APPLES_CST.md), not because anything reads them.
+These are the output of a rejected approach (docs/PIPELINE.md, "Tried and rejected"),
+kept as its evidence, not because anything reads them.
 Nothing in scripts/ references this folder.
 
 What they are

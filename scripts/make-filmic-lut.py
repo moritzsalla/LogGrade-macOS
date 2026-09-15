@@ -2,6 +2,9 @@
 """
 Generate a 3D .cube LUT: Apple Log -> scene-linear -> filmic tonemap -> Rec.709.
 
+NOT WHAT SHIPS. This route lost on colour to Apple's CST (docs/PIPELINE.md, "Tried and rejected").
+Kept because the architecture is right and may win with proper gamut mapping.
+
 WHY THIS EXISTS
 ---------------
 Apple's AppleLogToRec709 LUT is a *technical* conversion: accurate, neutral, and deliberately

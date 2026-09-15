@@ -39,10 +39,9 @@ SKIPPED=""
 # to trust, so a default that quietly ran less would bring back the "green but tested nothing"
 # failure the missing-tool rule below exists for. What --fast leaves out is named at the end.
 #
-# The Swift classes left out are the ones that render real footage through the engine. Their
-# measured cost, and that of the bats tests tagged `slow`, is in
-# docs/adr/0013_A_PARALLEL_SUITE_WITH_A_FAST_TIER.md. Re-measure rather than guess before adding
-# to this list.
+# The Swift classes left out are the ones that render real footage through the engine, each
+# measured at several seconds. Time a new one (`swift test --filter <Class>`) rather than guessing
+# before adding it to this list.
 SLOW_SWIFT='LiveChainTests|EndToEndTests|DeliveryTests|PreviewRendererTests|ClipListTests'
 
 # Parallel runs lose one signal: `swift test --parallel` reports a skipped test as passed, where
@@ -85,7 +84,7 @@ fi
 echo
 echo "== grade golden (ffmpeg's recorded output, against the chain and the probe) =="
 # It used to gate on node, because this check ran the browser Bench's JavaScript. The Bench is
-# gone (docs/adr/0007) and the per-pixel comparison moved to LiveGradeTests, which the swift block
+# gone and the per-pixel comparison moved to LiveGradeTests, which the swift block
 # below runs. What is left here is the golden itself: fresh against grade_chain, matching the probe
 # it was measured on, and still carrying a tolerance for every case — that last one is what keeps
 # LiveGradeTests from silently skipping a case and reading as coverage.
