@@ -1066,7 +1066,12 @@ load_delivery_look() {
 	GRAIN_HIGHLIGHTS="$(require_unit grain.highlights "$(look .grain.highlights)")" || return 1
 	AUDIO_HIGHPASS_HZ="$(require_hz AUDIO_HIGHPASS_HZ \
 		"${AUDIO_HIGHPASS_HZ:-$DELIVERY_AUDIO_HIGHPASS_HZ}")" || return 1
+	# Only 0 or 1: `FINISH=no` would otherwise sharpen a render its caller believes is plain.
 	FINISH="${FINISH:-1}"
+	case "$FINISH" in
+		0|1) ;;
+		*) echo "FINISH must be 0 or 1: got '$FINISH'" >&2; return 1;;
+	esac
 }
 
 # THE GRADE ITSELF, as a spliceable filter chain: look LUT, tone curve, saturation, warmth. Both

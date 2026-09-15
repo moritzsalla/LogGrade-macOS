@@ -2736,6 +2736,17 @@ sys.exit("; ".join(problems) or None)
 	[[ "$(delivery_grain_merge b g o 0.9 1)" == *maskedmerge* ]] || fail "a weight of 0.9 built no mask"
 }
 
+@test "a FINISH that is not 0 or 1 is refused before anything renders" {
+	local work="$BATS_TEST_TMPDIR/bad-finish"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	FINISH=no FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -ne 0 ] || fail "rendered with FINISH=no"
+	[[ "$output" == *"FINISH must be 0 or 1"* ]] || fail "refused without naming FINISH: $output"
+	[ ! -d "$work/dist/frames" ] || fail "FINISH=no got as far as rendering"
+}
+
 @test "a grain weight outside 0 to 1 is refused before anything renders" {
 	local work="$BATS_TEST_TMPDIR/bad-grain" look="$BATS_TEST_TMPDIR/bad-grain.json" v
 	mkdir -p "$work/src"
