@@ -205,9 +205,17 @@ struct RootView: View {
     }
 }
 
-/// The selected clip's edge marker, observing the model itself — see `RootView.grade`.
+/// The selected clip's edge marker, observing the model’s changes itself — see `RootView.grade`.
 private struct SelectionMark: View {
-    @ObservedObject var model: GradeModel
+    // Not observed: see `GradeModel.changes`.
+    let model: GradeModel
+    @ObservedObject private var changes: GradeModel.Changes
+
+    init(model: GradeModel, stem: String) {
+        self.model = model
+        _changes = ObservedObject(wrappedValue: model.changes)
+        self.stem = stem
+    }
     let stem: String
 
     static let width: CGFloat = 2
@@ -219,9 +227,16 @@ private struct SelectionMark: View {
     }
 }
 
-/// The open project's file name, observing the model itself — see `RootView.grade`.
+/// The open project's file name, observing the model’s changes itself — see `RootView.grade`.
 private struct ProjectName: View {
-    @ObservedObject var model: GradeModel
+    // Not observed: see `GradeModel.changes`.
+    let model: GradeModel
+    @ObservedObject private var changes: GradeModel.Changes
+
+    init(model: GradeModel) {
+        self.model = model
+        _changes = ObservedObject(wrappedValue: model.changes)
+    }
 
     var body: some View {
         if let url = model.projectURL {

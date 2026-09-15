@@ -10,7 +10,14 @@ import SwiftUI
 /// clip has one — the same refusal the engine makes, said before a render starts rather than
 /// discovered from its exit code.
 struct DeliveryPanel: View {
-    @ObservedObject var model: GradeModel
+    // Not observed: see `GradeModel.changes`.
+    let model: GradeModel
+    @ObservedObject private var changes: GradeModel.Changes
+
+    init(model: GradeModel) {
+        self.model = model
+        _changes = ObservedObject(wrappedValue: model.changes)
+    }
     @State private var shapeEditor: ShapeEditorMode?
 
     private static let cropStepperPixels = 8
@@ -92,7 +99,8 @@ struct DeliveryPanel: View {
             // Spelled as the WIDTH every deliverable shares, not as "1080p" or a portrait size: each
             // shape's height follows its own aspect, so "1080 × 1920" was only true of reels. The
             // tag stays the 9:16 reference height the engine's HEIGHT takes.
-            Picker("", selection: $model.project.delivery.height) {
+            Picker("", selection: Binding(get: { model.project.delivery.height },
+                                         set: { model.project.delivery.height = $0 })) {
                 Text("1080 wide").tag(1920)
                 Text("1440 wide").tag(2560)
                 Text("2160 wide").tag(3840)
@@ -334,7 +342,16 @@ struct DeliveryPanel: View {
 /// the frame, and no number answers it. The box is the engine's window — filling the master along one
 /// axis and moving along the other — so what is inside it is what gets delivered.
 struct CropOverlay: View {
-    @ObservedObject var model: GradeModel
+    // Not observed: see `GradeModel.changes`.
+    let model: GradeModel
+    @ObservedObject private var changes: GradeModel.Changes
+
+    init(model: GradeModel, geometry: CropGeometry, framedPerClip: Bool) {
+        self.model = model
+        _changes = ObservedObject(wrappedValue: model.changes)
+        self.geometry = geometry
+        self.framedPerClip = framedPerClip
+    }
     let geometry: CropGeometry
     /// False for a shape that carries `centre`: its box is drawn where the engine will cut, and
     /// dragging it would change a per-clip offset that shape ignores.

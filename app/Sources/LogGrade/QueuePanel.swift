@@ -7,7 +7,15 @@ import SwiftUI
 /// independent jobs and one of them failing is information about that clip rather than about the
 /// run. The engine already keeps a failed clip from taking the batch with it; this shows which one.
 struct QueuePanel: View {
-    @ObservedObject var model: GradeModel
+    // Not observed: see `GradeModel.changes`.
+    let model: GradeModel
+    @ObservedObject private var changes: GradeModel.Changes
+
+    init(model: GradeModel, queue: RenderQueue) {
+        self.model = model
+        _changes = ObservedObject(wrappedValue: model.changes)
+        self.queue = queue
+    }
     @ObservedObject var queue: RenderQueue
 
     var body: some View {

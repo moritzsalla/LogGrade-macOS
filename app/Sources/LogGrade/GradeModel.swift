@@ -8,6 +8,8 @@ import SwiftUI
 ///
 /// ObservableObject, not @Observable: the latter is macOS 14 and this builds against 13.
 final class GradeModel: ObservableObject {
+    // A new @Published property goes into the `changes` relay in init too, unless it follows from
+    // the look; otherwise the panels that observe the relay never see it change.
     @Published var look: Look
     /// The picture, in its OWN observable. A new frame must not rebuild the inspector, which is
     /// what made a drag feel slow even though grading the frame took four milliseconds.
@@ -101,12 +103,20 @@ final class GradeModel: ObservableObject {
     /// Apple's conversion, read once. It is 65 points and parsing it takes long enough to be worth
     /// not doing on a drag.
     private let conversionCube: Cube3D?
+
+    // TOUCHED ONLY ON `liveQueue`, from here to `convertedFrom`. They were built on the main
+    // thread, and the correction cube alone costs 10 ms on the Intel Mac — every tick of an
+    // Exposure drag, which spent the frame the slider's thumb needed to redraw. The queue is not
+    // what makes this serial: `gradeInFlight` allows one grade at a time, so no two jobs overlap.
+
     /// Film looks and prints, read on first use and kept. There are a handful and they are small.
     private var filmCubeCache: [URL: Cube3D] = [:]
     /// The correction cube and what it was built from, so an unchanged correction is not rebuilt
     /// 60 times a second.
     private var correctionCube: Cube3D?
     private var correctionFor: Look.Correct?
+    private var gradeCurve: ToneCurve?
+    private var gradeCurveFor: Look.Tone?
     /// The engine's own default (`CORRECT_SIZE` in grade.sh), because the live picture has to be
     /// built from the cube the render builds. The error at 17, 33 and 65 is measured in
     /// `make-correct-lut.py`.
@@ -116,6 +126,10 @@ final class GradeModel: ObservableObject {
     /// are most of the work.
     private var convertedFrame: LiveChain.Converted?
     private var convertedFor: ColourKey?
+    /// Which source pixels `convertedFrame` came from, compared by identity. A new clip replaces
+    /// `sourceImage` on the main thread, and this lets the live queue notice that without the main
+    /// thread reaching into its cache.
+    private var convertedFrom: CGImage?
 
     /// Everything the colour stages depend on, so a tone drag reuses them and nothing else does.
     private struct ColourKey: Equatable {
@@ -177,18 +191,26 @@ final class GradeModel: ObservableObject {
     /// away from it — so it is stopped here rather than left to finish and be discarded. Without
     /// this, letting go and immediately grabbing again gives three dead seconds.
     func beginDrag() {
+        stopRender()
+    }
+
+    private func stopRender() {
         // Unless nothing is live yet for THIS clip at THIS timecode. `sourceImage` alone is not
         // that question: right after a clip switch it still holds the previous clip's frame, so
         // checking it cancelled the very render that would have fetched the new one, and grabbing
         // a control every couple of seconds kept live from ever starting.
-        let liveHere = sourceImage != nil && sourceClip == selectedClip?.url
-            && sourceSeconds == previewSeconds
-        if preview.isRendering && liveHere {
-            previewGeneration += 1
-            if let running = previewProcess, running.isRunning { EngineRun.stop(running) }
-            preview.isRendering = false
-        }
+        guard preview.isRendering, isLiveHere else { return }
+        previewGeneration += 1
+        if let running = previewProcess, running.isRunning { EngineRun.stop(running) }
+        preview.isRendering = false
     }
+
+    private var isLiveHere: Bool {
+        sourceImage != nil && sourceClip == selectedClip?.url && sourceSeconds == previewSeconds
+    }
+
+    /// The look the engine render in flight was asked for.
+    private var renderingLook: Look?
 
     /// What the live tier is currently grading, and what it should be grading.
     ///
@@ -208,23 +230,66 @@ final class GradeModel: ObservableObject {
     /// engine render to see — the slowest thing in the app, for the control with the biggest
     /// effect on the picture.
     func liveUpdate() {
-        guard let clip = selectedClip else { return }
-        guard sourceImage != nil, sourceClip == clip.url, sourceSeconds == previewSeconds else {
+        guard selectedClip != nil else { return }
+        guard isLiveHere else {
             if isFetchingSource { preview.say("Preparing preview…") }
             return
         }
-        refreshCurve()
-        pendingLook = effectiveLook
+        // An exact render of an OLDER look would land after this live frame and replace it with
+        // the grade you just moved away from. Only when the look differs: a preset or a reset
+        // fires every slider's onChange after its own `renderPreview`, and that render is current.
+        let wanted = effectiveLook
+        if renderingLook != wanted { stopRender() }
+        pendingLook = wanted
         startGradeIfIdle()
     }
 
     private func startGradeIfIdle() {
         guard !gradeInFlight, let wanted = pendingLook, let source = sourceImage,
-              let conversion = conversionCube, let curve = preview.curve else { return }
+              let conversion = conversionCube else { return }
         pendingLook = nil
         gradeInFlight = true
+        let measuredYAVG = matchedYAVG
 
-        // Built here, on the main thread, because they read the caches this class owns.
+        // OFF THE MAIN THREAD, all of it. The main thread's job during a drag is to redraw the
+        // slider; any work here is a frame the thumb doesn't get, which reads as the control being
+        // slow rather than the picture being late.
+        liveQueue.async { [weak self] in
+            guard let self else { return }
+            let outcome = self.grade(wanted, source: source, conversion: conversion,
+                                     measuredYAVG: measuredYAVG)
+            DispatchQueue.main.async {
+                self.gradeInFlight = false
+                switch outcome {
+                case .refused(let reason):
+                    self.preview.isLive = false
+                    self.preview.say(reason, failure: true)
+                case .graded(let image, let scopes, let tone, let curve):
+                    self.publishCurve(curve, for: tone)
+                    self.preview.image = NSImage(cgImage: image,
+                                                 size: NSSize(width: image.width,
+                                                              height: image.height))
+                    self.preview.scopes = scopes
+                    self.preview.isLive = true
+                    self.preview.say("Live preview. Release to render the exact frame.")
+                case .failed:
+                    break
+                }
+                // Whatever arrived while that ran.
+                self.startGradeIfIdle()
+            }
+        }
+    }
+
+    private enum LiveOutcome {
+        case graded(CGImage, Scopes?, Look.Tone, ToneCurve)
+        case refused(String)
+        case failed
+    }
+
+    /// One live frame. Runs on `liveQueue`, where the caches it reads live.
+    private func grade(_ wanted: Look, source: CGImage, conversion: Cube3D,
+                       measuredYAVG: Double?) -> LiveOutcome {
         if correctionFor != wanted.correct {
             correctionCube = wanted.correct.isNeutral ? nil
                 : CorrectionCube.cube(for: wanted.correct, size: Self.correctionCubeSize)
@@ -233,72 +298,56 @@ final class GradeModel: ObservableObject {
         // A correction the engine would refuse gets no live picture, rather than a picture of
         // something it will not render.
         if !wanted.correct.isNeutral && correctionCube == nil {
-            gradeInFlight = false
-            preview.isLive = false
-            preview.say("That correction isn’t a value the engine accepts.", failure: true)
-            return
+            return .refused("That correction isn’t a value the engine accepts.")
         }
         // Built against the SOURCE frame's height, because the look stores the glow's radius as a
         // fraction of the frame and the frame this grades is the preview-sized one.
         let halation = LiveHalation(wanted.halation, frameLongEdge: max(source.width, source.height))
         if !wanted.halation.isNeutral && halation == nil {
-            gradeInFlight = false
-            preview.isLive = false
-            preview.say("That halation tint isn’t a value the engine accepts.", failure: true)
-            return
+            return .refused("That halation tint isn’t a value the engine accepts.")
         }
         // The same refusal for a film cube that was named and would not load: drawn without it,
         // the picture is a grade with a stage missing that reads as the grade.
         let lookStage = lookCube(for: wanted.lookLUT)
         if Self.namesCube(wanted.lookLUT) && lookStage == nil {
-            gradeInFlight = false
-            preview.isLive = false
-            preview.say("The film look “\(wanted.lookLUT)” couldn’t be read.", failure: true)
-            return
+            return .refused("The film look “\(wanted.lookLUT)” couldn’t be read.")
         }
         let printStage = printCube(for: wanted.printLUT)
         if Self.namesCube(wanted.printLUT) && printStage == nil {
-            gradeInFlight = false
-            preview.isLive = false
-            preview.say("The print “\(wanted.printLUT)” couldn’t be read.", failure: true)
-            return
+            return .refused("The print “\(wanted.printLUT)” couldn’t be read.")
         }
-        let stages = LiveChain.colourStages(correction: correctionCube, halation: halation,
-                                            conversion: conversion,
-                                            look: lookStage,
-                                            lookStrength: wanted.lookStrength,
-                                            print: printStage,
-                                            printStrength: wanted.printStrength)
-        let reuse = convertedFor == ColourKey(wanted) ? convertedFrame : nil
-        let grade = LiveGrade(curve: curve, saturation: wanted.colour.saturation,
-                              warmth: wanted.colour.warmth)
 
-        // OFF THE MAIN THREAD. The main thread's job during a drag is to keep the window
-        // responding; grading a frame on it makes the slider itself stutter, which reads as the
-        // app being slow rather than the picture being late.
-        liveQueue.async { [weak self] in
-            guard let self else { return }
-            let converted = reuse ?? LiveChain.converted(source, through: stages)
-            let graded = converted.flatMap { LiveChain.graded($0, with: grade) }
-            let measured = graded.map { Scopes.measure($0) }
-            DispatchQueue.main.async {
-                self.gradeInFlight = false
-                if let converted {
-                    self.convertedFrame = converted
-                    self.convertedFor = ColourKey(wanted)
-                }
-                if let graded {
-                    self.preview.image = NSImage(cgImage: graded,
-                                                 size: NSSize(width: graded.width,
-                                                              height: graded.height))
-                    self.preview.scopes = measured
-                    self.preview.isLive = true
-                    self.preview.say("Live preview. Release to render the exact frame.")
-                }
-                // Whatever arrived while that ran.
-                self.startGradeIfIdle()
+        let tone = Self.appliedTone(wanted, measuredYAVG: measuredYAVG)
+        if gradeCurveFor != tone {
+            gradeCurve = ToneCurve.generated(tone: tone)
+            gradeCurveFor = tone
+        }
+        guard let curve = gradeCurve else { return .failed }
+
+        let key = ColourKey(wanted)
+        let converted: LiveChain.Converted?
+        if convertedFor == key, convertedFrom === source, let reused = convertedFrame {
+            converted = reused
+        } else {
+            let stages = LiveChain.colourStages(correction: correctionCube, halation: halation,
+                                                conversion: conversion,
+                                                look: lookStage,
+                                                lookStrength: wanted.lookStrength,
+                                                print: printStage,
+                                                printStrength: wanted.printStrength)
+            converted = LiveChain.converted(source, through: stages)
+            if let converted {
+                convertedFrame = converted
+                convertedFor = key
+                convertedFrom = source
             }
         }
+        let grade = LiveGrade(curve: curve, saturation: wanted.colour.saturation,
+                              warmth: wanted.colour.warmth)
+        guard let graded = converted.flatMap({ LiveChain.graded($0, with: grade) }) else {
+            return .failed
+        }
+        return .graded(graded, Scopes.measure(graded), tone, curve)
     }
 
     /// Fetches the source frame for a clip, and the clip's exposure with it.
@@ -334,9 +383,6 @@ final class GradeModel: ObservableObject {
             self.sourceClip = clip.url
             self.sourceSeconds = seconds
             self.isFetchingSource = false
-            // A new clip's pixels, so whatever was converted belongs to the old one.
-            self.convertedFrame = nil
-            self.convertedFor = nil
             self.toaster?.show("photo", "\(clip.stem) ready", "Controls are live for this clip.")
             // The probe this render paid for. It is what the gamma solve needs, and recording it
             // here means the curve is the rendered one from the first drag rather than from the
@@ -393,7 +439,32 @@ final class GradeModel: ObservableObject {
             self.openStages = Set(remembered)
         }
         refreshCurve()
+
+        for changed in [$selectedClip.map { _ in () }.eraseToAnyPublisher(),
+                        $isComparing.map { _ in () }.eraseToAnyPublisher(),
+                        $renderedLook.map { _ in () }.eraseToAnyPublisher(),
+                        $project.map { _ in () }.eraseToAnyPublisher(),
+                        $openStages.map { _ in () }.eraseToAnyPublisher(),
+                        $bypassed.map { _ in () }.eraseToAnyPublisher(),
+                        $frameSizes.map { _ in () }.eraseToAnyPublisher(),
+                        $projectURL.map { _ in () }.eraseToAnyPublisher()] {
+            changed.dropFirst()
+                .sink { [changes] in changes.objectWillChange.send() }
+                .store(in: &relayed)
+        }
     }
+
+    /// Everything this model publishes EXCEPT the look and what follows from it (`appliedGamma`),
+    /// for the views that never read the look.
+    ///
+    /// A look write is sixty a second during a drag, and with ObservableObject every observer of
+    /// the model rebuilds on each one. The delivery and queue panels alone cost the Intel Mac
+    /// about 30 ms of SwiftUI and AppKit layout per tick, measured, so the slider's thumb ran at
+    /// 20 fps while grading was already off the main thread. A new view that does not read
+    /// `look` observes this; a new @Published property that such a view reads is added above.
+    final class Changes: ObservableObject {}
+    let changes = Changes()
+    private var relayed: Set<AnyCancellable> = []
 
     /// The curve the render will apply to this clip, built here.
     ///
@@ -407,20 +478,40 @@ final class GradeModel: ObservableObject {
     /// it so that every clip lands where the look was tuned. Drawing the slider value gives a
     /// graph of a curve nothing applies.
     func refreshCurve() {
-        let look = effectiveLook
+        let tone = Self.appliedTone(effectiveLook, measuredYAVG: matchedYAVG)
+        guard tone != publishedTone else { return }
+        publishCurve(ToneCurve.generated(tone: tone), for: tone)
+    }
+
+    /// The selected clip's measured mean, when the render will match exposure from it.
+    private var matchedYAVG: Double? {
+        guard Look.matchesExposure(bypassing: bypassed), let clip = selectedClip?.url else {
+            return nil
+        }
+        return measuredYAVG[clip]
+    }
+
+    static func appliedTone(_ look: Look, measuredYAVG: Double?) -> Look.Tone {
         var tone = look.tone
-        if Look.matchesExposure(bypassing: bypassed),
-           let clip = selectedClip?.url, let measured = measuredYAVG[clip] {
-            tone.gamma = ToneCurve.solvedGamma(clipYAVG: measured,
+        if let measuredYAVG {
+            tone.gamma = ToneCurve.solvedGamma(clipYAVG: measuredYAVG,
                                                referenceYAVG: look.matchReferenceYAVG,
                                                referenceGamma: tone.gamma)
         }
-        // WRITTEN ONLY WHEN IT CHANGES. Both of these are @Published, and a redundant write to a
-        // published property is a full rebuild of every view observing this object — which during
-        // a drag is the inspector, sixty times a second, for a value that did not move.
-        if appliedGamma != tone.gamma { appliedGamma = tone.gamma }
-        preview.curve = ToneCurve.generated(tone: tone)
+        return tone
     }
+
+    /// WRITTEN ONLY WHEN IT CHANGES. Both are @Published, and a redundant write is a rebuild of
+    /// every view observing them — during an Exposure drag, sixty times a second, for a curve that
+    /// did not move.
+    private func publishCurve(_ curve: ToneCurve, for tone: Look.Tone) {
+        if appliedGamma != tone.gamma { appliedGamma = tone.gamma }
+        guard tone != publishedTone else { return }
+        preview.curve = curve
+        publishedTone = tone
+    }
+
+    private var publishedTone: Look.Tone?
 
     /// What the engine measured for each clip, mirrored here so the solve above needs no render
     /// and no cross-thread read of the renderer's own cache.
@@ -655,6 +746,7 @@ final class GradeModel: ObservableObject {
         if let running = previewProcess, running.isRunning {
             EngineRun.stop(running)
         }
+        renderingLook = look
 
         // Decided on the main thread, where these are the only ones touched.
         let needsSource = sourceClip != clip.url || sourceSeconds != seconds
