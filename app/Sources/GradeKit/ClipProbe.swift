@@ -80,9 +80,11 @@ public struct ClipProbe {
     private func field(_ entry: String, of url: URL) -> String? {
         let process = Process()
         process.executableURL = ffprobe
-        process.arguments = ["-v", "error", "-select_streams", "v:0",
-                             "-show_entries", "stream=\(entry)",
-                             "-of", "default=nw=1:nk=1", url.path]
+        process.arguments = [
+            "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=\(entry)",
+            "-of", "default=nw=1:nk=1", url.path,
+        ]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = Pipe()
@@ -92,31 +94,38 @@ public struct ClipProbe {
         // FIRST line only: this camera's files print the video stream twice, so a naive read of
         // the whole output gets two values and a blank line.
         let text = String(decoding: data, as: UTF8.self)
-        guard let first = text.split(separator: "\n").first(where: {
-            !$0.trimmingCharacters(in: .whitespaces).isEmpty
-        }) else { return nil }
+        guard
+            let first = text.split(separator: "\n").first(where: {
+                !$0.trimmingCharacters(in: .whitespaces).isEmpty
+            })
+        else { return nil }
         // And a trailing comma appears on camera originals, so it is stripped rather than trusted.
         return first.trimmingCharacters(in: CharacterSet(charactersIn: " ,\r"))
     }
 
     public func fields(of url: URL) -> Fields? {
         guard let codec = field("codec_name", of: url),
-              let pix = field("pix_fmt", of: url),
-              let w = field("width", of: url).flatMap(Int.init),
-              let h = field("height", of: url).flatMap(Int.init) else { return nil }
+            let pix = field("pix_fmt", of: url),
+            let w = field("width", of: url).flatMap(Int.init),
+            let h = field("height", of: url).flatMap(Int.init)
+        else { return nil }
         var rate: Double?
         if let raw = field("r_frame_rate", of: url) {
             let parts = raw.split(separator: "/").compactMap { Double($0) }
-            if parts.count == 2, parts[1] != 0 { rate = parts[0] / parts[1] }
-            else if parts.count == 1 { rate = parts[0] }
+            if parts.count == 2, parts[1] != 0 {
+                rate = parts[0] / parts[1]
+            } else if parts.count == 1 {
+                rate = parts[0]
+            }
         }
-        return Fields(codec: codec,
-                      pixelFormat: pix,
-                      primaries: field("color_primaries", of: url) ?? "unknown",
-                      transfer: field("color_transfer", of: url) ?? "unknown",
-                      width: w, height: h,
-                      duration: field("duration", of: url).flatMap(Double.init),
-                      frameRate: rate)
+        return Fields(
+            codec: codec,
+            pixelFormat: pix,
+            primaries: field("color_primaries", of: url) ?? "unknown",
+            transfer: field("color_transfer", of: url) ?? "unknown",
+            width: w, height: h,
+            duration: field("duration", of: url).flatMap(Double.init),
+            frameRate: rate)
     }
 
     /// A SIGNATURE, not proof, and the interface says so. What it rules out is the case that

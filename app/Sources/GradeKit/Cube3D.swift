@@ -49,7 +49,8 @@ public struct Cube3D: Equatable {
             }
             let parts = trimmed.split(separator: " ")
             guard parts.count == 3, let r = Float(parts[0]), let g = Float(parts[1]),
-                  let b = Float(parts[2]) else { continue }
+                let b = Float(parts[2])
+            else { continue }
             samples.append(SIMD3(r, g, b))
         }
         guard size > 1 else { throw Invalid.noSize(url) }
@@ -69,8 +70,10 @@ public struct Cube3D: Equatable {
     @inline(__always)
     public func sample(_ input: SIMD3<Float>) -> SIMD3<Float> {
         let last = Float(size - 1)
-        let p = input.clamped(lowerBound: SIMD3(repeating: 0),
-                              upperBound: SIMD3(repeating: 1)) * last
+        let p =
+            input.clamped(
+                lowerBound: SIMD3(repeating: 0),
+                upperBound: SIMD3(repeating: 1)) * last
         let i0 = SIMD3<Int>(Int(p.x), Int(p.y), Int(p.z))
         let lo = SIMD3<Int>(min(i0.x, size - 2), min(i0.y, size - 2), min(i0.z, size - 2))
         let f = p - SIMD3(Float(lo.x), Float(lo.y), Float(lo.z))
@@ -84,32 +87,35 @@ public struct Cube3D: Equatable {
         //
         // Written as three weights and three edges rather than one expression on purpose: as a
         // single SIMD sum per branch it type-checked for over two minutes and then timed out.
-        let w0: Float, w1: Float, w2: Float
-        let e0: SIMD3<Float>, e1: SIMD3<Float>
+        let w0: Float
+        let w1: Float
+        let w2: Float
+        let e0: SIMD3<Float>
+        let e1: SIMD3<Float>
         if dr > dg {
-            if dg > db {                                        // r > g > b
+            if dg > db {  // r > g > b
                 (w0, w1, w2) = (dr, dg, db)
                 e0 = corner(lo.x + 1, lo.y, lo.z)
                 e1 = corner(lo.x + 1, lo.y + 1, lo.z)
-            } else if dr > db {                                 // r > b > g
+            } else if dr > db {  // r > b > g
                 (w0, w1, w2) = (dr, db, dg)
                 e0 = corner(lo.x + 1, lo.y, lo.z)
                 e1 = corner(lo.x + 1, lo.y, lo.z + 1)
-            } else {                                            // b > r > g
+            } else {  // b > r > g
                 (w0, w1, w2) = (db, dr, dg)
                 e0 = corner(lo.x, lo.y, lo.z + 1)
                 e1 = corner(lo.x + 1, lo.y, lo.z + 1)
             }
         } else {
-            if db > dg {                                        // b > g > r
+            if db > dg {  // b > g > r
                 (w0, w1, w2) = (db, dg, dr)
                 e0 = corner(lo.x, lo.y, lo.z + 1)
                 e1 = corner(lo.x, lo.y + 1, lo.z + 1)
-            } else if db > dr {                                 // g > b > r
+            } else if db > dr {  // g > b > r
                 (w0, w1, w2) = (dg, db, dr)
                 e0 = corner(lo.x, lo.y + 1, lo.z)
                 e1 = corner(lo.x, lo.y + 1, lo.z + 1)
-            } else {                                            // g > r > b
+            } else {  // g > r > b
                 (w0, w1, w2) = (dg, dr, db)
                 e0 = corner(lo.x, lo.y + 1, lo.z)
                 e1 = corner(lo.x + 1, lo.y + 1, lo.z)

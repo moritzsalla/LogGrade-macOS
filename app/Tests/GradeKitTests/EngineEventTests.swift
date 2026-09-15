@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import GradeKit
 
 final class EngineEventTests: XCTestCase {
@@ -6,16 +7,20 @@ final class EngineEventTests: XCTestCase {
     /// tests/make-event-fixture.sh and checked against the live engine by the bats suite, so this
     /// test needs no ffmpeg, no footage and no render.
     func testParsesTheRecordedStream() throws {
-        let fixture = try engineCheckout().root.appendingPathComponent("tests/fixtures/events.jsonl")
+        let fixture = try engineCheckout().root.appendingPathComponent(
+            "tests/fixtures/events.jsonl")
         let text = try String(contentsOf: fixture, encoding: .utf8)
         var events: [EngineEvent] = []
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
             if let event = try EngineEvent.decode(line: String(line)) { events.append(event) }
         }
-        XCTAssertEqual(events.map(\.name),
-                       ["disk", "run_start", "clip_skipped", "stabilisation", "clip_planned",
-                        "run_done"],
-                       "the recorded stream's shape is the contract the interface is built on")
+        XCTAssertEqual(
+            events.map(\.name),
+            [
+                "disk", "run_start", "clip_skipped", "stabilisation", "clip_planned",
+                "run_done",
+            ],
+            "the recorded stream's shape is the contract the interface is built on")
 
         let start = try XCTUnwrap(events.first { $0.name == "run_start" })
         XCTAssertEqual(start.int("clips"), 2)
@@ -42,22 +47,28 @@ final class EngineEventTests: XCTestCase {
         // Foundation bridges a JSON 0 or 1 to Bool, so a decoder that checks Bool first turns
         // every count in the stream into a boolean and every int() on them into nil. That is what
         // the first version of this decoder did, and what run_done's own fields exposed.
-        let event = try XCTUnwrap(try EngineEvent.decode(line:
-            #"{"event":"run_done","rendered":1,"skipped":0,"failed":0,"dry":1}"#))
+        let event = try XCTUnwrap(
+            try EngineEvent.decode(
+                line:
+                    #"{"event":"run_done","rendered":1,"skipped":0,"failed":0,"dry":1}"#))
         XCTAssertEqual(event.int("rendered"), 1)
         XCTAssertEqual(event.int("skipped"), 0)
         XCTAssertEqual(event.int("dry"), 1)
         XCTAssertEqual(event.fields["rendered"], .number(1))
         XCTAssertNotEqual(event.fields["rendered"], .bool(true))
         // A real boolean, if the engine ever emits one, still decodes as one.
-        let flagged = try XCTUnwrap(try EngineEvent.decode(line:
-            #"{"event":"x","ok":true}"#))
+        let flagged = try XCTUnwrap(
+            try EngineEvent.decode(
+                line:
+                    #"{"event":"x","ok":true}"#))
         XCTAssertEqual(flagged.fields["ok"], .bool(true))
     }
 
     func testAnUnknownEventSurvivesRatherThanVanishing() throws {
-        let event = try XCTUnwrap(try EngineEvent.decode(line:
-            #"{"event":"something_new","clip":"IMG_0001","depth":10}"#))
+        let event = try XCTUnwrap(
+            try EngineEvent.decode(
+                line:
+                    #"{"event":"something_new","clip":"IMG_0001","depth":10}"#))
         XCTAssertEqual(event.name, "something_new")
         XCTAssertEqual(event.clip, "IMG_0001")
         XCTAssertEqual(event.int("depth"), 10)
@@ -65,8 +76,9 @@ final class EngineEventTests: XCTestCase {
 
     func testMalformedLinesAreSurfacedNotSwallowed() {
         XCTAssertThrowsError(try EngineEvent.decode(line: "disk OK: 21GB available")) { error in
-            XCTAssertEqual(error as? EngineEvent.DecodeFailure,
-                           .notJSON(line: "disk OK: 21GB available"))
+            XCTAssertEqual(
+                error as? EngineEvent.DecodeFailure,
+                .notJSON(line: "disk OK: 21GB available"))
         }
         XCTAssertThrowsError(try EngineEvent.decode(line: #"{"clip":"IMG_0001"}"#)) { error in
             guard case .noEventName = error as? EngineEvent.DecodeFailure else {
@@ -86,11 +98,13 @@ final class EngineEventTests: XCTestCase {
     /// definition and the `# emit_code <NAME>` in its comment cannot count as emitted.
     func testTheCodesTheEngineEmitsAreExactlyTheOnesTheAppKnows() throws {
         let scripts = try engineCheckout().root.appendingPathComponent("scripts")
-        let pattern = try NSRegularExpression(pattern: #"^[ \t]*emit_code ([A-Z_]+)"#,
-                                              options: .anchorsMatchLines)
+        let pattern = try NSRegularExpression(
+            pattern: #"^[ \t]*emit_code ([A-Z_]+)"#,
+            options: .anchorsMatchLines)
         var emitted = Set<String>()
-        for script in try FileManager.default.contentsOfDirectory(at: scripts,
-                                                                  includingPropertiesForKeys: nil)
+        for script in try FileManager.default.contentsOfDirectory(
+            at: scripts,
+            includingPropertiesForKeys: nil)
         where script.pathExtension == "sh" {
             let text = try String(contentsOf: script, encoding: .utf8)
             for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
@@ -101,9 +115,11 @@ final class EngineEventTests: XCTestCase {
         }
         XCTAssertFalse(emitted.isEmpty, "found no emit_code calls, so this test proves nothing")
         let known = Set(EngineCode.byRawValue.keys)
-        XCTAssertEqual(emitted.subtracting(known).sorted(), [],
-                       "the engine emits these and EngineCode does not know them")
-        XCTAssertEqual(known.subtracting(emitted).sorted(), [],
-                       "EngineCode knows these and no script emits them")
+        XCTAssertEqual(
+            emitted.subtracting(known).sorted(), [],
+            "the engine emits these and EngineCode does not know them")
+        XCTAssertEqual(
+            known.subtracting(emitted).sorted(), [],
+            "EngineCode knows these and no script emits them")
     }
 }

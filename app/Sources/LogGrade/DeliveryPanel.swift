@@ -99,8 +99,12 @@ struct DeliveryPanel: View {
             // Spelled as the WIDTH every deliverable shares, not as "1080p" or a portrait size: each
             // shape's height follows its own aspect, so "1080 × 1920" was only true of reels. The
             // tag stays the 9:16 reference height the engine's HEIGHT takes.
-            Picker("", selection: Binding(get: { model.project.delivery.height },
-                                         set: { model.project.delivery.height = $0 })) {
+            Picker(
+                "",
+                selection: Binding(
+                    get: { model.project.delivery.height },
+                    set: { model.project.delivery.height = $0 })
+            ) {
                 Text("1080 wide").tag(1920)
                 Text("1440 wide").tag(2560)
                 Text("2160 wide").tag(3840)
@@ -125,12 +129,14 @@ struct DeliveryPanel: View {
     // height is an assumption rather than a measurement.
     @ViewBuilder private var sizeCostNote: some View {
         if model.project.delivery.height > 1920 {
-            Label("Instagram re-encodes to 1080 wide. This renders \(pixelRatio)× longer for no "
-                  + "gain, and the grain was tuned at 1080.",
-                  systemImage: "info.circle")
-                .font(Type.caption)
-                .foregroundColor(Palette.inkTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            Label(
+                "Instagram re-encodes to 1080 wide. This renders \(pixelRatio)× longer for no "
+                    + "gain, and the grain was tuned at 1080.",
+                systemImage: "info.circle"
+            )
+            .font(Type.caption)
+            .foregroundColor(Palette.inkTertiary)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -147,17 +153,21 @@ struct DeliveryPanel: View {
         if model.project.delivery.anyTargetNeedsClipOffset(model.selectedFrameSize) {
             cropRow
         } else if let centred = model.project.delivery.cropBoxTarget(model.selectedFrameSize) {
-            Text("The \(centred.aspectWidth):\(centred.aspectHeight) crop sits at the centre of "
-                 + "every clip, so there is nothing to place.")
-                .font(Type.caption)
-                .foregroundColor(Palette.inkTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            Text(
+                "The \(centred.aspectWidth):\(centred.aspectHeight) crop sits at the centre of "
+                    + "every clip, so there is nothing to place."
+            )
+            .font(Type.caption)
+            .foregroundColor(Palette.inkTertiary)
+            .fixedSize(horizontal: false, vertical: true)
         } else {
-            Text("Nothing selected crops this clip, so there is no crop to place. Tick a "
-                 + "shape that is not the clip's own and it appears here.")
-                .font(Type.caption)
-                .foregroundColor(Palette.inkTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            Text(
+                "Nothing selected crops this clip, so there is no crop to place. Tick a "
+                    + "shape that is not the clip's own and it appears here."
+            )
+            .font(Type.caption)
+            .foregroundColor(Palette.inkTertiary)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -213,11 +223,13 @@ struct DeliveryPanel: View {
     // had touched.
     @ViewBuilder private var fpsNote: some View {
         if model.project.delivery.fps != nil {
-            Text("A frame rate that does not divide the source evenly would have to be "
-                 + "retimed, which judders. Those are refused before the render starts.")
-                .font(Type.caption)
-                .foregroundColor(Palette.inkTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            Text(
+                "A frame rate that does not divide the source evenly would have to be "
+                    + "retimed, which judders. Those are refused before the render starts."
+            )
+            .font(Type.caption)
+            .foregroundColor(Palette.inkTertiary)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -226,12 +238,16 @@ struct DeliveryPanel: View {
     /// whether it needed to be or not.
     private var stabiliseRow: some View {
         HStack(spacing: 10) {
-            Toggle("stabilise this clip", isOn: Binding(get: { model.stabilise },
-                                                        set: { model.stabilise = $0 }))
-                .toggleStyle(.checkbox)
-                .font(Type.label)
-                .foregroundColor(Palette.inkSecondary)
-                .disabled(model.selectedClip == nil)
+            Toggle(
+                "stabilise this clip",
+                isOn: Binding(
+                    get: { model.stabilise },
+                    set: { model.stabilise = $0 })
+            )
+            .toggleStyle(.checkbox)
+            .font(Type.label)
+            .foregroundColor(Palette.inkSecondary)
+            .disabled(model.selectedClip == nil)
             Spacer()
         }
     }
@@ -255,8 +271,9 @@ struct DeliveryPanel: View {
     }
 
     private func binding(for deliverable: Deliverable) -> Binding<Bool> {
-        Binding(get: { model.project.delivery.isSelected(deliverable) },
-                set: { model.project.delivery.setTarget(deliverable, selected: $0) })
+        Binding(
+            get: { model.project.delivery.isSelected(deliverable) },
+            set: { model.project.delivery.setTarget(deliverable, selected: $0) })
     }
 
     private var cropRow: some View {
@@ -267,23 +284,30 @@ struct DeliveryPanel: View {
                     // TYPED AS WELL AS DRAGGED. A drag finds a framing; only a number repeats one,
                     // and repeating one is how a shoot gets a consistent crop. Arrow keys nudge by
                     // a pixel from here too.
-                    TextField("", value: Binding(get: { model.cropOffset ?? 0 },
-                                                 set: { model.cropOffset = geometry.clamp($0) }),
-                              formatter: Self.pixels)
-                        .font(Type.value)
-                        .monospacedDigit()
-                        .multilineTextAlignment(.trailing)
-                        .textFieldStyle(.plain)
-                        .foregroundColor(Palette.ink)
-                        .frame(width: 46)
+                    TextField(
+                        "",
+                        value: Binding(
+                            get: { model.cropOffset ?? 0 },
+                            set: { model.cropOffset = geometry.clamp($0) }),
+                        formatter: Self.pixels
+                    )
+                    .font(Type.value)
+                    .monospacedDigit()
+                    .multilineTextAlignment(.trailing)
+                    .textFieldStyle(.plain)
+                    .foregroundColor(Palette.ink)
+                    .frame(width: 46)
                     // A String, not the Int: an interpolated Int is locale-grouped ("1.140").
-                    Text("of \(String(geometry.maximumOffset)) px from the "
-                         + (geometry.axis == .y ? "top" : "left"))
-                        .font(Type.caption).foregroundColor(Palette.inkTertiary)
+                    Text(
+                        "of \(String(geometry.maximumOffset)) px from the "
+                            + (geometry.axis == .y ? "top" : "left")
+                    )
+                    .font(Type.caption).foregroundColor(Palette.inkTertiary)
                     // INVERTED ON THE Y AXIS. The offset counts down from the top, so the stepper's
                     // up arrow has to shrink it to move the window up, as the Up key does. On the
                     // x axis it counts from the left, and up reads as "more".
-                    let upward = geometry.axis == .y ? -Self.cropStepperPixels : Self.cropStepperPixels
+                    let upward =
+                        geometry.axis == .y ? -Self.cropStepperPixels : Self.cropStepperPixels
                     Stepper("") {
                         model.nudgeCrop(by: upward)
                     } onDecrement: {
@@ -314,7 +338,8 @@ struct DeliveryPanel: View {
         let stabilised = model.clipNames.filter { model.project.settings(for: $0).stabilise }.count
         let total = clips * passes + stabilised
         guard total > 0 else { return "Nothing selected to deliver." }
-        return "\(clips) clip\(clips == 1 ? "" : "s"), \(total) render pass\(total == 1 ? "" : "es")"
+        return
+            "\(clips) clip\(clips == 1 ? "" : "s"), \(total) render pass\(total == 1 ? "" : "es")"
             + (stabilised > 0 ? " including \(stabilised) for stabilisation." : ".")
     }
 
@@ -331,8 +356,9 @@ struct DeliveryPanel: View {
     /// Zero stands for "the source's rate", which is the only lossless answer and therefore the
     /// default. A picker needs a value for it; the project keeps nil.
     private var fpsBinding: Binding<Int> {
-        Binding(get: { model.project.delivery.fps ?? 0 },
-                set: { model.project.delivery.fps = $0 == 0 ? nil : $0 })
+        Binding(
+            get: { model.project.delivery.fps ?? 0 },
+            set: { model.project.delivery.fps = $0 == 0 ? nil : $0 })
     }
 }
 
@@ -370,9 +396,10 @@ struct CropOverlay: View {
             // The frame's length along the axis the window moves, and the window's along it.
             let span = vertical ? geo.size.height : geo.size.width
             let length = span * geometry.windowFraction
-            let offset = geometry.fraction(
-                forOffset: framedPerClip ? model.cropOffset ?? 0 : geometry.centreOffset
-            ) * span
+            let offset =
+                geometry.fraction(
+                    forOffset: framedPerClip ? model.cropOffset ?? 0 : geometry.centreOffset
+                ) * span
             let boxWidth = vertical ? geo.size.width : length
             let boxHeight = vertical ? length : geo.size.height
             ZStack(alignment: .topLeading) {
@@ -404,7 +431,8 @@ struct CropOverlay: View {
                     .onChanged { value in
                         let from = startedAt ?? model.cropOffset ?? 0
                         if startedAt == nil { startedAt = from }
-                        let travelled = geometry.axis == .y
+                        let travelled =
+                            geometry.axis == .y
                             ? value.translation.height / geo.size.height
                             : value.translation.width / geo.size.width
                         model.cropOffset = geometry.offset(

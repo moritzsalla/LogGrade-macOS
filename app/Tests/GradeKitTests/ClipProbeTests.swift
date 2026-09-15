@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import GradeKit
 
 final class ClipProbeTests: XCTestCase {
@@ -13,8 +14,10 @@ final class ClipProbeTests: XCTestCase {
     /// print the video stream twice, which is exactly what the reader has to survive.
     func testRecognisesRealAppleLogFootage() throws {
         let src = try engineCheckout().root.appendingPathComponent("src")
-        let clips = (try? FileManager.default.contentsOfDirectory(at: src,
-                                                                  includingPropertiesForKeys: nil))
+        let clips =
+            (try? FileManager.default.contentsOfDirectory(
+                at: src,
+                includingPropertiesForKeys: nil))
             ?? []
         guard let clip = clips.first(where: { $0.pathExtension.lowercased() == "mov" }) else {
             throw XCTSkip("no footage in src/")
@@ -30,8 +33,9 @@ final class ClipProbeTests: XCTestCase {
         // And the container says LANDSCAPE for a clip that plays vertically, because the rotation
         // is a display-matrix flag. Asserted here so nobody adds an orientation answer to this
         // type: the engine decides that by decoding a frame.
-        XCTAssertGreaterThan(fields.width, fields.height,
-                             "the container's dimensions are not the graph's; that is ADR 0005")
+        XCTAssertGreaterThan(
+            fields.width, fields.height,
+            "the container's dimensions are not the graph's; that is ADR 0005")
     }
 
     func testRefusesFootageThatHasAlreadyBeenConverted() throws {
@@ -49,25 +53,32 @@ final class ClipProbeTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: raw) }
         let encode = Process()
         encode.executableURL = ffmpeg
-        encode.arguments = ["-v", "error", "-y", "-f", "lavfi",
-                            "-i", "color=c=gray:s=64x128:d=0.1:r=24", "-frames:v", "1",
-                            "-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le",
-                            raw.path]
-        try encode.run(); encode.waitUntilExit()
+        encode.arguments = [
+            "-v", "error", "-y", "-f", "lavfi",
+            "-i", "color=c=gray:s=64x128:d=0.1:r=24", "-frames:v", "1",
+            "-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le",
+            raw.path,
+        ]
+        try encode.run()
+        encode.waitUntilExit()
         let tag = Process()
         tag.executableURL = ffmpeg
-        tag.arguments = ["-v", "error", "-y", "-i", raw.path, "-map", "0:v:0", "-c", "copy",
-                         "-color_primaries", "bt709", "-color_trc", "bt709",
-                         "-colorspace", "bt709", out.path]
-        try tag.run(); tag.waitUntilExit()
+        tag.arguments = [
+            "-v", "error", "-y", "-i", raw.path, "-map", "0:v:0", "-c", "copy",
+            "-color_primaries", "bt709", "-color_trc", "bt709",
+            "-colorspace", "bt709", out.path,
+        ]
+        try tag.run()
+        tag.waitUntilExit()
 
         let verdict = try probe().verdict(for: out)
         guard case .alreadyConverted(let why) = verdict else {
             return XCTFail("a Rec.709 file should be refused, got \(verdict)")
         }
         XCTAssertTrue(why.contains("bt709"), "the reason should name what it measured: \(why)")
-        XCTAssertTrue(verdict.description.contains("bleached"),
-                      "the message should point at the failure class, got \(verdict.description)")
+        XCTAssertTrue(
+            verdict.description.contains("bleached"),
+            "the message should point at the failure class, got \(verdict.description)")
     }
 
     func testRefusesBT2020FootageThatCarriesARec709Transfer() throws {
@@ -85,17 +96,23 @@ final class ClipProbeTests: XCTestCase {
         }
         let encode = Process()
         encode.executableURL = ffmpeg
-        encode.arguments = ["-v", "error", "-y", "-f", "lavfi",
-                            "-i", "color=c=gray:s=64x128:d=0.1:r=24", "-frames:v", "1",
-                            "-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le",
-                            raw.path]
-        try encode.run(); encode.waitUntilExit()
+        encode.arguments = [
+            "-v", "error", "-y", "-f", "lavfi",
+            "-i", "color=c=gray:s=64x128:d=0.1:r=24", "-frames:v", "1",
+            "-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le",
+            raw.path,
+        ]
+        try encode.run()
+        encode.waitUntilExit()
         let tag = Process()
         tag.executableURL = ffmpeg
-        tag.arguments = ["-v", "error", "-y", "-i", raw.path, "-map", "0:v:0", "-c", "copy",
-                         "-color_primaries", "bt2020", "-color_trc", "bt709",
-                         "-colorspace", "bt2020nc", out.path]
-        try tag.run(); tag.waitUntilExit()
+        tag.arguments = [
+            "-v", "error", "-y", "-i", raw.path, "-map", "0:v:0", "-c", "copy",
+            "-color_primaries", "bt2020", "-color_trc", "bt709",
+            "-colorspace", "bt2020nc", out.path,
+        ]
+        try tag.run()
+        tag.waitUntilExit()
 
         let verdict = try probe().verdict(for: out)
         guard case .alreadyConverted(let why) = verdict else {
@@ -116,8 +133,9 @@ final class ClipFieldsSummaryTests: XCTestCase {
     func testDimensionsAreNotFormattedWithSeparators() {
         // SwiftUI formats an interpolated Int with the locale's separators, so 3840 rendered as
         // "3.840" on this machine and read as a decimal. Built as a string here, and tested.
-        let f = ClipProbe.Fields(codec: "prores", pixelFormat: "yuv422p10le", primaries: "bt2020",
-                                 transfer: "unknown", width: 3840, height: 2160)
+        let f = ClipProbe.Fields(
+            codec: "prores", pixelFormat: "yuv422p10le", primaries: "bt2020",
+            transfer: "unknown", width: 3840, height: 2160)
         XCTAssertEqual(f.summary, "prores yuv422p10le bt2020 3840x2160")
         XCTAssertFalse(f.summary.contains("3.840"))
     }
@@ -126,10 +144,13 @@ final class ClipFieldsSummaryTests: XCTestCase {
 final class ClipDurationTests: XCTestCase {
     func testRealFootageReportsItsLengthAndRate() throws {
         let engine = try engineCheckout()
-        let clips = (try? FileManager.default.contentsOfDirectory(
-            at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil)) ?? []
+        let clips =
+            (try? FileManager.default.contentsOfDirectory(
+                at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil))
+            ?? []
         guard let clip = clips.first(where: { $0.pathExtension.lowercased() == "mov" }),
-              let ffprobe = EngineLocation.resolveTool("ffprobe") else {
+            let ffprobe = EngineLocation.resolveTool("ffprobe")
+        else {
             throw XCTSkip("no footage or no ffprobe")
         }
         let fields = try XCTUnwrap(ClipProbe(ffprobe: ffprobe).fields(of: clip))

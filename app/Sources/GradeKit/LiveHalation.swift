@@ -133,7 +133,8 @@ public struct LiveHalation {
                         for x in 0..<width {
                             var sum: Float = 0
                             for k in -radius...radius {
-                                sum += src[min(height - 1, max(0, y + k)) * width + x]
+                                sum +=
+                                    src[min(height - 1, max(0, y + k)) * width + x]
                                     * kernel[k + radius]
                             }
                             dst[y * width + x] = sum

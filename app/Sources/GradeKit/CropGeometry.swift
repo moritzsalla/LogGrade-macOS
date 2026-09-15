@@ -32,8 +32,9 @@ public struct CropGeometry: Equatable {
     }
 
     public init(source: FrameSize, deliverable: Deliverable) {
-        self.init(sourceWidth: source.width, sourceHeight: source.height,
-                  aspectWidth: deliverable.aspectWidth, aspectHeight: deliverable.aspectHeight)
+        self.init(
+            sourceWidth: source.width, sourceHeight: source.height,
+            aspectWidth: deliverable.aspectWidth, aspectHeight: deliverable.aspectHeight)
     }
 
     /// The y axis first, as the engine tries it, so a portrait source keeps its full-width window.
@@ -105,5 +106,8 @@ public struct CropGeometry: Equatable {
 public struct FrameSize: Equatable {
     public let width: Int
     public let height: Int
-    public init(width: Int, height: Int) { self.width = width; self.height = height }
+    public init(width: Int, height: Int) {
+        self.width = width
+        self.height = height
+    }
 }

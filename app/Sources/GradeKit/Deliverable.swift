@@ -32,8 +32,10 @@ public struct Deliverable: Equatable, Hashable {
     public let aspectHeight: Int
     public let cropOffset: DeliverableCropOffset?
 
-    public init(name: String, aspectWidth: Int, aspectHeight: Int,
-                cropOffset: DeliverableCropOffset? = nil) {
+    public init(
+        name: String, aspectWidth: Int, aspectHeight: Int,
+        cropOffset: DeliverableCropOffset? = nil
+    ) {
         self.name = name
         self.aspectWidth = aspectWidth
         self.aspectHeight = aspectHeight

@@ -5,7 +5,7 @@ The traps, and where things live. `CONTEXT.md` defines the words (*look* ≠ *to
 ## Check
 
 ```sh
-./scripts/check.sh          # before a commit: shellcheck, grade golden, Swift, render golden, bats
+./scripts/check.sh          # before a commit: shellcheck, grade golden, swift-format, Swift, render golden, bats
 ./scripts/check.sh --fast   # while iterating; not a pass for a commit
 ```
 

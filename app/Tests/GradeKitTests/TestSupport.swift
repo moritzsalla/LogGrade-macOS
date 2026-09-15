@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import GradeKit
 
 /// The checkout these tests live in, found by walking up from this source file. No resource
@@ -21,21 +22,28 @@ func stubEngine(script: String) throws -> EngineLocation {
         .appendingPathComponent(UUID().uuidString)
     let scripts = root.appendingPathComponent("scripts")
     try FileManager.default.createDirectory(at: scripts, withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: root.appendingPathComponent("luts/looks"),
-                                            withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(at: root.appendingPathComponent("luts/apple"),
-                                            withIntermediateDirectories: true)
-    try "{}".write(to: root.appendingPathComponent("look.json"), atomically: true,
-                   encoding: .utf8)
-    try "".write(to: root.appendingPathComponent("luts/apple/AppleLogToRec709-v1.0.cube"),
-                 atomically: true, encoding: .utf8)
-    for name in ["grade.sh", "make-tone-lut.py", "make-correct-lut.py", "make-halation-luts.py",
-                 "solve-gamma.py"] {
+    try FileManager.default.createDirectory(
+        at: root.appendingPathComponent("luts/looks"),
+        withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(
+        at: root.appendingPathComponent("luts/apple"),
+        withIntermediateDirectories: true)
+    try "{}".write(
+        to: root.appendingPathComponent("look.json"), atomically: true,
+        encoding: .utf8)
+    try "".write(
+        to: root.appendingPathComponent("luts/apple/AppleLogToRec709-v1.0.cube"),
+        atomically: true, encoding: .utf8)
+    for name in [
+        "grade.sh", "make-tone-lut.py", "make-correct-lut.py", "make-halation-luts.py",
+        "solve-gamma.py",
+    ] {
         let url = scripts.appendingPathComponent(name)
         try (name == "grade.sh" ? script : "#!/bin/bash\n")
             .write(to: url, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755],
-                                              ofItemAtPath: url.path)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: url.path)
     }
     return EngineLocation(root: root)
 }
@@ -53,16 +61,18 @@ func runToCompletion(_ executable: URL, _ arguments: [String]) throws -> Ran {
     let process = Process()
     process.executableURL = executable
     process.arguments = arguments
-    let out = Pipe(), err = Pipe()
+    let out = Pipe()
+    let err = Pipe()
     process.standardOutput = out
     process.standardError = err
     try process.run()
     let stdout = out.fileHandleForReading.readDataToEndOfFile()
     let stderr = err.fileHandleForReading.readDataToEndOfFile()
     process.waitUntilExit()
-    return Ran(status: process.terminationStatus,
-               stdout: String(decoding: stdout, as: UTF8.self),
-               stderr: String(decoding: stderr, as: UTF8.self))
+    return Ran(
+        status: process.terminationStatus,
+        stdout: String(decoding: stdout, as: UTF8.self),
+        stderr: String(decoding: stderr, as: UTF8.self))
 }
 
 /// One call into `scripts/lib.sh`, on the interpreter production runs it under.
@@ -72,9 +82,10 @@ func runToCompletion(_ executable: URL, _ arguments: [String]) throws -> Ran {
 /// proves two Swift expressions agree. The arguments go through argv, never spliced into the
 /// script, so a value can never be read as shell.
 func libSh(_ engine: EngineLocation, _ function: String, _ arguments: [String]) throws -> Ran {
-    try runToCompletion(URL(fileURLWithPath: "/bin/bash"),
-            ["-c", #"source "$0/scripts/lib.sh"; "$@""#, engine.root.path, function]
-                + arguments)
+    try runToCompletion(
+        URL(fileURLWithPath: "/bin/bash"),
+        ["-c", #"source "$0/scripts/lib.sh"; "$@""#, engine.root.path, function]
+            + arguments)
 }
 
 /// A complete look.json, so a test that needs a `Look` does not depend on the checkout's file —
@@ -82,13 +93,13 @@ func libSh(_ engine: EngineLocation, _ function: String, _ arguments: [String]) 
 /// Every key is present because `Look` refuses a missing one, as the engine does.
 func lookFixture(gamma: Double = 2.02, lut: String = "kodak_portra_400_nc") throws -> Look {
     let json = """
-    {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
-     "power":"1,1,1","lum_mix":1},
-     "halation":{"strength":0,"threshold":1,"radius":0.006,"tint":"1,0.3,0.05"},
-     "look":{"lut":"\(lut)","strength":1},"print":{"lut":"none","strength":1},
-     "tone":{"gamma":\(gamma),"pivot":0.39,"contrast":1.09,"toe":0,"shoulder":0.1,"black":0.025},
-     "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8,"shadows":1,"highlights":1},
-     "stabilisation":{"smoothing":30},"match":{"reference_yavg":609}}
-    """
+        {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
+         "power":"1,1,1","lum_mix":1},
+         "halation":{"strength":0,"threshold":1,"radius":0.006,"tint":"1,0.3,0.05"},
+         "look":{"lut":"\(lut)","strength":1},"print":{"lut":"none","strength":1},
+         "tone":{"gamma":\(gamma),"pivot":0.39,"contrast":1.09,"toe":0,"shoulder":0.1,"black":0.025},
+         "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8,"shadows":1,"highlights":1},
+         "stabilisation":{"smoothing":30},"match":{"reference_yavg":609}}
+        """
     return try Look(data: Data(json.utf8))
 }

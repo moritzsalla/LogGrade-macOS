@@ -67,8 +67,10 @@ struct DeliverableEditor: View {
         .background(Palette.panel)
     }
 
-    private func field<Content: View>(_ label: String,
-                                      @ViewBuilder content: () -> Content) -> some View {
+    private func field<Content: View>(
+        _ label: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         HStack(spacing: Space.s) {
             Text(label).font(Type.label).foregroundColor(Palette.inkSecondary)
                 .frame(width: 44, alignment: .leading)

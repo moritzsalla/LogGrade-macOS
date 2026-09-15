@@ -34,10 +34,12 @@ public final class ClipList: ObservableObject {
         for url in urls where !entries.contains(where: { $0.url == url }) {
             let stem = url.deletingPathExtension().lastPathComponent
             let fields = probe?.fields(of: url)
-            let verdict = probe?.verdict(for: url)
+            let verdict =
+                probe?.verdict(for: url)
                 ?? .unreadable("no ffprobe available to measure with")
-            let entry = Entry(stem: stem, url: url, verdict: verdict, fields: fields,
-                              thumbnail: nil)
+            let entry = Entry(
+                stem: stem, url: url, verdict: verdict, fields: fields,
+                thumbnail: nil)
             entries.append(entry)
             added.append(entry)
         }
@@ -63,7 +65,7 @@ public final class ClipList: ObservableObject {
         let url = entries[index].url
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let generator = AVAssetImageGenerator(asset: AVAsset(url: url))
-            generator.appliesPreferredTrackTransform = true   // honour the display matrix
+            generator.appliesPreferredTrackTransform = true  // honour the display matrix
             generator.maximumSize = CGSize(width: 240, height: 240)
             // Any nearby frame will do for a list thumbnail, and demanding an exact one makes the
             // generator decode from the previous keyframe to reach it.

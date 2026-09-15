@@ -26,8 +26,10 @@ struct ScopesView: View {
         }
     }
 
-    private func panel<Content: View>(_ title: String,
-                                      @ViewBuilder content: () -> Content) -> some View {
+    private func panel<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title).font(Type.caption).foregroundColor(Palette.inkTertiary)
             content()
@@ -54,23 +56,30 @@ struct ScopesView: View {
 
     private var parade: some View {
         GeometryReader { geo in
-            if let scopes, let peak = [scopes.red, scopes.green, scopes.blue]
-                .compactMap({ $0.max() }).max(), peak > 0 {
+            if let scopes,
+                let peak = [scopes.red, scopes.green, scopes.blue]
+                    .compactMap({ $0.max() }).max(), peak > 0
+            {
                 let third = geo.size.width / 3
                 ZStack {
-                    channel(scopes.red, peak: peak, width: third, height: geo.size.height,
-                            colour: Palette.scopeRed, offset: 0)
-                    channel(scopes.green, peak: peak, width: third, height: geo.size.height,
-                            colour: Palette.scopeGreen, offset: third)
-                    channel(scopes.blue, peak: peak, width: third, height: geo.size.height,
-                            colour: Palette.scopeBlue, offset: third * 2)
+                    channel(
+                        scopes.red, peak: peak, width: third, height: geo.size.height,
+                        colour: Palette.scopeRed, offset: 0)
+                    channel(
+                        scopes.green, peak: peak, width: third, height: geo.size.height,
+                        colour: Palette.scopeGreen, offset: third)
+                    channel(
+                        scopes.blue, peak: peak, width: third, height: geo.size.height,
+                        colour: Palette.scopeBlue, offset: third * 2)
                 }
             }
         }
     }
 
-    private func channel(_ bins: [Int], peak: Int, width: Double, height: Double,
-                         colour: Color, offset: Double) -> some View {
+    private func channel(
+        _ bins: [Int], peak: Int, width: Double, height: Double,
+        colour: Color, offset: Double
+    ) -> some View {
         Path { p in
             for (i, count) in bins.enumerated() {
                 let x = offset + Double(i) / 255 * width
@@ -95,17 +104,22 @@ struct ScopesView: View {
                 if let scopes, let peak = scopes.vector.max(), peak > 0 {
                     Canvas { context, size in
                         let n = Scopes.vectorSize
-                        let cell = CGSize(width: size.width / Double(n),
-                                          height: size.height / Double(n))
+                        let cell = CGSize(
+                            width: size.width / Double(n),
+                            height: size.height / Double(n))
                         for y in 0..<n {
                             for x in 0..<n where scopes.vector[y * n + x] > 0 {
-                                let weight = min(1, Double(scopes.vector[y * n + x])
-                                                 / Double(peak) * Self.vectorGain)
+                                let weight = min(
+                                    1,
+                                    Double(scopes.vector[y * n + x])
+                                        / Double(peak) * Self.vectorGain)
                                 let opacity = Self.vectorFloor + weight * Self.vectorSpan
                                 context.fill(
-                                    Path(CGRect(x: Double(x) * cell.width,
-                                                y: Double(y) * cell.height,
-                                                width: cell.width, height: cell.height)),
+                                    Path(
+                                        CGRect(
+                                            x: Double(x) * cell.width,
+                                            y: Double(y) * cell.height,
+                                            width: cell.width, height: cell.height)),
                                     with: .color(Palette.inkSecondary.opacity(opacity)))
                             }
                         }

@@ -61,7 +61,8 @@ public struct EngineEvent: Equatable {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return nil }
         guard let data = trimmed.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             throw DecodeFailure.notJSON(line: trimmed)
         }
         guard let name = object["event"] as? String else {

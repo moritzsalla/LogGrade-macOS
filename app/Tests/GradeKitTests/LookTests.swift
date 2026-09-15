@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import GradeKit
 
 final class LookTests: XCTestCase {
@@ -7,15 +8,17 @@ final class LookTests: XCTestCase {
         let look = try Look(data: try Data(contentsOf: url))
         // Against the file's own values rather than the numbers it held when this was written, so
         // a re-tune of the look does not read as a broken reader.
-        let raw = try JSONSerialization.jsonObject(with: try Data(contentsOf: url))
+        let raw =
+            try JSONSerialization.jsonObject(with: try Data(contentsOf: url))
             as? [String: Any] ?? [:]
         func field(_ block: String, _ key: String) -> Any? {
             (raw[block] as? [String: Any])?[key]
         }
         XCTAssertEqual(look.lookLUT, field("look", "lut") as? String)
         XCTAssertEqual(look.tone.gamma, (field("tone", "gamma") as? NSNumber)?.doubleValue)
-        XCTAssertEqual(look.colour.saturation,
-                       (field("colour", "saturation") as? NSNumber)?.doubleValue)
+        XCTAssertEqual(
+            look.colour.saturation,
+            (field("colour", "saturation") as? NSNumber)?.doubleValue)
         XCTAssertEqual(look.halation.tint, field("halation", "tint") as? String)
         XCTAssertTrue(look.correct.isNeutral, "the shipped correction does nothing, by design")
         // The file's own commentary is not modelled and must survive a round trip, or a look sent
@@ -45,20 +48,23 @@ final class LookTests: XCTestCase {
         for script in scripts where script.pathExtension == "sh" {
             let text = try String(contentsOf: script, encoding: .utf8)
             for m in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-                if let a = Range(m.range(at: 1), in: text), let b = Range(m.range(at: 2), in: text) {
+                if let a = Range(m.range(at: 1), in: text), let b = Range(m.range(at: 2), in: text)
+                {
                     asked.insert("\(text[a]).\(text[b])")
                 }
             }
         }
         XCTAssertFalse(asked.isEmpty, "found no look reads, so this test proves nothing")
 
-        let written = try JSONSerialization.jsonObject(with: try Data(contentsOf: out))
+        let written =
+            try JSONSerialization.jsonObject(with: try Data(contentsOf: out))
             as? [String: Any] ?? [:]
         for key in asked.sorted() {
             let parts = key.split(separator: ".").map(String.init)
             let block = written[parts[0]] as? [String: Any]
-            XCTAssertNotNil(block?[parts[1]],
-                            "the engine asks for \(key) and a written look.json has no such key")
+            XCTAssertNotNil(
+                block?[parts[1]],
+                "the engine asks for \(key) and a written look.json has no such key")
         }
         // And it round-trips: what was written reads back as what was meant.
         let reread = try Look(data: try Data(contentsOf: out))
@@ -68,17 +74,20 @@ final class LookTests: XCTestCase {
 
     func testAMissingKeyIsRefusedRatherThanDefaulted() throws {
         // Inherited from the engine: a silent substitution is a different look under the same name.
-        let partial = #"{"tone":{"gamma":2.0,"pivot":0.4,"contrast":1.1,"toe":0,"shoulder":0.1,"black":0}}"#
+        let partial =
+            #"{"tone":{"gamma":2.0,"pivot":0.4,"contrast":1.1,"toe":0,"shoulder":0.1,"black":0}}"#
         XCTAssertThrowsError(try Look(data: Data(partial.utf8))) { error in
-            XCTAssertTrue(String(describing: error).contains("correct"),
-                          "the error has to name what is missing, got \(error)")
+            XCTAssertTrue(
+                String(describing: error).contains("correct"),
+                "the error has to name what is missing, got \(error)")
         }
 
         // And a block that is PRESENT but incomplete. Testing only the absent-block case let a
         // mutation through: defaulting a missing number to zero stayed green, because the first
         // thing the decoder reached was an absent block rather than an absent number.
         let root = try engineCheckout().root.appendingPathComponent("look.json")
-        var object = try JSONSerialization.jsonObject(with: try Data(contentsOf: root))
+        var object =
+            try JSONSerialization.jsonObject(with: try Data(contentsOf: root))
             as? [String: Any] ?? [:]
         var tone = object["tone"] as? [String: Any] ?? [:]
         tone.removeValue(forKey: "shoulder")
@@ -86,8 +95,9 @@ final class LookTests: XCTestCase {
         XCTAssertThrowsError(
             try Look(data: try JSONSerialization.data(withJSONObject: object))
         ) { error in
-            XCTAssertTrue(String(describing: error).contains("tone.shoulder"),
-                          "should name the exact key, got \(error)")
+            XCTAssertTrue(
+                String(describing: error).contains("tone.shoulder"),
+                "should name the exact key, got \(error)")
         }
     }
 
@@ -103,15 +113,18 @@ final class LookTests: XCTestCase {
             .appendingPathComponent("\(UUID().uuidString).json")
         try look.write(to: out)
         defer { try? FileManager.default.removeItem(at: out) }
-        let written = try JSONSerialization.jsonObject(with: try Data(contentsOf: out))
+        let written =
+            try JSONSerialization.jsonObject(with: try Data(contentsOf: out))
             as? [String: Any] ?? [:]
         XCTAssertNotNil(written["_comment"], "the file's own commentary was dropped on write")
         // Compared against the source rather than against a phrase this test remembers: asserting
         // on wording is how a test ends up failing for the wrong reason, which this one did.
-        let original = try JSONSerialization.jsonObject(with: try Data(contentsOf: url))
+        let original =
+            try JSONSerialization.jsonObject(with: try Data(contentsOf: url))
             as? [String: Any] ?? [:]
-        XCTAssertEqual(written["_comment"] as? [String], original["_comment"] as? [String],
-                       "the commentary came back changed")
+        XCTAssertEqual(
+            written["_comment"] as? [String], original["_comment"] as? [String],
+            "the commentary came back changed")
     }
 
     /// A switched-off stage must be one the engine leaves out, not a small move nobody chose.
@@ -130,10 +143,12 @@ final class LookTests: XCTestCase {
         XCTAssertEqual(off.grainStrength, 0)
         let curve = ToneCurve.generated(tone: off.tone)
         for x in stride(from: 0.0, through: 1.0, by: 0.05) {
-            XCTAssertEqual(curve.value(at: x), x, accuracy: 1e-3, "tone off is not identity at \(x)")
+            XCTAssertEqual(
+                curve.value(at: x), x, accuracy: 1e-3, "tone off is not identity at \(x)")
         }
-        XCTAssertFalse(Look.matchesExposure(bypassing: [.tone]),
-                       "matching would re-solve the identity gamma into a curve")
+        XCTAssertFalse(
+            Look.matchesExposure(bypassing: [.tone]),
+            "matching would re-solve the identity gamma into a curve")
         XCTAssertEqual(look.bypassing([]), look)
     }
 }
@@ -142,9 +157,10 @@ final class ProjectTests: XCTestCase {
     private func aLook() throws -> Look { try lookFixture() }
 
     func testRoundTripsThroughDisk() throws {
-        var project = Project(presets: [.init(name: "Portra", look: try aLook())],
-                              activePreset: "Portra",
-                              delivery: .init(targets: [.reels, .feed], height: 1440, fps: 24))
+        var project = Project(
+            presets: [.init(name: "Portra", look: try aLook())],
+            activePreset: "Portra",
+            delivery: .init(targets: [.reels, .feed], height: 1440, fps: 24))
         project.clips["IMG_0609"] = .init(cropOffset: 750, previewSeconds: 4, stabilise: true)
         project.clips["IMG_0610"] = .init(cropOffset: nil, previewSeconds: 1, stabilise: false)
 
@@ -161,7 +177,8 @@ final class ProjectTests: XCTestCase {
     /// halation. A current project missing the block is damaged and is refused, because that is
     /// the rule `Look` enforces everywhere else.
     func testAProjectFromBeforeTheFilmStagesOpensWithoutThem() throws {
-        var preset = try JSONSerialization.jsonObject(with: try aLook().serialised())
+        var preset =
+            try JSONSerialization.jsonObject(with: try aLook().serialised())
             as? [String: Any] ?? [:]
         preset.removeValue(forKey: "halation")
         preset["grain"] = ["strength": 8]
@@ -175,51 +192,61 @@ final class ProjectTests: XCTestCase {
             ])
         }
         let opened = try Project(data: try project(version: 1))
-        XCTAssertEqual(opened.presets.first?.look.halation.isNeutral, true,
-                       "a look from before halation existed came back with some")
-        XCTAssertEqual(opened.clips["IMG_0609"]?.lookOverride?.halation.isNeutral, true,
-                       "a per-clip look was not upgraded like the preset it sits beside")
+        XCTAssertEqual(
+            opened.presets.first?.look.halation.isNeutral, true,
+            "a look from before halation existed came back with some")
+        XCTAssertEqual(
+            opened.clips["IMG_0609"]?.lookOverride?.halation.isNeutral, true,
+            "a per-clip look was not upgraded like the preset it sits beside")
         XCTAssertEqual(opened.presets.first?.look.grainShadows, 1, "old grain came back weighted")
         XCTAssertEqual(opened.presets.first?.look.printLUT, "none", "an old look came back printed")
         XCTAssertEqual(opened.presets.first?.look.lookStrength, 1, "an old look came back weakened")
-        XCTAssertEqual(opened.presets.first?.look.grainHighlights, 1, "old grain came back weighted")
-        XCTAssertThrowsError(try Project(data: try project(version: 2)),
-                             "a current project missing a block was quietly repaired")
+        XCTAssertEqual(
+            opened.presets.first?.look.grainHighlights, 1, "old grain came back weighted")
+        XCTAssertThrowsError(
+            try Project(data: try project(version: 2)),
+            "a current project missing a block was quietly repaired")
         // And what this writes is the current version, so it is never upgraded twice.
-        let written = try JSONSerialization.jsonObject(with: try opened.serialised())
+        let written =
+            try JSONSerialization.jsonObject(with: try opened.serialised())
             as? [String: Any]
         XCTAssertEqual(written?["version"] as? Int, 2)
     }
 
     func testACroppedRenderIsBlockedUntilEveryClipHasAnOffset() throws {
-        var project = Project(presets: [.init(name: "Portra", look: try aLook())],
-                              activePreset: "Portra",
-                              delivery: .init(targets: [.reels, .feed]))
+        var project = Project(
+            presets: [.init(name: "Portra", look: try aLook())],
+            activePreset: "Portra",
+            delivery: .init(targets: [.reels, .feed]))
         project.clips["A"] = .init(cropOffset: 750)
         project.clips["B"] = .init(cropOffset: nil)
         let blockers = project.blockers(for: ["A", "B"])
         XCTAssertEqual(blockers, [.cropWithoutOffset(deliverables: [.feed], clips: ["B"])])
-        XCTAssertTrue(blockers[0].description.contains("per-clip"),
-                      "the reason matters more than the fact: \(blockers[0].description)")
+        XCTAssertTrue(
+            blockers[0].description.contains("per-clip"),
+            "the reason matters more than the fact: \(blockers[0].description)")
         // The shape that does not crop needs no offset at all.
         project.delivery.setTarget(.feed, selected: false)
         XCTAssertTrue(project.blockers(for: ["A", "B"]).isEmpty)
     }
 
     func testTheEnvironmentCarriesOnlyVariables() throws {
-        var project = Project(presets: [.init(name: "P", look: try aLook())], activePreset: "P",
-                              delivery: .init(targets: [.reels, .feed], height: 1080, fps: 12))
+        var project = Project(
+            presets: [.init(name: "P", look: try aLook())], activePreset: "P",
+            delivery: .init(targets: [.reels, .feed], height: 1080, fps: 12))
         project.clips["IMG_0609"] = .init(cropOffset: 600, stabilise: false)
-        let env = project.environment(for: "IMG_0609",
-                                      lookFile: URL(fileURLWithPath: "/tmp/look.json"))
+        let env = project.environment(
+            for: "IMG_0609",
+            lookFile: URL(fileURLWithPath: "/tmp/look.json"))
         XCTAssertEqual(env["CROP_OFFSET"], "600")
         XCTAssertEqual(env["HEIGHT"], "1080")
         XCTAssertEqual(env["FPS_OUT"], "12")
         XCTAssertEqual(env["STAB"], "0")
         XCTAssertEqual(env["LOOK_FILE"], "/tmp/look.json")
         // The app sets variables the engine documents; it does not describe the image.
-        XCTAssertFalse(env.values.contains { $0.contains("lut3d") || $0.contains("=") && $0.contains(",") },
-                       "no filter fragments belong in here: \(env)")
+        XCTAssertFalse(
+            env.values.contains { $0.contains("lut3d") || $0.contains("=") && $0.contains(",") },
+            "no filter fragments belong in here: \(env)")
     }
 
     func testAClipFollowsThePresetUnlessItDeparts() throws {
@@ -230,7 +257,8 @@ final class ProjectTests: XCTestCase {
         departed.tone.gamma = 1.5
         project.clips["A"]?.lookOverride = departed
         XCTAssertEqual(project.look(for: "A")?.tone.gamma, 1.5)
-        XCTAssertEqual(project.look(for: "B")?.tone.gamma, 2.02, "an unknown clip follows the preset")
+        XCTAssertEqual(
+            project.look(for: "B")?.tone.gamma, 2.02, "an unknown clip follows the preset")
     }
 }
 
@@ -240,8 +268,10 @@ final class LookEngineIntegrationTests: XCTestCase {
     func testTheEngineRendersWithALookTheAppWrote() throws {
         let engine = try engineCheckout()
         let src = engine.root.appendingPathComponent("src")
-        let clips = (try? FileManager.default.contentsOfDirectory(at: src,
-                                                                  includingPropertiesForKeys: nil))
+        let clips =
+            (try? FileManager.default.contentsOfDirectory(
+                at: src,
+                includingPropertiesForKeys: nil))
             ?? []
         guard let clip = clips.first(where: { $0.pathExtension.lowercased() == "mov" }) else {
             throw XCTSkip("no footage in src/")
@@ -265,15 +295,20 @@ final class LookEngineIntegrationTests: XCTestCase {
 
         let outcome = try EngineRun(engine: engine).run(
             arguments: [clip.path],
-            environment: ["LOOK_FILE": lookFile.path, "GRADE_WORK_DIR": work.path,
-                          "DRY": "1", "MATCH": "0", "STAB": "0"])
+            environment: [
+                "LOOK_FILE": lookFile.path, "GRADE_WORK_DIR": work.path,
+                "DRY": "1", "MATCH": "0", "STAB": "0",
+            ])
         XCTAssertTrue(outcome.succeeded, "engine said: \(outcome.stderrText)")
-        let planned = try XCTUnwrap(outcome.events.first { $0.name == "clip_planned" },
-                                    "no plan in: \(outcome.events.map(\.name))")
-        XCTAssertEqual(planned.double("gamma"), 1.61,
-                       "the engine did not read the look the app wrote")
-        XCTAssertTrue(outcome.malformed.isEmpty,
-                      "the real engine put prose on stdout: \(outcome.malformed)")
+        let planned = try XCTUnwrap(
+            outcome.events.first { $0.name == "clip_planned" },
+            "no plan in: \(outcome.events.map(\.name))")
+        XCTAssertEqual(
+            planned.double("gamma"), 1.61,
+            "the engine did not read the look the app wrote")
+        XCTAssertTrue(
+            outcome.malformed.isEmpty,
+            "the real engine put prose on stdout: \(outcome.malformed)")
     }
 }
 
@@ -282,9 +317,10 @@ final class PresetTests: XCTestCase {
     private func aLook(gamma: Double = 2.02) throws -> Look { try lookFixture(gamma: gamma) }
 
     func testAProjectSurvivesBeingSavedAndReopened() throws {
-        var project = Project(presets: [.init(name: "shipped", look: try aLook())],
-                              activePreset: "shipped",
-                              delivery: .init(targets: [.reels, .feed], height: 2560, fps: 24))
+        var project = Project(
+            presets: [.init(name: "shipped", look: try aLook())],
+            activePreset: "shipped",
+            delivery: .init(targets: [.reels, .feed], height: 2560, fps: 24))
         project.clips["IMG_0609"] = .init(cropOffset: 812, previewSeconds: 4, stabilise: false)
         project.clips["IMG_0610"] = .init(cropOffset: nil)
 
@@ -306,8 +342,9 @@ final class PresetTests: XCTestCase {
     }
 
     func testSavingUnderAnExistingNameReplacesIt() throws {
-        var project = Project(presets: [.init(name: "shipped", look: try aLook())],
-                              activePreset: "shipped")
+        var project = Project(
+            presets: [.init(name: "shipped", look: try aLook())],
+            activePreset: "shipped")
         project.savePreset(named: " shipped ", look: try aLook(gamma: 1.77))
         XCTAssertEqual(project.presets.count, 1, "saving over a name should not add a second")
         XCTAssertEqual(project.active?.look.tone.gamma, 1.77)
@@ -325,19 +362,20 @@ final class PresetTests: XCTestCase {
     }
 }
 
-
 final class OutputDestinationTests: XCTestCase {
     /// The rule, stated as a test because the app shipped for a day without it: a preview is
     /// scratch and belongs in a temp directory, a deliverable is the thing the app exists to
     /// produce and must not. This half holds the chosen destination across the project file;
     /// `DeliveryTests` holds where a render actually lands.
     func testAProjectRemembersWhereToDeliver() throws {
-        var project = Project(presets: [.init(name: "p", look: try lookFixture())],
-                              activePreset: "p")
+        var project = Project(
+            presets: [.init(name: "p", look: try lookFixture())],
+            activePreset: "p")
         project.outputDirectory = URL(fileURLWithPath: "/Users/someone/Footage/shoot")
         let reread = try Project(data: try project.serialised())
-        XCTAssertEqual(reread.outputDirectory?.path, "/Users/someone/Footage/shoot",
-                       "a chosen destination has to survive the project file")
+        XCTAssertEqual(
+            reread.outputDirectory?.path, "/Users/someone/Footage/shoot",
+            "a chosen destination has to survive the project file")
     }
 }
 
@@ -354,11 +392,13 @@ final class WheelTests: XCTestCase {
         for wheel in Look.Correct.Wheel.allCases {
             for channel in 0..<3 {
                 correct.setValue(wheel, channel, wheel.neutral + 0.25)
-                XCTAssertFalse(correct.isNeutral, "\(wheel) \(channel) moved and still reads neutral")
+                XCTAssertFalse(
+                    correct.isNeutral, "\(wheel) \(channel) moved and still reads neutral")
                 correct.setValue(wheel, channel, wheel.neutral)
-                XCTAssertTrue(correct.isNeutral,
-                              "\(wheel) \(channel) returned to centre and reads as a correction — "
-                              + "the engine would put the cube back in the graph")
+                XCTAssertTrue(
+                    correct.isNeutral,
+                    "\(wheel) \(channel) returned to centre and reads as a correction — "
+                        + "the engine would put the cube back in the graph")
             }
         }
         // And the text is spelled the default way, so a centred wheel writes back the file it
@@ -374,13 +414,18 @@ final class WheelTests: XCTestCase {
     /// this one has to as well, or a hand-written "1.0,1.0,1.0" puts a lookup that returns its own
     /// input into the filter graph for every pixel of every render.
     func testNeutralityIsDecidedByValueNotBySpelling() {
-        XCTAssertTrue(Look.Correct(slope: "1.0,1.0,1.0", offset: "0.0,0.0,0.0",
-                                   power: "1.00,1.00,1.00").isNeutral)
-        XCTAssertTrue(Look.Correct(slope: "1", offset: "0", power: "1").isNeutral,
-                      "the generator accepts one value for three; so must this")
+        XCTAssertTrue(
+            Look.Correct(
+                slope: "1.0,1.0,1.0", offset: "0.0,0.0,0.0",
+                power: "1.00,1.00,1.00"
+            ).isNeutral)
+        XCTAssertTrue(
+            Look.Correct(slope: "1", offset: "0", power: "1").isNeutral,
+            "the generator accepts one value for three; so must this")
         XCTAssertFalse(Look.Correct(slope: "1,1,1.0001").isNeutral)
-        XCTAssertFalse(Look.Correct(slope: "nonsense").isNeutral,
-                       "an unparseable triple is not a neutral one — the engine would refuse it")
+        XCTAssertFalse(
+            Look.Correct(slope: "nonsense").isNeutral,
+            "an unparseable triple is not a neutral one — the engine would refuse it")
     }
 
     /// `isNeutral` is a second copy of the generator's `is_neutral`, and the generator's is the one
@@ -399,26 +444,34 @@ final class WheelTests: XCTestCase {
             ("slope", .init(slope: "1,1,1.1")),
             ("offset", .init(offset: "0,0.01,0")),
             ("power", .init(power: "0.9,1,1")),
-            ("spelled by hand", .init(slope: "1.0,1.0,1.0", offset: "0.0,0.0,0.0",
-                                      power: "1.00,1.00,1.00")),
+            (
+                "spelled by hand",
+                .init(
+                    slope: "1.0,1.0,1.0", offset: "0.0,0.0,0.0",
+                    power: "1.00,1.00,1.00")
+            ),
             ("one value for three", .init(slope: "1", offset: "0", power: "1")),
             ("lum_mix alone", .init(lumMix: 0)),
             ("a trailing comma", .init(slope: "1,")),
         ]
         for (name, correct) in cases {
-            let answer = try runToCompletion(engine.correctGenerator,
-                                             correct.generatorArguments(size: 2) + ["--check-neutral"])
+            let answer = try runToCompletion(
+                engine.correctGenerator,
+                correct.generatorArguments(size: 2) + ["--check-neutral"])
             let verdict = answer.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
             if answer.status != 0 {
                 // A value the generator refuses cannot be a neutral one: the engine stops there.
-                XCTAssertFalse(correct.isNeutral,
-                               "\(name): the generator refuses it and the app calls it neutral")
+                XCTAssertFalse(
+                    correct.isNeutral,
+                    "\(name): the generator refuses it and the app calls it neutral")
                 continue
             }
-            XCTAssertTrue(verdict == "neutral" || verdict == "active",
-                          "\(name): the generator answered '\(verdict)' \(answer.stderr)")
-            XCTAssertEqual(correct.isNeutral, verdict == "neutral",
-                           "\(name): the generator says \(verdict)")
+            XCTAssertTrue(
+                verdict == "neutral" || verdict == "active",
+                "\(name): the generator answered '\(verdict)' \(answer.stderr)")
+            XCTAssertEqual(
+                correct.isNeutral, verdict == "neutral",
+                "\(name): the generator says \(verdict)")
         }
     }
 

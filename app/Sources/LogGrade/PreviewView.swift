@@ -20,8 +20,10 @@ struct PreviewView: View {
         VStack(spacing: 12) {
             ZStack {
                 Rectangle().fill(Palette.well)
-                if let image = comparing ? (preview.comparison ?? preview.image)
-                                          : preview.image {
+                if let image = comparing
+                    ? (preview.comparison ?? preview.image)
+                    : preview.image
+                {
                     ZStack {
                         Image(nsImage: image)
                             .resizable()
@@ -29,10 +31,13 @@ struct PreviewView: View {
                         // The crop is judged on the picture, because the question it answers is
                         // what is in the frame and no number answers that.
                         if let geometry = model.cropGeometry, geometry.crops {
-                            CropOverlay(model: model, geometry: geometry,
-                                        framedPerClip: model.cropIsPerClip)
-                                .aspectRatio(image.size.width / image.size.height,
-                                             contentMode: .fit)
+                            CropOverlay(
+                                model: model, geometry: geometry,
+                                framedPerClip: model.cropIsPerClip
+                            )
+                            .aspectRatio(
+                                image.size.width / image.size.height,
+                                contentMode: .fit)
                         }
                     }
                     .padding(Space.s + 2)
@@ -49,11 +54,13 @@ struct PreviewView: View {
                         }
                     }
                 } else {
-                    Text(model.selectedClip == nil
-                         ? "Drop Apple Log clips here to start"
-                         : "Rendering the first frame of this clip…")
-                        .font(Type.label)
-                        .foregroundColor(Palette.inkTertiary)
+                    Text(
+                        model.selectedClip == nil
+                            ? "Drop Apple Log clips here to start"
+                            : "Rendering the first frame of this clip…"
+                    )
+                    .font(Type.label)
+                    .foregroundColor(Palette.inkTertiary)
                 }
                 // NO SPINNER CENTRED IN THE WELL. It used to be an unaligned child of this stack,
                 // so it centred itself — on top of the picture when there was one, and squarely on
@@ -80,8 +87,10 @@ struct PreviewView: View {
                 // happened is a button that teaches you to distrust the picture.
                 Text("hold C for the picture before this change")
                     .font(Type.label)
-                    .foregroundColor(preview.comparison == nil ? Palette.inkTertiary
-                                                                   : Palette.inkSecondary)
+                    .foregroundColor(
+                        preview.comparison == nil
+                            ? Palette.inkTertiary
+                            : Palette.inkSecondary)
                 Spacer()
                 if comparing {
                     Readout(text: "before")

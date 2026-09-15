@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import GradeKit
 
 /// The live halation's arithmetic against the generator's cubes, and its shape against the rule.
@@ -17,7 +18,9 @@ final class LiveHalationTests: XCTestCase {
                 domainMax = Double(line.split(separator: " ")[1]) ?? 1
                 continue
             }
-            guard let first = line.split(separator: " ").first, let v = Double(first) else { continue }
+            guard let first = line.split(separator: " ").first, let v = Double(first) else {
+                continue
+            }
             values.append(v)
         }
         return (values, domainMax)
@@ -54,7 +57,10 @@ final class LiveHalationTests: XCTestCase {
             for (i, theirs) in values.enumerated() {
                 let x = domainMax * Double(i) / Double(values.count - 1)
                 let d = abs(mine(x) - theirs)
-                if d > worst { worst = d; worstAt = i }
+                if d > worst {
+                    worst = d
+                    worstAt = i
+                }
             }
             // The generator prints eight decimal places, so rounding alone is 5e-9.
             XCTAssertLessThan(worst, 1e-8, "\(name): entry \(worstAt) differs by \(worst)")
@@ -64,7 +70,8 @@ final class LiveHalationTests: XCTestCase {
     /// The same rule the engine's bats test pins: the glow spills past an edge and a bright field
     /// does not glow onto itself.
     func testTheGlowIsEdgeOnly() throws {
-        let width = 256, height = 16
+        let width = 256
+        let height = 16
         var log = [Float](repeating: 0, count: width * height * 3)
         for y in 0..<height {
             for x in 0..<width {
@@ -72,9 +79,10 @@ final class LiveHalationTests: XCTestCase {
             }
         }
         // Sigma 4 pixels on a 16-line frame.
-        let halation = try XCTUnwrap(LiveHalation(
-            Look.Halation(strength: 1, threshold: 1, radius: 0.25, tint: "1,0,0"),
-            frameLongEdge: height))
+        let halation = try XCTUnwrap(
+            LiveHalation(
+                Look.Halation(strength: 1, threshold: 1, radius: 0.25, tint: "1,0,0"),
+                frameLongEdge: height))
         halation.apply(to: &log, width: width, height: height)
         func at(_ x: Int, _ c: Int) -> Float { log[((height / 2) * width + x) * 3 + c] }
 
@@ -84,15 +92,17 @@ final class LiveHalationTests: XCTestCase {
         XCTAssertEqual(at(250, 0), 0.3, accuracy: 0.002, "the glow reached the far side")
         for x in 0..<width {
             for c in 1...2 {
-                XCTAssertEqual(at(x, c), x < width / 2 ? 0.9 : 0.3, accuracy: 0.0005,
-                               "a red-only tint moved channel \(c) at \(x)")
+                XCTAssertEqual(
+                    at(x, c), x < width / 2 ? 0.9 : 0.3, accuracy: 0.0005,
+                    "a red-only tint moved channel \(c) at \(x)")
             }
         }
     }
 
     func testANeutralOrMalformedHalationHasNoLiveStage() {
         XCTAssertNil(LiveHalation(Look.Halation(strength: 0), frameLongEdge: 480))
-        XCTAssertNil(LiveHalation(Look.Halation(strength: 0.5, tint: "1,0.3"), frameLongEdge: 480),
-                     "a tint the engine refuses got a live picture")
+        XCTAssertNil(
+            LiveHalation(Look.Halation(strength: 0.5, tint: "1,0.3"), frameLongEdge: 480),
+            "a tint the engine refuses got a live picture")
     }
 }

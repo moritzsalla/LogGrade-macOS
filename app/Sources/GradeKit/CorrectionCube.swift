@@ -44,15 +44,18 @@ public struct CorrectionCube {
     /// reject reaches it, so a malformed CDL refuses rather than rendering something arbitrary.
     public static func cube(for correct: Look.Correct, size: Int) -> Cube3D? {
         guard size > 1,
-              let slope = Look.Correct.parse(correct.slope),
-              let offset = Look.Correct.parse(correct.offset),
-              let power = Look.Correct.parse(correct.power),
-              power.0 > 0, power.1 > 0, power.2 > 0 else { return nil }
+            let slope = Look.Correct.parse(correct.slope),
+            let offset = Look.Correct.parse(correct.offset),
+            let power = Look.Correct.parse(correct.power),
+            power.0 > 0, power.1 > 0, power.2 > 0
+        else { return nil }
 
         // Temperature and tint as per-channel linear gains, on the generator's scale.
-        let wb = (max(0.05, 1 + 0.30 * correct.temp),
-                  max(0.05, 1 + 0.30 * correct.tint),
-                  max(0.05, 1 - 0.30 * correct.temp - 0.15 * correct.tint))
+        let wb = (
+            max(0.05, 1 + 0.30 * correct.temp),
+            max(0.05, 1 + 0.30 * correct.tint),
+            max(0.05, 1 - 0.30 * correct.temp - 0.15 * correct.tint)
+        )
         let exposureGain = correct.exposure == 0 ? 1 : pow(2, correct.exposure)
         let hasCDL = slope != (1, 1, 1) || offset != (0, 0, 0) || power != (1, 1, 1)
 
@@ -65,9 +68,11 @@ public struct CorrectionCube {
                 let g = Double(gi) / last
                 for ri in 0..<size {
                     let r = Double(ri) / last
-                    var out = (decode(r) * exposureGain * wb.0,
-                               decode(g) * exposureGain * wb.1,
-                               decode(b) * exposureGain * wb.2)
+                    var out = (
+                        decode(r) * exposureGain * wb.0,
+                        decode(g) * exposureGain * wb.1,
+                        decode(b) * exposureGain * wb.2
+                    )
                     out = (encode(out.0), encode(out.1), encode(out.2))
 
                     if hasCDL {
@@ -75,9 +80,11 @@ public struct CorrectionCube {
                             let lifted = max(0, v * s + o)
                             return p == 1 ? lifted : pow(lifted, 1 / p)
                         }
-                        out = (cdl(out.0, slope.0, offset.0, power.0),
-                               cdl(out.1, slope.1, offset.1, power.1),
-                               cdl(out.2, slope.2, offset.2, power.2))
+                        out = (
+                            cdl(out.0, slope.0, offset.0, power.0),
+                            cdl(out.1, slope.1, offset.1, power.1),
+                            cdl(out.2, slope.2, offset.2, power.2)
+                        )
                     }
 
                     if correct.lumMix != 1 {
@@ -89,9 +96,10 @@ public struct CorrectionCube {
                         }
                     }
 
-                    samples[index] = SIMD3(Float(min(1, max(0, out.0))),
-                                           Float(min(1, max(0, out.1))),
-                                           Float(min(1, max(0, out.2))))
+                    samples[index] = SIMD3(
+                        Float(min(1, max(0, out.0))),
+                        Float(min(1, max(0, out.1))),
+                        Float(min(1, max(0, out.2))))
                     index += 1
                 }
             }

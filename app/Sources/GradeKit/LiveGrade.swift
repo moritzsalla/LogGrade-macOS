@@ -51,8 +51,10 @@ public struct LiveGrade {
     /// differently — one evaluates the curve, one reads a table — and that is the only difference
     /// between them that is allowed to exist.
     @inline(__always)
-    func merge(r: Double, g: Double, b: Double,
-               lr: Double, lg: Double, lb: Double) -> (Double, Double, Double) {
+    func merge(
+        r: Double, g: Double, b: Double,
+        lr: Double, lg: Double, lb: Double
+    ) -> (Double, Double, Double) {
         let y = Rec709.luma(r, g, b)
         var cb = (b - y) / Rec709.cbScale
         var cr = (r - y) / Rec709.crScale
@@ -61,7 +63,10 @@ public struct LiveGrade {
         // plane to RGB for it.
         var ny = Rec709.luma(lr, lg, lb)
 
-        if saturation != 1 { cb *= saturation; cr *= saturation }
+        if saturation != 1 {
+            cb *= saturation
+            cr *= saturation
+        }
 
         // Clamped in the PLANE, which is where the renderer clamps, not in RGB afterwards.
         ny = min(255, max(0, ny))
@@ -69,7 +74,8 @@ public struct LiveGrade {
         cr = min(127, max(-128, cr))
 
         var outR = ny + Rec709.crScale * cr
-        let outG = ny - (Rec709.kr * Rec709.crScale / Rec709.kg) * cr
+        let outG =
+            ny - (Rec709.kr * Rec709.crScale / Rec709.kg) * cr
             - (Rec709.kb * Rec709.cbScale / Rec709.kg) * cb
         var outB = ny + Rec709.cbScale * cb
 

@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import GradeKit
 
 /// The shape editor asks the engine whether a shape can be rendered, and decides only what the
@@ -7,8 +8,10 @@ import XCTest
 /// Every test here runs the real `lib.sh`. A stub resolver would test that Swift agrees with a
 /// stub, which is the untied copy this replaced.
 final class ShapeEditingTests: XCTestCase {
-    private func draft(_ name: String, _ w: String, _ h: String,
-                       centre: Bool = false) -> ShapeDraft {
+    private func draft(
+        _ name: String, _ w: String, _ h: String,
+        centre: Bool = false
+    ) -> ShapeDraft {
         ShapeDraft(name: name, aspectWidth: w, aspectHeight: h, centre: centre)
     }
 
@@ -41,11 +44,13 @@ final class ShapeEditingTests: XCTestCase {
         for input in inputs {
             let label = "'\(input.spec)'"
             var delivery = Project.Delivery(targets: [.reels])
-            let refusal = delivery.save(input, replacing: nil,
-                                        resolve: engine.resolveDeliverable)
+            let refusal = delivery.save(
+                input, replacing: nil,
+                resolve: engine.resolveDeliverable)
             if let said = try engineVerdict(engine, input) {
-                XCTAssertEqual(refusal, .engine(said),
-                               "\(label): not refused in the engine's words")
+                XCTAssertEqual(
+                    refusal, .engine(said),
+                    "\(label): not refused in the engine's words")
                 XCTAssertEqual(delivery.targets, [.reels], "\(label): a refusal changed the set")
             } else {
                 XCTAssertNil(refusal, "\(label): the engine accepts it and the editor did not")
@@ -69,9 +74,10 @@ final class ShapeEditingTests: XCTestCase {
         for (input, words) in expected {
             var delivery = Project.Delivery()
             let refusal = delivery.save(input, replacing: nil, resolve: engine.resolveDeliverable)
-            XCTAssertTrue(refusal?.description.contains(words) ?? false,
-                          "'\(input.spec)': expected \"\(words)\", "
-                            + "got \(String(describing: refusal))")
+            XCTAssertTrue(
+                refusal?.description.contains(words) ?? false,
+                "'\(input.spec)': expected \"\(words)\", "
+                    + "got \(String(describing: refusal))")
         }
     }
 
@@ -80,9 +86,11 @@ final class ShapeEditingTests: XCTestCase {
     /// ignoring case, because `Reels_9x16.mp4` and `reels_9x16.mp4` are one file on this disk.
     func testAPresetsNameIsRefusedWhetherOrNotItIsTicked() throws {
         let engine = try engineCheckout()
-        for (input, preset) in [(draft("feed", "4", "5"), "feed"),
-                                (draft("Reels", "9", "16"), "reels"),
-                                (draft("feed", "1", "1", centre: true), "feed")] {
+        for (input, preset) in [
+            (draft("feed", "4", "5"), "feed"),
+            (draft("Reels", "9", "16"), "reels"),
+            (draft("feed", "1", "1", centre: true), "feed"),
+        ] {
             var delivery = Project.Delivery(targets: [.reels])
             let refusal = delivery.save(input, replacing: nil, resolve: engine.resolveDeliverable)
             XCTAssertEqual(refusal, .presetName(preset), "'\(input.spec)' was not refused")
@@ -95,8 +103,9 @@ final class ShapeEditingTests: XCTestCase {
     func testAShapeThatWouldWriteAPresetsFileIsRefused() throws {
         let engine = try engineCheckout()
         var delivery = Project.Delivery(targets: [])
-        let refusal = delivery.save(draft("reels-stories", "9", "16"), replacing: nil,
-                                    resolve: engine.resolveDeliverable)
+        let refusal = delivery.save(
+            draft("reels-stories", "9", "16"), replacing: nil,
+            resolve: engine.resolveDeliverable)
         XCTAssertEqual(refusal, .sameOutputFile(other: "reels", suffix: "reels-stories_9x16"))
         XCTAssertTrue(refusal?.description.contains("which 'reels' already writes") ?? false)
         XCTAssertEqual(delivery.targets, [])
@@ -106,11 +115,13 @@ final class ShapeEditingTests: XCTestCase {
         let engine = try engineCheckout()
         let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
         var delivery = Project.Delivery(targets: [.reels, square])
-        let refusal = delivery.save(draft("Square", "4", "5"), replacing: nil,
-                                    resolve: engine.resolveDeliverable)
+        let refusal = delivery.save(
+            draft("Square", "4", "5"), replacing: nil,
+            resolve: engine.resolveDeliverable)
         XCTAssertEqual(refusal, .duplicateName("square"))
-        XCTAssertTrue(refusal?.description.contains("A shape named 'square' already exists")
-                      ?? false)
+        XCTAssertTrue(
+            refusal?.description.contains("A shape named 'square' already exists")
+                ?? false)
         XCTAssertEqual(delivery.targets, [.reels, square])
     }
 
@@ -121,8 +132,9 @@ final class ShapeEditingTests: XCTestCase {
         let engine = try engineCheckout()
         for term in ["1:1", "99999999999999999999", "007"] {
             var delivery = Project.Delivery(targets: [])
-            let refusal = delivery.save(draft("x", term, "1"), replacing: nil,
-                                        resolve: engine.resolveDeliverable)
+            let refusal = delivery.save(
+                draft("x", term, "1"), replacing: nil,
+                resolve: engine.resolveDeliverable)
             XCTAssertEqual(refusal, .notAsWritten(term), "'\(term)' was stored as something else")
             XCTAssertEqual(delivery.targets, [])
         }
@@ -138,12 +150,18 @@ final class ShapeEditingTests: XCTestCase {
         var delivery = Project.Delivery(targets: [.reels, square, tall])
         let mode = ShapeEditorMode.editing(square)
         XCTAssertEqual(mode.draft, draft("square", "1", "1"), "the edit did not open on its shape")
-        let refusal = delivery.save(draft("square", "4", "5", centre: true),
-                                    replacing: mode.original, resolve: engine.resolveDeliverable)
+        let refusal = delivery.save(
+            draft("square", "4", "5", centre: true),
+            replacing: mode.original, resolve: engine.resolveDeliverable)
         XCTAssertNil(refusal, "an edit was refused as a duplicate of itself")
-        XCTAssertEqual(delivery.targets,
-                       [.reels, Deliverable(name: "square", aspectWidth: 4, aspectHeight: 5,
-                                            cropOffset: .centre), tall])
+        XCTAssertEqual(
+            delivery.targets,
+            [
+                .reels,
+                Deliverable(
+                    name: "square", aspectWidth: 4, aspectHeight: 5,
+                    cropOffset: .centre), tall,
+            ])
     }
 
     /// THE BUG THIS EDITOR SHIPPED WITH. Add after Edit opened pre-filled as that edit, and Save
@@ -154,13 +172,18 @@ final class ShapeEditingTests: XCTestCase {
         let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
         var delivery = Project.Delivery(targets: [square])
         var open = ShapeEditorMode.editing(square)
-        XCTAssertNil(delivery.save(draft("square", "1", "1", centre: true),
-                                   replacing: open.original, resolve: engine.resolveDeliverable))
+        XCTAssertNil(
+            delivery.save(
+                draft("square", "1", "1", centre: true),
+                replacing: open.original, resolve: engine.resolveDeliverable))
         open = .adding
         XCTAssertEqual(open.draft, ShapeDraft(), "Add opened with a previous shape in it")
-        XCTAssertNil(delivery.save(draft("tall", "2", "3"), replacing: open.original,
-                                   resolve: engine.resolveDeliverable))
-        XCTAssertEqual(delivery.targets.map(\.name), ["square", "tall"],
-                       "Add replaced a shape instead of adding one")
+        XCTAssertNil(
+            delivery.save(
+                draft("tall", "2", "3"), replacing: open.original,
+                resolve: engine.resolveDeliverable))
+        XCTAssertEqual(
+            delivery.targets.map(\.name), ["square", "tall"],
+            "Add replaced a shape instead of adding one")
     }
 }

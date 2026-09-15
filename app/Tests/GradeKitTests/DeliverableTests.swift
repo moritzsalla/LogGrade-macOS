@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import GradeKit
 
 /// A deliverable used to be two booleans here and a two-branch `case` in the engine, so the set of
@@ -26,17 +27,22 @@ final class DeliverableTests: XCTestCase {
         let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
         for deliverable in Deliverable.presets + [square] {
             let resolved = try libSh(engine, "deliverable_spec", [deliverable.spec])
-            XCTAssertEqual(resolved.status, 0,
-                           "the engine refused \(deliverable.spec): \(resolved.stderr)")
+            XCTAssertEqual(
+                resolved.status, 0,
+                "the engine refused \(deliverable.spec): \(resolved.stderr)")
             let fields = resolved.stdout.split(separator: " ").map {
                 $0.trimmingCharacters(in: .whitespacesAndNewlines)
             }
             XCTAssertEqual(fields.count, 5, "unexpected spec output: \(resolved.stdout)")
             guard fields.count == 5 else { continue }
             XCTAssertEqual(fields[0], deliverable.name)
-            XCTAssertEqual(fields[1...2], [String(deliverable.aspectWidth),
-                                           String(deliverable.aspectHeight)],
-                           "\(deliverable.name): the engine renders a different aspect")
+            XCTAssertEqual(
+                fields[1...2],
+                [
+                    String(deliverable.aspectWidth),
+                    String(deliverable.aspectHeight),
+                ],
+                "\(deliverable.name): the engine renders a different aspect")
         }
     }
 
@@ -65,21 +71,27 @@ final class DeliverableTests: XCTestCase {
     }
 
     func testALandscapeClipBlocksReelsUntilItHasAnOffset() throws {
-        let project = Project(presets: [.init(name: "p", look: try lookFixture())],
-                              activePreset: "p", delivery: .init(targets: [.reels]))
-        let sizes = ["WIDE": FrameSize(width: 3840, height: 2160),
-                     "TALL": FrameSize(width: 2160, height: 3840)]
-        XCTAssertEqual(project.blockers(for: ["WIDE", "TALL"], sizes: sizes),
-                       [.cropWithoutOffset(deliverables: [.reels], clips: ["WIDE"])],
-                       "only the landscape clip has a window to place")
+        let project = Project(
+            presets: [.init(name: "p", look: try lookFixture())],
+            activePreset: "p", delivery: .init(targets: [.reels]))
+        let sizes = [
+            "WIDE": FrameSize(width: 3840, height: 2160),
+            "TALL": FrameSize(width: 2160, height: 3840),
+        ]
+        XCTAssertEqual(
+            project.blockers(for: ["WIDE", "TALL"], sizes: sizes),
+            [.cropWithoutOffset(deliverables: [.reels], clips: ["WIDE"])],
+            "only the landscape clip has a window to place")
     }
 
     func testTheEnvironmentNamesEveryDeliverableAndNoLongerNamesFEED() throws {
-        var project = Project(presets: [], activePreset: "",
-                              delivery: .init(targets: [.reels, .feed]))
+        var project = Project(
+            presets: [], activePreset: "",
+            delivery: .init(targets: [.reels, .feed]))
         project.clips["IMG_0609"] = .init(cropOffset: 600)
-        let env = project.environment(for: "IMG_0609",
-                                      lookFile: URL(fileURLWithPath: "/tmp/look.json"))
+        let env = project.environment(
+            for: "IMG_0609",
+            lookFile: URL(fileURLWithPath: "/tmp/look.json"))
         XCTAssertEqual(env["DELIVERABLES"], "reels,feed")
         // FEED was removed from the engine, not aliased. An app still setting it would be asking
         // for a deliverable nothing renders, and the run would succeed while producing one file
@@ -88,10 +100,14 @@ final class DeliverableTests: XCTestCase {
     }
 
     func testACustomShapeReachesTheEngineThroughTheSameVariable() throws {
-        let project = Project(presets: [], activePreset: "",
-                              delivery: .init(targets: [.reels,
-                                                        .init(name: "square", aspectWidth: 1,
-                                                              aspectHeight: 1)]))
+        let project = Project(
+            presets: [], activePreset: "",
+            delivery: .init(targets: [
+                .reels,
+                .init(
+                    name: "square", aspectWidth: 1,
+                    aspectHeight: 1),
+            ]))
         let env = project.environment(for: "X", lookFile: URL(fileURLWithPath: "/tmp/look.json"))
         XCTAssertEqual(env["DELIVERABLES"], "reels,square:1:1")
     }
@@ -132,9 +148,9 @@ final class DeliverableTests: XCTestCase {
         // A reader that ignored them would open such a project showing the default — a delivery
         // nobody chose, replacing one somebody did.
         let legacy = """
-        {"version": 1, "presets": [], "active_preset": "",
-         "delivery": {"reels": true, "feed": true, "height": 2560}, "clips": {}}
-        """
+            {"version": 1, "presets": [], "active_preset": "",
+             "delivery": {"reels": true, "feed": true, "height": 2560}, "clips": {}}
+            """
         let project = try Project(data: Data(legacy.utf8))
         XCTAssertEqual(project.delivery.targets, [.reels, .feed])
         XCTAssertEqual(project.delivery.height, 2560)
@@ -142,17 +158,18 @@ final class DeliverableTests: XCTestCase {
 
     func testALegacyProjectWithFeedOffLoadsOnlyReels() throws {
         let legacy = """
-        {"version": 1, "presets": [], "active_preset": "",
-         "delivery": {"reels": true, "feed": false, "height": 1920}, "clips": {}}
-        """
+            {"version": 1, "presets": [], "active_preset": "",
+             "delivery": {"reels": true, "feed": false, "height": 1920}, "clips": {}}
+            """
         let project = try Project(data: Data(legacy.utf8))
         XCTAssertEqual(project.delivery.targets, [.reels])
     }
 
     func testAnArbitraryShapeSurvivesTheProjectFile() throws {
         let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
-        let project = Project(presets: [], activePreset: "",
-                              delivery: .init(targets: [.reels, square], height: 1920))
+        let project = Project(
+            presets: [], activePreset: "",
+            delivery: .init(targets: [.reels, square], height: 1920))
         let reread = try Project(data: try project.serialised())
         XCTAssertEqual(reread.delivery.targets, [.reels, square])
     }
@@ -163,56 +180,69 @@ final class DeliverableTests: XCTestCase {
     // MARK: - A shape carrying its own offset
 
     func testACentreShapeSaysSoInItsSpecAndAnUnoffsetOneDoesNot() throws {
-        let centred = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
-                                  cropOffset: .centre)
+        let centred = Deliverable(
+            name: "square", aspectWidth: 1, aspectHeight: 1,
+            cropOffset: .centre)
         XCTAssertEqual(centred.spec, "square:1:1:centre")
-        XCTAssertEqual(Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1).spec,
-                       "square:1:1")
+        XCTAssertEqual(
+            Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1).spec,
+            "square:1:1")
     }
 
     /// The engine lets a deliverable's own offset beat `CROP_OFFSET`, so a `centre` shape has nothing
     /// for a clip to decide, while one without an offset still takes the clip's.
     func testOnlyAShapeWithoutItsOwnOffsetWaitsForTheClip() throws {
-        let centred = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
-                                  cropOffset: .centre)
-        var project = Project(presets: [.init(name: "p", look: try lookFixture())],
-                              activePreset: "p", delivery: .init(targets: [centred]))
-        XCTAssertEqual(project.blockers(for: ["IMG_0609"]), [],
-                       "a centred shape blocked Convert on a framing it ignores")
+        let centred = Deliverable(
+            name: "square", aspectWidth: 1, aspectHeight: 1,
+            cropOffset: .centre)
+        var project = Project(
+            presets: [.init(name: "p", look: try lookFixture())],
+            activePreset: "p", delivery: .init(targets: [centred]))
+        XCTAssertEqual(
+            project.blockers(for: ["IMG_0609"]), [],
+            "a centred shape blocked Convert on a framing it ignores")
         project.delivery.targets.append(.feed)
-        XCTAssertEqual(project.blockers(for: ["IMG_0609"]),
-                       [.cropWithoutOffset(deliverables: [.feed], clips: ["IMG_0609"])],
-                       "the blocker must name only the shape that takes the clip's offset")
+        XCTAssertEqual(
+            project.blockers(for: ["IMG_0609"]),
+            [.cropWithoutOffset(deliverables: [.feed], clips: ["IMG_0609"])],
+            "the blocker must name only the shape that takes the clip's offset")
     }
 
     func testTheEngineReadsACentreShapeAsCentred() throws {
         let engine = try engineCheckout()
-        let centred = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
-                                  cropOffset: .centre)
-        XCTAssertEqual(engine.resolveDeliverable(name: centred.name, spec: centred.spec),
-                       .resolved(.init(name: "square", aspectWidth: "1", aspectHeight: "1",
-                                       offset: "centre", suffix: "square_1x1")))
+        let centred = Deliverable(
+            name: "square", aspectWidth: 1, aspectHeight: 1,
+            cropOffset: .centre)
+        XCTAssertEqual(
+            engine.resolveDeliverable(name: centred.name, spec: centred.spec),
+            .resolved(
+                .init(
+                    name: "square", aspectWidth: "1", aspectHeight: "1",
+                    offset: "centre", suffix: "square_1x1")))
     }
 
     /// Both directions, because a serialiser that dropped the key would read every shape back as
     /// nil and still pass a test that only saves shapes without one.
     func testACentreOffsetSurvivesTheProjectFileAndItsAbsenceReadsAsNone() throws {
-        let centred = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1,
-                                  cropOffset: .centre)
+        let centred = Deliverable(
+            name: "square", aspectWidth: 1, aspectHeight: 1,
+            cropOffset: .centre)
         let plain = Deliverable(name: "tall", aspectWidth: 2, aspectHeight: 3)
-        let project = Project(presets: [], activePreset: "",
-                              delivery: .init(targets: [.reels, centred, plain]))
+        let project = Project(
+            presets: [], activePreset: "",
+            delivery: .init(targets: [.reels, centred, plain]))
         let reread = try Project(data: try project.serialised())
         XCTAssertEqual(reread.delivery.targets, [.reels, centred, plain])
 
         // Written before a shape could carry an offset: every shape then followed the clip's offset.
         let older = """
-        {"version": 2, "presets": [], "active_preset": "",
-         "delivery": {"targets": [{"name": "square", "aspect_width": 1, "aspect_height": 1}]},
-         "clips": {}}
-        """
+            {"version": 2, "presets": [], "active_preset": "",
+             "delivery": {"targets": [{"name": "square", "aspect_width": 1, "aspect_height": 1}]},
+             "clips": {}}
+            """
         let opened = try Project(data: Data(older.utf8))
-        XCTAssertEqual(opened.delivery.targets,
-                       [Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)])
+        XCTAssertEqual(
+            opened.delivery.targets,
+            [Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)])
     }
 }

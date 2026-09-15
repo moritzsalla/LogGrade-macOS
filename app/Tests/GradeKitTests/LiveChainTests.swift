@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+
 @testable import GradeKit
 
 /// The whole live chain against the whole render, on real footage.
@@ -22,8 +23,10 @@ final class LiveChainTests: XCTestCase {
     private func rig() throws -> Rig {
         let engine = try engineCheckout()
         try XCTSkipIf(!engine.preflight().isEmpty, "engine preflight not clean")
-        let clips = (try? FileManager.default.contentsOfDirectory(
-            at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil)) ?? []
+        let clips =
+            (try? FileManager.default.contentsOfDirectory(
+                at: engine.root.appendingPathComponent("src"), includingPropertiesForKeys: nil))
+            ?? []
         guard let clip = clips.first(where: { $0.pathExtension.lowercased() == "mov" }) else {
             throw XCTSkip("no footage in src/")
         }
@@ -33,14 +36,17 @@ final class LiveChainTests: XCTestCase {
         let look = try Look(data: Data(contentsOf: engine.lookFile))
         let conversion = try Cube3D(contentsOf: engine.appleCube)
         let lookCube = engine.lookCube(named: look.lookLUT).flatMap { try? Cube3D(contentsOf: $0) }
-        return Rig(engine: engine,
-                   renderer: PreviewRenderer(engine: engine, workDirectory: work),
-                   clip: clip, look: look, conversion: conversion, lookCube: lookCube)
+        return Rig(
+            engine: engine,
+            renderer: PreviewRenderer(engine: engine, workDirectory: work),
+            clip: clip, look: look, conversion: conversion, lookCube: lookCube)
     }
 
     private func image(_ frame: PreviewRenderer.Frame) throws -> CGImage {
-        guard let image = NSImage(contentsOf: frame.url)?
-            .cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+        guard
+            let image = NSImage(contentsOf: frame.url)?
+                .cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else {
             throw XCTSkip("cannot read \(frame.url.path)")
         }
         return image
@@ -53,19 +59,23 @@ final class LiveChainTests: XCTestCase {
     /// orders agree everywhere except on a hard edge, where one pixel is a blend of two colours
     /// that the tone curve moves in different directions. The disagreement is therefore bounded to
     /// edges and is invisible, but a single worst-pixel assertion would read it as a defect.
-    private func difference(_ a: CGImage, _ b: CGImage) throws -> (mean: Double, p999: Double,
-                                                                  worst: Double) {
+    private func difference(_ a: CGImage, _ b: CGImage) throws -> (
+        mean: Double, p999: Double,
+        worst: Double
+    ) {
         try XCTSkipIf(a.width != b.width || a.height != b.height, "different sizes")
         func pixels(_ image: CGImage) -> [UInt8] {
             var buffer = [UInt8](repeating: 0, count: image.width * image.height * 4)
-            let ctx = CGContext(data: &buffer, width: image.width, height: image.height,
-                                bitsPerComponent: 8, bytesPerRow: image.width * 4,
-                                space: CGColorSpaceCreateDeviceRGB(),
-                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            let ctx = CGContext(
+                data: &buffer, width: image.width, height: image.height,
+                bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
             ctx?.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
             return buffer
         }
-        let left = pixels(a), right = pixels(b)
+        let left = pixels(a)
+        let right = pixels(b)
         var deltas: [Double] = []
         deltas.reserveCapacity(left.count / 4 * 3)
         var i = 0
@@ -87,15 +97,19 @@ final class LiveChainTests: XCTestCase {
 
     private func source(_ rig: Rig) throws -> CGImage {
         if let cached = Self.cachedSource { return cached }
-        let image = try image(rig.renderer.render(clip: rig.clip, seconds: 4, look: rig.look,
-                                                  height: 480, match: false, stage: .source))
+        let image = try image(
+            rig.renderer.render(
+                clip: rig.clip, seconds: 4, look: rig.look,
+                height: 480, match: false, stage: .source))
         Self.cachedSource = image
         return image
     }
 
     /// Grades the source frame in-process and measures it against the engine's own render.
-    private func compare(_ rig: Rig, look: Look) throws -> (mean: Double, p999: Double,
-                                                            worst: Double) {
+    private func compare(_ rig: Rig, look: Look) throws -> (
+        mean: Double, p999: Double,
+        worst: Double
+    ) {
         let exact = try rig.renderer.render(clip: rig.clip, seconds: 4, look: look, height: 480)
         let exactImage = try image(exact)
         var tone = look.tone
@@ -103,21 +117,26 @@ final class LiveChainTests: XCTestCase {
         // `ToneCurvePortTests` checks separately. Taking it from the event keeps this a test of
         // the picture rather than of the solve.
         if let gamma = exact.gamma { tone.gamma = gamma }
-        let correction = look.correct.isNeutral ? nil
+        let correction =
+            look.correct.isNeutral
+            ? nil
             : CorrectionCube.cube(for: look.correct, size: 33)
         let sourceImage = try source(rig)
         let chain = LiveChain(
-            stages: LiveChain.colourStages(correction: correction,
-                                           halation: LiveHalation(look.halation,
-                                                                  frameLongEdge: max(sourceImage.width, sourceImage.height)),
-                                           conversion: rig.conversion,
-                                           look: look.lookLUT == "none" ? nil : rig.lookCube,
-                                           lookStrength: look.lookStrength,
-                                           print: rig.engine.printCube(named: look.printLUT)
-                                               .flatMap { try? Cube3D(contentsOf: $0) },
-                                           printStrength: look.printStrength),
-            grade: LiveGrade(curve: ToneCurve.generated(tone: tone),
-                             saturation: look.colour.saturation, warmth: look.colour.warmth))
+            stages: LiveChain.colourStages(
+                correction: correction,
+                halation: LiveHalation(
+                    look.halation,
+                    frameLongEdge: max(sourceImage.width, sourceImage.height)),
+                conversion: rig.conversion,
+                look: look.lookLUT == "none" ? nil : rig.lookCube,
+                lookStrength: look.lookStrength,
+                print: rig.engine.printCube(named: look.printLUT)
+                    .flatMap { try? Cube3D(contentsOf: $0) },
+                printStrength: look.printStrength),
+            grade: LiveGrade(
+                curve: ToneCurve.generated(tone: tone),
+                saturation: look.colour.saturation, warmth: look.colour.warmth))
         guard let live = chain.apply(to: sourceImage) else {
             throw XCTSkip("the live chain produced no image")
         }
@@ -155,11 +174,13 @@ final class LiveChainTests: XCTestCase {
         withPrint.printStrength = 0.6
         // Strong enough to see, so the tolerance below is spent on the glow rather than on nothing.
         var withHalation = rig.look
-        withHalation.halation = Look.Halation(strength: 0.8, threshold: 1, radius: 0.006,
-                                              tint: "1,0.3,0.05")
+        withHalation.halation = Look.Halation(
+            strength: 0.8, threshold: 1, radius: 0.006,
+            tint: "1,0.3,0.05")
 
         // The percentile each case is held to; see above for why a print needs more.
-        let edgeBound = 24.0, printedEdgeBound = 42.0
+        let edgeBound = 24.0
+        let printedEdgeBound = 42.0
         // No rig per case: `compare` leaves the look cube out for a look of "none" by itself.
         let cases: [(String, Look, Double)] = [
             ("the shipped look", rig.look, edgeBound),
@@ -177,10 +198,13 @@ final class LiveChainTests: XCTestCase {
         for (name, look, percentileBound) in cases {
             let (mean, p999, worst) = try compare(rig, look: look)
             XCTAssertLessThan(mean, 3, "\(name): \(mean) code values from the render on average")
-            XCTAssertLessThan(p999, percentileBound,
-                              "\(name): a thousandth of it is more than \(p999) out")
-            XCTAssertLessThan(worst, 90, "\(name): the worst pixel is \(worst), beyond the edge "
-                              + "effect the percentile allows for")
+            XCTAssertLessThan(
+                p999, percentileBound,
+                "\(name): a thousandth of it is more than \(p999) out")
+            XCTAssertLessThan(
+                worst, 90,
+                "\(name): the worst pixel is \(worst), beyond the edge "
+                    + "effect the percentile allows for")
         }
     }
 }

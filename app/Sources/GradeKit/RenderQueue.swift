@@ -110,7 +110,8 @@ public final class RenderQueue: ObservableObject {
     }
 
     public func enqueue(_ clips: [(url: URL, stem: String, frames: Int?)]) {
-        for clip in clips where !jobs.contains(where: { $0.stem == clip.stem && !$0.state.isFinished }) {
+        for clip in clips
+        where !jobs.contains(where: { $0.stem == clip.stem && !$0.state.isFinished }) {
             jobs.append(Job(clip: clip.url, stem: clip.stem, totalFrames: clip.frames))
         }
     }
@@ -121,7 +122,9 @@ public final class RenderQueue: ObservableObject {
 
     /// Runs everything waiting. Returns when the queue is empty or cancelled.
     public func start(environment: @escaping (String) -> [String: String]) {
-        lock.lock(); cancelled = false; lock.unlock()
+        lock.lock()
+        cancelled = false
+        lock.unlock()
         setRunning(true)
 
         let group = DispatchGroup()
@@ -138,7 +141,10 @@ public final class RenderQueue: ObservableObject {
             }
             group.enter()
             pool.async { [weak self] in
-                defer { slots.signal(); group.leave() }
+                defer {
+                    slots.signal()
+                    group.leave()
+                }
                 self?.run(job, environment: environment(job.stem))
             }
         }
@@ -148,7 +154,9 @@ public final class RenderQueue: ObservableObject {
         // about windows or notifications, and should not start now; the app decides what a
         // finished run looks like on screen.
         let summary = jobs.reduce(into: (done: 0, failed: 0)) { total, job in
-            if case .done = job.state { total.done += 1 } else if job.state.isFinished {
+            if case .done = job.state {
+                total.done += 1
+            } else if job.state.isFinished {
                 total.failed += 1
             }
         }
@@ -180,7 +188,9 @@ public final class RenderQueue: ObservableObject {
                         break
                     }
                 })
-            lock.lock(); running[job.id] = nil; lock.unlock()
+            lock.lock()
+            running[job.id] = nil
+            lock.unlock()
 
             if isCancelled() {
                 update(job.id) { $0.state = .cancelled }
@@ -193,7 +203,8 @@ public final class RenderQueue: ObservableObject {
                     update(job.id) { $0.state = .done }
                 }
             } else {
-                let reason = outcome.codes.first?.message
+                let reason =
+                    outcome.codes.first?.message
                     ?? outcome.stderrText.split(separator: "\n").first.map(String.init)
                     ?? "the engine exited \(outcome.exitCode)"
                 update(job.id) { $0.state = .failed(reason) }
@@ -222,8 +233,10 @@ public final class RenderQueue: ObservableObject {
     /// Removes staging files under a work directory. Called after a cancel, and safe any time: a
     /// `.partial` file is by definition not a deliverable.
     @discardableResult
-    public static func sweepStagingFiles(in workDirectory: URL,
-                                         fileManager: FileManager = .default) -> [URL] {
+    public static func sweepStagingFiles(
+        in workDirectory: URL,
+        fileManager: FileManager = .default
+    ) -> [URL] {
         let dist = workDirectory.appendingPathComponent("dist")
         guard let walker = fileManager.enumerator(at: dist, includingPropertiesForKeys: nil) else {
             return []
@@ -239,7 +252,8 @@ public final class RenderQueue: ObservableObject {
     // MARK: - state
 
     private func isCancelled() -> Bool {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
+        defer { lock.unlock() }
         return cancelled
     }
 

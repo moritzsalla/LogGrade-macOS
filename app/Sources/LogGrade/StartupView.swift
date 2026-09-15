@@ -44,10 +44,14 @@ struct StartupView: View {
                 .tint(Palette.plate)
 
                 if let recent = recentProject {
-                    Button { onOpenProject(recent) } label: {
-                        Label("Reopen \(recent.deletingPathExtension().lastPathComponent)",
-                              systemImage: "clock.arrow.circlepath")
-                            .frame(width: 190)
+                    Button {
+                        onOpenProject(recent)
+                    } label: {
+                        Label(
+                            "Reopen \(recent.deletingPathExtension().lastPathComponent)",
+                            systemImage: "clock.arrow.circlepath"
+                        )
+                        .frame(width: 190)
                     }
                     .controlSize(.large)
                     .buttonStyle(.bordered)
@@ -78,11 +82,13 @@ struct StartupView: View {
                 .background(RoundedRectangle(cornerRadius: 8).fill(Palette.panel))
             }
             Spacer()
-            Text("Apple Log ProRes only. Already-converted footage is refused rather than graded "
-                 + "a second time.")
-                .font(Type.caption)
-                .foregroundColor(Palette.inkTertiary)
-                .padding(.bottom, Space.xl)
+            Text(
+                "Apple Log ProRes only. Already-converted footage is refused rather than graded "
+                    + "a second time."
+            )
+            .font(Type.caption)
+            .foregroundColor(Palette.inkTertiary)
+            .padding(.bottom, Space.xl)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.surround)

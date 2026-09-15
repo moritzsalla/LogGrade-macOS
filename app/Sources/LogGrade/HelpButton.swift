@@ -12,7 +12,9 @@ struct HelpButton: View {
     @State private var shown = false
 
     var body: some View {
-        Button { shown.toggle() } label: {
+        Button {
+            shown.toggle()
+        } label: {
             Image(systemName: "questionmark.circle")
                 .font(Type.label)
                 .foregroundColor(Palette.inkTertiary)
