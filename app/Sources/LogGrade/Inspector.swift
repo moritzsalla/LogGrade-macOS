@@ -6,6 +6,11 @@ import SwiftUI
 /// sections are never reordered.
 struct InspectorView: View {
     @ObservedObject var model: GradeModel
+    /// Bound from `presetRow`'s name field. Clicking a slider or a button already moves focus
+    /// away on its own; this catches the rest of the panel — labels, padding, anywhere without its
+    /// own control — so the field does not keep the keyboard forever just because the next click
+    /// landed on inert space.
+    @FocusState private var presetNameFocused: Bool
 
     private static let appliedGammaTolerance = 0.005
 
@@ -24,6 +29,8 @@ struct InspectorView: View {
             }
             .padding(.vertical, 18)
             .padding(.trailing, 16)
+            .contentShape(Rectangle())
+            .onTapGesture { presetNameFocused = false }
         }
         .background(Palette.panel)
     }
@@ -263,7 +270,8 @@ struct InspectorView: View {
                 }
                 .labelsHidden().frame(width: 150)
                 Button("auto") { model.autoTone() }
-                    .buttonStyle(.borderless).font(Type.label)
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .tint(Palette.plate).font(Type.label)
                     .disabled(model.selectedClip == nil)
                 if model.hasUnsavedChanges {
                     Text("adjusted").font(Type.caption).foregroundColor(Palette.plate)
@@ -274,9 +282,11 @@ struct InspectorView: View {
                     .textFieldStyle(.roundedBorder)
                     .font(Type.label)
                     .frame(width: 160)
+                    .focused($presetNameFocused)
                     .onSubmit {
                         model.savePreset(named: newPresetName)
                         newPresetName = ""
+                        presetNameFocused = false
                     }
                 Button("save") {
                     model.savePreset(
@@ -284,6 +294,7 @@ struct InspectorView: View {
                             ? model.project.activePreset
                             : newPresetName)
                     newPresetName = ""
+                    presetNameFocused = false
                 }
                 .buttonStyle(.borderless).font(Type.label)
             }
