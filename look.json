@@ -30,6 +30,9 @@
     "window gets the same look rather than the same curve. It lives here because it is a",
     "measurement of the grade, not a knob: change it only if the look is re-tuned on another frame."
   ],
+  "convert": {
+    "cube": "apple"
+  },
   "correct": {
     "exposure": 0.0,
     "temp": 0.0,
@@ -74,6 +77,12 @@
     "smoothing": 30
   },
   "match": {
-    "reference_yavg": 609
+    "reference_yavg": 609,
+    "reference_stops": -0.4
+  },
+  "finish": {
+    "denoise": 0,
+    "sharpen": 0.6,
+    "gauge": "none"
   }
 }

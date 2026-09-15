@@ -1,0 +1,46 @@
+Film looks — provenance and changes
+===================================
+
+These cubes encode spektrafilm profiles and are therefore under CC BY-SA 4.0
+(SPEKTRAFILM_LICENSE.txt, beside this file, unmodified as it asks).
+
+  Film modelling: spektrafilm by Andrea Volpato
+  Canonical source: https://github.com/andreavolpato/spektrafilm
+  License: CC BY-SA 4.0
+  Modified by Moritz Salla, 2026-09-15 (spektrafilm main, v0.3.4) — see below.
+
+Every cube is Apple Log (full-range RGB, as ffmpeg lut3d reads it) in, Rec.709
+display code values (BT.1886, gamma 2.4) out, 65^3, and replaces Apple's
+AppleLogToRec709 cube as the conversion. Each TITLE carries its exact bake
+parameters.
+
+What was modified
+-----------------
+imax65.cube, rz67_portra400.cube, pro400h.cube
+  spektrafilm produces the developed negative's CMY dye densities only (its
+  own scan of a negative is not inverted). The positive is NOT spektrafilm's:
+  a lab-scan model written here inverts each channel's density, balances it
+  onto the green layer's grey-scale curve, then puts back the stock's own layer
+  crossover as a linear scanner anchored at -5 stops and mid grey would keep it
+  ("crossover", capped at half a stop). It renders through a Michaelis-Menten
+  scanner tone curve anchored at mid grey, then applies Oklab chroma, hue
+  curves (hue-vs-hue, hue-vs-chroma, hue-vs-lightness, periodic splines
+  through 12 knots, fitted from the window parameters in the TITLE),
+  subtractive density, a gamut fit that reduces chroma at constant lightness
+  and hue instead of clipping, and a display black lift. DIR coupler amount
+  raised above the profile default (the "dir" value in each TITLE).
+    imax65          kodak_vision3_250d negative, +0.5 stop, scanned (a DI-
+                    finished large-format look: neutral, deep, holds the sky)
+    rz67_portra400  kodak_portra_400, +1.5 stops, scanned
+    pro400h         fujifilm_pro_400h, +1 stop, scanned
+
+super8_kodachrome64.cube
+  kodak_kodachrome_64 reversal, +0.7 stop, scanned directly (io.scan_film:
+  the kodak_2383 print named in the TITLE is not applied), scanner white and
+  black correction re-enabled after spektrafilm's LUT mode resets them. Then
+  an Oklab trim: lightness S-curve (contrast 1.25 about 0.62), chroma x1.5
+  faded out below lightness 0.2-0.45 so the warm toe keeps its blue channel,
+  and the same gamut fit.
+
+Not reproducible from this repo alone: the bake scripts import spektrafilm
+(GPLv3) and are kept out of it. The TITLE lines record every parameter.

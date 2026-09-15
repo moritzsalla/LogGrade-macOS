@@ -878,6 +878,88 @@ JSON
 	[ -z "$missing" ] || fail "look.json is missing:$missing"
 }
 
+@test "every shipped preset is a complete look whose conversion exists" {
+	# The app offers presets/ as they are; one missing a key stops its first render, and one naming
+	# a cube that is not on disk fails inside ffmpeg.
+	local root="$BATS_TEST_DIRNAME/.." preset key missing="" n=0
+	for preset in "$root"/presets/*.json; do
+		n=$((n + 1))
+		for key in $(grep -ho 'look \.[a-z_.]*' "$root"/scripts/*.sh | awk '{print $2}' | sort -u); do
+			jq -e "$key" "$preset" >/dev/null 2>&1 || missing="$missing $(basename "$preset"):$key"
+		done
+		jq -e '.name | strings' "$preset" >/dev/null || missing="$missing $(basename "$preset"):name"
+		LOOK_FILE="$preset" resolve_conversion "$(jq -r .convert.cube "$preset")" >/dev/null \
+			|| missing="$missing $(basename "$preset"):cube"
+	done
+	[ "$n" -ge 4 ] || fail "found $n presets"
+	[ -z "$missing" ] || fail "incomplete:$missing"
+}
+
+@test "resolve_conversion names Apple's cube or a film cube, and refuses anything else" {
+	run resolve_conversion imax65
+	[ "$status" -eq 0 ] && [ "$output" = "$LIB_ROOT/luts/film/imax65.cube" ] || fail "film: $output"
+	run resolve_conversion portra_nonexistent
+	[ "$status" -ne 0 ] || fail "accepted a cube that is not there"
+	[[ "$output" == *"no luts/film/"*"nonexistent"* ]] || fail "$output"
+	# The name reaches a path and a filter graph.
+	run resolve_conversion ../apple/AppleLogToRec709-v1.0
+	[ "$status" -ne 0 ] || fail "accepted a path"
+	[[ "$output" == *"must be 'apple' or a cube name"* ]] || fail "$output"
+}
+
+@test "the log denoise is absent at 0 and pinned to 10-bit YUV otherwise" {
+	run denoise_prefix 0
+	[ -z "$output" ] || fail "strength 0 left a filter: $output"
+	run denoise_prefix 1
+	# Behind an RGB filter these would otherwise run on R, G and B.
+	[[ "$output" == "format=yuv444p10le,vaguedenoiser=threshold=8:planes=6,atadenoise="*":s=5," ]] \
+		|| fail "$output"
+}
+
+@test "the finish follows finish.*: no hqdn3d under the log denoise, no sharpener at 0, Super 8 at 18 fps" {
+	DENOISE_STRENGTH=1 SHARPEN=0 GAUGE=none run delivery_image_chain 1080 1920 "" "" 1 24
+	[[ "$output" != *hqdn3d* ]] || fail "hqdn3d on top of the log denoise: $output"
+	[[ "$output" != *unsharp* ]] || fail "sharpened at 0: $output"
+	DENOISE_STRENGTH=0 SHARPEN=1 GAUGE=super8 run delivery_image_chain 1080 1920 "" "" 1 24
+	[[ "$output" == *"hqdn3d="* ]] || fail "lost hqdn3d without the log denoise: $output"
+	[[ "$output" == *"unsharp=5:5:1:3:3:0.0[sh_sharp]"*"maskedclamp=planes=1:undershoot=2:overshoot=2"* ]] || fail "the limit did not follow the amount: $output"
+	# Pinned before the gauge: behind halation the picture is float RGB, where noise goes wild.
+	[[ "$output" == *"format=yuv444p10le,scale=w=486:h=864:flags=area"*"fps=18,zscale="* ]] || fail "$output"
+	[[ "$output" == *",fps=24" ]] || fail "did not return to the clip's rate: $output"
+	# The clamp is in code values: at 10 bits the same tolerance is four times as many.
+	DELIVERY_BITS=10 DENOISE_STRENGTH=0 SHARPEN=1 GAUGE=none run delivery_image_chain 1080 1920 "" "" 1 24
+	[[ "$output" == *"undershoot=8:overshoot=8"* ]] || fail "10-bit clamp not scaled: $output"
+	# A plain export has no gauge.
+	DENOISE_STRENGTH=0 SHARPEN=0.3 GAUGE=super8 run delivery_image_chain 1080 1920 "" "" 0 24
+	[[ "$output" != *fps=18* ]] || fail "FINISH=0 kept the gauge: $output"
+}
+
+@test "solve-exposure meters a grey frame to the reference and balances a cast out" {
+	# One frame of planar float G, B, R, as ffmpeg's gbrpf32le writes it.
+	_frame() {  # _frame <r> <g> <b>   linear values
+		python3 -c '
+import array, sys
+sys.path.insert(0, sys.argv[4])
+from applelog import encode
+r, g, b = (encode(float(v)) for v in sys.argv[1:4])
+n = 16 * 16
+sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
+' "$1" "$2" "$3" "$LIB_ROOT/scripts"
+	}
+	local solve="$LIB_ROOT/scripts/solve-exposure.py" stops temp tint
+	read -r stops temp tint < <(_frame 0.18 0.18 0.18 | "$solve" 16 16 0)
+	[ "$stops" = "0.000" ] && [ "$temp" = "0.000" ] && [ "$tint" = "0.000" ] || fail "grey at reference: $stops $temp $tint"
+	# Two stops under: brightened, but damped, not all the way.
+	read -r stops temp tint < <(_frame 0.045 0.045 0.045 | "$solve" 16 16 0)
+	awk -v s="$stops" 'BEGIN { exit !(s > 0.5 && s < 2) }' || fail "two stops under metered $stops"
+	# A warm cast: red up, blue down, so temp comes out negative (cooling).
+	read -r stops temp tint < <(_frame 0.2 0.18 0.16 | "$solve" 16 16 0)
+	awk -v t="$temp" 'BEGIN { exit !(t < -0.05) }' || fail "a warm cast solved temp $temp"
+	# An unreadable frame is no correction, not a failed batch.
+	run "$solve" 16 16 0 < /dev/null
+	[ "$status" -eq 0 ] && [ "$output" = "0 0 0" ] || fail "empty frame: $status $output"
+}
+
 @test "look refuses a missing key rather than substituting a different look" {
 	local look="$BATS_TEST_TMPDIR/partial.json"
 	printf '{ "tone": { "gamma": 2.02 } }\n' > "$look"
@@ -1771,12 +1853,12 @@ PY
 	# Its 5x5 was measured at 1080x1920 and the radius is in PIXELS, so at another height it
 	# sharpens a different real-world detail size.
 	run delivery_image_chain 1080 1920 "" "" 1
-	[[ "$output" == *"unsharp=5:5:0.4"* ]] || fail "1920 should be the measured radius: $output"
+	[[ "$output" == *"unsharp=5:5:0.6:3:3"* ]] || fail "1920 should be the measured radius: $output"
 	run delivery_image_chain 2160 3840 "" "" 1
-	[[ "$output" == *"unsharp=11:11:0.4"* ]] || fail "radius did not scale: $output"
+	[[ "$output" == *"unsharp=11:11:0.6:3:3"* ]] || fail "radius did not scale: $output"
 	# unsharp rejects a radius below 3, so a small output must not ask for one.
 	run delivery_image_chain 360 640 "" "" 1
-	[[ "$output" == *"unsharp=3:3:0.4"* ]] || fail "radius went below the floor: $output"
+	[[ "$output" == *"unsharp=3:3:0.6:3:3"* ]] || fail "radius went below the floor: $output"
 }
 
 @test "fps_filter accepts an integer relation and refuses retiming" {

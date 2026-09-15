@@ -298,8 +298,10 @@ extension Project {
     /// Kept apart from `fileVersion` so a later bump does not re-apply this upgrade to files that
     /// already have the stages.
     static let filmStagesVersion = 2
+    /// The first version whose looks carry a conversion, a finish and a film exposure reference.
+    static let conversionVersion = 3
     /// The format this build writes.
-    static let fileVersion = filmStagesVersion
+    static let fileVersion = conversionVersion
 
     public func serialised() throws -> Data {
         var presetList: [[String: Any]] = []
@@ -374,6 +376,23 @@ extension Project {
                 if grain["shadows"] == nil { grain["shadows"] = 1.0 }
                 if grain["highlights"] == nil { grain["highlights"] = 1.0 }
                 look["grain"] = grain
+            }
+            upgraded = look
+        }
+        // Before version 3 every look rendered through Apple's cube, with the delivery finish the
+        // engine then hardcoded: no log denoise, no gauge, and the
+        // shipped sharpener (now edge-limited, at the amount that measured the old detail).
+        if version < conversionVersion, var look = upgraded as? [String: Any] {
+            if look["convert"] == nil { look["convert"] = ["cube": Look.appleConversion] }
+            if look["finish"] == nil {
+                let finish = Look.Finish()
+                look["finish"] = [
+                    "denoise": finish.denoise, "sharpen": finish.sharpen, "gauge": finish.gauge,
+                ]
+            }
+            if var match = look["match"] as? [String: Any], match["reference_stops"] == nil {
+                match["reference_stops"] = Look.defaultReferenceStops
+                look["match"] = match
             }
             upgraded = look
         }

@@ -7,7 +7,7 @@
 # maintaining an Xcode project for a personal tool, and it keeps the build a script rather than a
 # GUI action.
 #
-# WHAT GOES INSIDE. The engine too: scripts/, luts/ and look.json are copied in, because the app
+# WHAT GOES INSIDE. The engine too: scripts/, luts/, presets/ and look.json are copied in, because the app
 # should not stop working when a checkout moves. A debug build points at the working copy instead,
 # so engine scripts stay editable without a rebuild — see LOGGRADE_ENGINE.
 #
@@ -72,7 +72,7 @@ ENGINE="$APP/Contents/Resources/engine"
 # -L: a symlinked cube (a worktree links Apple's, which cannot be committed) would be copied as a
 # link to a path outside the bundle. That fails `codesign --strict` here and is a dangling link on
 # the other Mac.
-cp -RL "$ROOT/scripts" "$ROOT/luts" "$ROOT/look.json" "$ENGINE/"
+cp -RL "$ROOT/scripts" "$ROOT/luts" "$ROOT/presets" "$ROOT/look.json" "$ENGINE/"
 for tool in ffmpeg ffprobe jq; do
 	lipo -create "$TOOLS/x86_64/$tool" "$TOOLS/arm64/$tool" -output "$ENGINE/$tool"
 done

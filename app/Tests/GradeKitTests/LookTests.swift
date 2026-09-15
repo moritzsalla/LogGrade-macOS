@@ -214,7 +214,31 @@ final class ProjectTests: XCTestCase {
         let written =
             try JSONSerialization.jsonObject(with: try opened.serialised())
             as? [String: Any]
-        XCTAssertEqual(written?["version"] as? Int, 2)
+        XCTAssertEqual(written?["version"] as? Int, 3)
+    }
+
+    /// A project saved before the conversion and finish existed rendered through Apple's cube with
+    /// the finish the engine then hardcoded, and opens meaning exactly that.
+    func testAProjectFromBeforeTheConversionOpensOnApplesCube() throws {
+        var preset =
+            try JSONSerialization.jsonObject(with: try aLook().serialised())
+            as? [String: Any] ?? [:]
+        preset.removeValue(forKey: "convert")
+        preset.removeValue(forKey: "finish")
+        preset["match"] = ["reference_yavg": 609]
+        func project(version: Int) throws -> Data {
+            try JSONSerialization.data(withJSONObject: [
+                "version": version, "active_preset": "old",
+                "presets": [["name": "old", "look": preset]],
+            ])
+        }
+        let look = try XCTUnwrap(try Project(data: try project(version: 2)).presets.first?.look)
+        XCTAssertEqual(look.convertCube, Look.appleConversion)
+        XCTAssertFalse(look.isFilmConversion)
+        XCTAssertEqual(look.finish, Look.Finish(denoise: 0, sharpen: 0.6, gauge: "none"))
+        XCTAssertThrowsError(
+            try Project(data: try project(version: 3)),
+            "a current project missing the conversion was quietly repaired")
     }
 
     func testACroppedRenderIsBlockedUntilEveryClipHasAnOffset() throws {

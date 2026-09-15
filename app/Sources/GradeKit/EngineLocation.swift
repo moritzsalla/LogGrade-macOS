@@ -32,6 +32,31 @@ public struct EngineLocation {
     }
     public var lookCubes: URL { root.appendingPathComponent("luts/looks") }
     public var printCubes: URL { root.appendingPathComponent("luts/print") }
+    public var filmCubes: URL { root.appendingPathComponent("luts/film") }
+    public var presetFolder: URL { root.appendingPathComponent("presets") }
+
+    /// The cube `convert.cube` names: Apple's for "apple", otherwise a film cube, or nil when the
+    /// file is not there. Resolved as `resolve_conversion` in lib.sh resolves it.
+    public func conversionCube(named stem: String, fileManager: FileManager = .default) -> URL? {
+        if stem == Look.appleConversion {
+            return fileManager.fileExists(atPath: appleCube.path) ? appleCube : nil
+        }
+        guard !stem.isEmpty, !stem.contains("/"), !stem.hasPrefix(".") else { return nil }
+        let url = filmCubes.appendingPathComponent("\(stem).cube")
+        return fileManager.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// The presets the engine ships, `presets/*.json`, each a complete look with a `name`, in file
+    /// order. A file that is not a complete look is left out rather than offered half-read.
+    public func shippedPresets(fileManager: FileManager = .default) -> [Project.Preset] {
+        stems(in: presetFolder, fileManager: fileManager, extension: "json").compactMap { stem in
+            let url = presetFolder.appendingPathComponent("\(stem).json")
+            guard let data = try? Data(contentsOf: url), let look = try? Look(data: data),
+                let name = look.preserved["name"] as? String
+            else { return nil }
+            return Project.Preset(name: name, look: look)
+        }
+    }
 
     /// What a preflight can conclude. Each case names the thing to fix, because "could not render"
     /// is the message this whole type exists to avoid.
@@ -135,12 +160,14 @@ public struct EngineLocation {
         stems(in: printCubes, fileManager: fileManager)
     }
 
-    private func stems(in folder: URL, fileManager: FileManager) -> [String] {
+    private func stems(
+        in folder: URL, fileManager: FileManager, extension ext: String = "cube"
+    ) -> [String] {
         let urls =
             (try? fileManager.contentsOfDirectory(
                 at: folder,
                 includingPropertiesForKeys: nil)) ?? []
-        return urls.filter { $0.pathExtension == "cube" }
+        return urls.filter { $0.pathExtension == ext }
             .map { $0.deletingPathExtension().lastPathComponent }
             .sorted()
     }

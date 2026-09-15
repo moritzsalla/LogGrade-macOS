@@ -1,5 +1,5 @@
 #!/bin/bash
-# Stage 1: source -> baseline (Log->Rec709 CST, correct colour tags).
+# Stage 1: source -> baseline (the conversion out of Apple Log, correct colour tags).
 # Usage: ./01-baseline.sh IMG_XXXX
 #
 # Rotation is NOT handled anywhere in this pipeline. Orientation is an ingest concern and the
@@ -20,7 +20,12 @@ SRC="$(source_path "$WORK" "$CLIP")"
 OUT="$(baseline_path "$WORK" "$CLIP")"
 
 [ -f "$SRC" ] || { echo "source not found: $SRC" >&2; exit 1; }
-require_apple_cst || exit 1
+# look.json's conversion, and its log denoise, which must run here before the cube: stage 3 drops
+# hqdn3d whenever finish.denoise is on. A film conversion's per-clip metering is grade.sh's only.
+CST="$(resolve_conversion "${CONVERT:-$(look .convert.cube)}")" || exit 1
+load_delivery_look || exit 1
+DENOISE_PREFIX=""
+[ "$FINISH" = 0 ] || DENOISE_PREFIX="$(denoise_prefix "$DENOISE_STRENGTH")"
 # A clip's baseline and graded masters measured 4.6GB together (docs/PIPELINE.md, "Disk space
 # policy"); 10GB is a margin over that, not a measurement.
 check_disk_space "$WORK/dist" 10
@@ -28,7 +33,7 @@ check_disk_space "$WORK/dist" 10
 # is wrong the moment a work dir is set: the marker was in the repo and the output was not.
 mkdir -p "$(dirname "$OUT")"
 
-FILTER="lut3d=file='${APPLE_CST}':interp=tetrahedral"
+FILTER="${DENOISE_PREFIX}lut3d=file='${CST}':interp=tetrahedral"
 
 ffmpeg -y -i "$SRC" -vf "$FILTER" \
 	"${PRORES_MASTER[@]}" \

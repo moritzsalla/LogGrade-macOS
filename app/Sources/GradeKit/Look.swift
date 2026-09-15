@@ -222,6 +222,31 @@ public struct Look: Equatable {
         public var warmth: Double
     }
 
+    /// The delivery finish. `denoise` is a strength (0 leaves the stage out), `sharpen` the
+    /// sharpener's amount, and `gauge` either "none" or a film format's texture ("super8").
+    /// `scripts/lib.sh` carries what each does; like grain, none of them is in a still.
+    public struct Finish: Equatable {
+        public var denoise: Double
+        public var sharpen: Double
+        public var gauge: String
+
+        public init(denoise: Double = 0, sharpen: Double = 0.6, gauge: String = "none") {
+            self.denoise = denoise
+            self.sharpen = sharpen
+            self.gauge = gauge
+        }
+    }
+
+    /// Apple's own conversion, as `convert.cube` names it.
+    public static let appleConversion = "apple"
+    /// What an older project's looks are given for `match.reference_stops`: look.json's value, which
+    /// only a film conversion reads, so it changes nothing those looks render.
+    static let defaultReferenceStops = -0.4
+
+    /// The conversion out of Apple Log: "apple", or a film cube's stem in `luts/film/`. A film cube
+    /// is the stock's whole rendering, and under one the engine meters each clip's exposure and
+    /// white balance in linear rather than solving a gamma (`scripts/solve-exposure.py`).
+    public var convertCube: String
     public var correct: Correct
     public var halation: Halation
     /// The film-emulation cube's stem in `luts/looks/`, or "none".
@@ -240,18 +265,25 @@ public struct Look: Equatable {
     public var grainHighlights: Double
     public var stabilisationSmoothing: Double
     public var matchReferenceYAVG: Double
+    /// The centre-weighted log-average, in stops from 0.18, a film conversion meters clips to.
+    public var matchReferenceStops: Double
+    public var finish: Finish
     /// Everything this type does not model, kept verbatim so a written file is complete.
     public var preserved: [String: Any]
 
     public static func == (a: Look, b: Look) -> Bool {
-        a.correct == b.correct && a.halation == b.halation && a.lookLUT == b.lookLUT
+        a.convertCube == b.convertCube && a.correct == b.correct && a.halation == b.halation
+            && a.lookLUT == b.lookLUT
             && a.lookStrength == b.lookStrength && a.printLUT == b.printLUT
             && a.printStrength == b.printStrength && a.tone == b.tone
             && a.colour == b.colour && a.grainStrength == b.grainStrength
             && a.grainShadows == b.grainShadows && a.grainHighlights == b.grainHighlights
             && a.stabilisationSmoothing == b.stabilisationSmoothing
             && a.matchReferenceYAVG == b.matchReferenceYAVG
+            && a.matchReferenceStops == b.matchReferenceStops && a.finish == b.finish
     }
+
+    public var isFilmConversion: Bool { convertCube != Self.appleConversion }
 
     public enum Invalid: Error, CustomStringConvertible {
         case notAnObject
@@ -297,6 +329,7 @@ public struct Look: Equatable {
             threshold: try number(halationBlock, "threshold", "halation.threshold"),
             radius: try number(halationBlock, "radius", "halation.radius"),
             tint: try text(halationBlock, "tint", "halation.tint"))
+        convertCube = try text(try block("convert"), "cube", "convert.cube")
         let lookBlock = try block("look")
         lookLUT = try text(lookBlock, "lut", "look.lut")
         lookStrength = try number(lookBlock, "strength", "look.strength")
@@ -322,14 +355,19 @@ public struct Look: Equatable {
         stabilisationSmoothing = try number(
             try block("stabilisation"), "smoothing",
             "stabilisation.smoothing")
-        matchReferenceYAVG = try number(
-            try block("match"), "reference_yavg",
-            "match.reference_yavg")
+        let matchBlock = try block("match")
+        matchReferenceYAVG = try number(matchBlock, "reference_yavg", "match.reference_yavg")
+        matchReferenceStops = try number(matchBlock, "reference_stops", "match.reference_stops")
+        let finishBlock = try block("finish")
+        finish = Finish(
+            denoise: try number(finishBlock, "denoise", "finish.denoise"),
+            sharpen: try number(finishBlock, "sharpen", "finish.sharpen"),
+            gauge: try text(finishBlock, "gauge", "finish.gauge"))
 
         var extra = root
         for known in [
-            "correct", "halation", "look", "print", "tone", "colour", "grain", "stabilisation",
-            "match",
+            "convert", "correct", "halation", "look", "print", "tone", "colour", "grain",
+            "stabilisation", "match", "finish",
         ] {
             extra.removeValue(forKey: known)
         }
@@ -338,6 +376,7 @@ public struct Look: Equatable {
 
     public func serialised() throws -> Data {
         var root: [String: Any] = preserved
+        root["convert"] = ["cube": convertCube]
         root["correct"] = [
             "exposure": correct.exposure, "temp": correct.temp, "tint": correct.tint,
             "slope": correct.slope, "offset": correct.offset, "power": correct.power,
@@ -359,7 +398,12 @@ public struct Look: Equatable {
             "highlights": grainHighlights,
         ]
         root["stabilisation"] = ["smoothing": stabilisationSmoothing]
-        root["match"] = ["reference_yavg": matchReferenceYAVG]
+        root["match"] = [
+            "reference_yavg": matchReferenceYAVG, "reference_stops": matchReferenceStops,
+        ]
+        root["finish"] = [
+            "denoise": finish.denoise, "sharpen": finish.sharpen, "gauge": finish.gauge,
+        ]
         return try JSONSerialization.data(
             withJSONObject: root,
             options: [.prettyPrinted, .sortedKeys])
@@ -394,7 +438,10 @@ public struct Look: Equatable {
             switch stage {
             case .correct: out.correct = Correct()
             case .halation: out.halation.strength = 0
-            case .filmLook: out.lookLUT = "none"
+            // A film conversion is the film look too, so off is Apple's plain conversion.
+            case .filmLook:
+                out.lookLUT = "none"
+                out.convertCube = Self.appleConversion
             case .print: out.printLUT = "none"
             case .tone:
                 out.tone = Tone(

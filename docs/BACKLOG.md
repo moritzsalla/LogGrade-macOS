@@ -11,7 +11,9 @@ non-technical photographer could use the result.
 1. **The look, judged against the partner's analog scans**, not the Portra LUT (a coarse community
    emulation). Needs scans and iPhone clips of similar scenes. Measure tone, colour and grain against
    them, and the user judges by eye. The default image may move (`render-golden.sh --regenerate`).
-   This includes the unsigned v4 look and the grain strength (8, never judged by eye).
+   This includes the unsigned v4 look and the grain strength (8, never judged by eye). The film
+   presets (`presets/`) were tuned by eye on 3–4 frames of one overcast shoot: judge the Portra and
+   400H scans, the 65mm look, and each preset's grain and halation against real references too.
 2. **Verify the universal app on the Apple silicon Mac** (built in #10). Launch shows Kind: Apple for
    LogGrade and ffmpeg; one render with stabilisation; how far it differs from this Mac's render
    (arm64 ffmpeg is OSXExperts 9.0, x86 is evermeet 9.0.1); jq 1.8.2 (minos 14) runs if that Mac is

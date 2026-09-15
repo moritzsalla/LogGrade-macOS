@@ -38,6 +38,50 @@ require_apple_cst() {
 	return 1
 }
 
+# The conversion out of Apple Log, as look.json's convert.cube names it: "apple" is Apple's cube
+# above, any other name a film cube in luts/film/. A film cube is the conversion AND the stock's
+# tone and colour in one scene-referred step (luts/film/CHANGELOG.txt), so it replaces Apple's cube
+# rather than following it: graded after Apple's cube, a look works on highlights that cube has
+# already squeezed into the top tenth of the range. An unknown name stops the run.
+resolve_conversion() {  # resolve_conversion <apple|film-stem>  -> a path, or refuses
+	case "$1" in
+		apple)
+			require_apple_cst || return 1
+			printf '%s\n' "$APPLE_CST";;
+		*/*|.*|'')
+			echo "convert.cube must be 'apple' or a cube name in luts/film/: got '$1'" >&2
+			return 1;;
+		*)
+			[ -f "$LIB_ROOT/luts/film/$1.cube" ] || {
+				echo "convert.cube: no luts/film/$1.cube" >&2
+				return 1
+			}
+			printf '%s\n' "$LIB_ROOT/luts/film/$1.cube";;
+	esac
+}
+
+# Denoise in Apple Log, before the correction and the conversion, where the noise is still the
+# sensor's rather than stretched by a film curve. A chroma wavelet pass plus a tight temporal average.
+# Measured against hqdn3d chroma, nlmeans and removegrain on this camera's shadows: hqdn3d tinted
+# static colour and smeared saturated red while panning, and nlmeans, removegrain and dctdnoiz all
+# negotiate 8-bit. `format=yuv444p10le` pins the planes: behind any RGB filter these would otherwise
+# run on R, G and B. Strength scales every threshold; 0 leaves the stage out.
+denoise_prefix() {  # denoise_prefix <strength>  -> a prefix with its trailing comma, or nothing
+	awk -v s="$1" 'BEGIN {
+		if (s <= 0) exit
+		printf "format=yuv444p10le,vaguedenoiser=threshold=%g:planes=6,", 8 * s
+		printf "atadenoise=0a=%g:0b=%g:1a=%g:1b=%g:2a=%g:2b=%g:s=5,", 0.01 * s, 0.02 * s, 0.003 * s, 0.006 * s, 0.003 * s, 0.006 * s
+	}'
+}
+
+# Exposure and white balance for a clip under a film conversion, metered in scene-linear light
+# (scripts/solve-exposure.py) from one decoded frame. Prints "<stops> <temp> <tint>"; an unreadable
+# frame is "0 0 0", which is no correction rather than a failed batch.
+probe_film_exposure() {  # probe_film_exposure <src> <reference-stops>
+	ffmpeg -v error -ss 1 -i "$1" -frames:v 1 -vf "scale=160:160:flags=area,format=gbrpf32le" \
+		-f rawvideo - 2>/dev/null | "$LIB_ROOT/scripts/solve-exposure.py" 160 160 "$2"
+}
+
 # Where each stage writes, by clip. Spelled once because two stages read what a third wrote, and a
 # path that differs by one component is a cache nobody hits: grade.sh once built the transform path
 # from the wrong root and paid ~65s a clip to redo analysis stage 00 had already done.
@@ -557,11 +601,18 @@ tone_shape_args() {  # tone_shape_args  -> "--pivot P --contrast C --toe T --sho
 }
 
 # The input correction. The size is a render setting rather than a look value, so it is not here.
-correction_args() {  # correction_args  -> "--exposure E ... --lum-mix L"
+# The optional three are a clip's metered exposure, temp and tint (probe_film_exposure), ADDED to
+# look.json's, so a hand correction still moves a metered clip the way it moves any other.
+correction_args() {  # correction_args [stops temp tint]  -> "--exposure E ... --lum-mix L"
 	local exposure temp tint slope offset power lum_mix
 	exposure="$(require_number correct.exposure "$(look .correct.exposure)")" || return 1
 	temp="$(require_number correct.temp "$(look .correct.temp)")" || return 1
 	tint="$(require_number correct.tint "$(look .correct.tint)")" || return 1
+	if [ "$#" -eq 3 ]; then
+		exposure="$(require_number exposure "$(awk -v a="$exposure" -v b="$1" 'BEGIN { printf "%g", a + b }')")" || return 1
+		temp="$(require_number temp "$(awk -v a="$temp" -v b="$2" 'BEGIN { printf "%g", a + b }')")" || return 1
+		tint="$(require_number tint "$(awk -v a="$tint" -v b="$3" 'BEGIN { printf "%g", a + b }')")" || return 1
+	fi
 	slope="$(require_numbers correct.slope "$(look .correct.slope)")" || return 1
 	offset="$(require_numbers correct.offset "$(look .correct.offset)")" || return 1
 	power="$(require_numbers correct.power "$(look .correct.power)")" || return 1
@@ -573,9 +624,9 @@ correction_args() {  # correction_args  -> "--exposure E ... --lum-mix L"
 # Whether each pre-conversion stage does anything, as the word its generator prints. The rule lives
 # in the generator; these exist so that no caller spells the arguments it is decided on. A failure
 # is a failure, never an answer — see the note above.
-correction_state() {  # correction_state  -> neutral|active
+correction_state() {  # correction_state [stops temp tint]  -> neutral|active
 	local args
-	args="$(correction_args)" || return 1
+	args="$(correction_args "$@")" || return 1
 	# shellcheck disable=SC2086
 	"$LIB_ROOT/scripts/make-correct-lut.py" --check-neutral $args
 }
@@ -1070,6 +1121,13 @@ load_delivery_look() {
 	GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain.strength)}")" || return 1
 	GRAIN_SHADOWS="$(require_unit grain.shadows "$(look .grain.shadows)")" || return 1
 	GRAIN_HIGHLIGHTS="$(require_unit grain.highlights "$(look .grain.highlights)")" || return 1
+	DENOISE_STRENGTH="$(require_number finish.denoise "$(look .finish.denoise)")" || return 1
+	SHARPEN="$(require_number finish.sharpen "$(look .finish.sharpen)")" || return 1
+	GAUGE="$(look .finish.gauge)" || return 1
+	case "$GAUGE" in
+		none|super8) ;;
+		*) echo "finish.gauge must be none or super8: got '$GAUGE'" >&2; return 1;;
+	esac
 	AUDIO_HIGHPASS_HZ="$(require_hz AUDIO_HIGHPASS_HZ \
 		"${AUDIO_HIGHPASS_HZ:-$DELIVERY_AUDIO_HIGHPASS_HZ}")" || return 1
 	# Only 0 or 1: `FINISH=no` would otherwise sharpen a render its caller believes is plain.
@@ -1298,7 +1356,7 @@ stab_prefix() {  # stab_prefix <trf> <smoothing>
 #
 # <finish> 0 leaves out the chroma denoise and the sharpener, for a plain export. What remains is the
 # stabiliser the caller chose, the crop and the dithered reduction, none of which is a look.
-delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-prefix> <finish 0|1>
+delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-prefix> <finish 0|1> [fps]
 	# The sharpener's 5x5 was measured at 1080x1920, and its radius is in PIXELS — so at another
 	# output height it sharpens a different real-world detail size and the look changes. The radius
 	# scales with height and the amount does not, which is an ASSUMPTION rather than a measurement:
@@ -1317,8 +1375,66 @@ delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-pre
 		printf '%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=%s' "$3" "$4" "$1" "$2" "$(delivery_pix_fmt)"
 		return
 	fi
-	printf '%s%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=%s,unsharp=%s:%s:0.4:5:5:0.0' \
-		"$3" "$DELIVERY_CHROMA" "$4" "$1" "$2" "$(delivery_pix_fmt)" "$r" "$r"
+	# Read here if nobody loaded them, as grade_chain loads the film look.
+	[ -n "${SHARPEN+set}" ] || load_delivery_look || return 1
+	# The log denoise (denoise_prefix) cleans chroma at the source, and hqdn3d on top of it only
+	# tints static colour, so the two are never both in the graph.
+	local chroma="$DELIVERY_CHROMA" gauge="" tail="" sharpen=""
+	awk -v s="$DENOISE_STRENGTH" 'BEGIN { exit !(s > 0) }' && chroma=""
+	awk -v s="$SHARPEN" 'BEGIN { exit !(s > 0) }' && sharpen=",$(edge_limited_sharpen "$r" "$SHARPEN")"
+	if [ "$GAUGE" = super8 ]; then
+		gauge="$(gauge_super8 "$1" "$2")"
+		tail=",$(gauge_super8_tail "${6:-}")"
+	fi
+	printf '%s%s%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=%s%s%s' \
+		"$3" "$chroma" "$4" "$gauge" "$1" "$2" "$(delivery_pix_fmt)" "$sharpen" "$tail"
+}
+
+# The sharpener, EDGE-LIMITED: unsharp on luma, then clamped to within a code value or two of the
+# unsharpened picture's own 3x3 minimum and maximum, so fine texture gains contrast and a hard edge
+# gains no halo. Measured at 1080x1920 on three clips through a film cube, grain 4, CRF 18 (halo as
+# overshoot past the local 5x5 range at strong edges; detail as band-pass std on foliage against
+# no sharpening):
+#
+#   plain unsharp 0.4 (the old finish)   halo p99 6.5, 3.5% of edge pixels over 3   detail 1.106
+#   cas 0.4 / 0.6                        halo p99 4.5 / 6.0                        detail 1.08 / 1.11
+#   unsharp at 4K before the reduction   blurred back out; the radii that survive it bring the halo back
+#   limited 0.6, within 1                halo p99 1.0, none over 3                 detail 1.122
+#   limited 1.0, within 2                halo p99 2.0, none over 3                 detail 1.206
+#
+# The halo was the "digital" line along poles against sky, and it is what grain over it read as
+# crunchy. The limit follows the amount (1 up to 0.6, 2 at 1.0) because those are the measured pairs.
+# Labelled because it is a sub-graph; the prefix keeps its labels clear of the caller's.
+edge_limited_sharpen() {  # edge_limited_sharpen <radius> <amount>
+	local limit
+	limit=$(awk -v a="$2" 'BEGIN { l = int(a * 2 + 0.5); print (l < 1) ? 1 : l }')
+	# In code values, so four times as many at 10 bits for the same tolerance.
+	[ "$(delivery_pix_fmt)" = yuv420p ] || limit=$(( limit * 4 ))
+	printf 'split=3[sh_in][sh_lo][sh_hi];[sh_in]unsharp=%s:%s:%s:3:3:0.0[sh_sharp];' "$1" "$1" "$2"
+	printf '[sh_lo]erosion[sh_min];[sh_hi]dilation[sh_max];'
+	printf '[sh_sharp][sh_min][sh_max]maskedclamp=planes=1:undershoot=%s:overshoot=%s' "$limit" "$limit"
+}
+
+# SUPER 8, the format rather than the stock (the stock is the conversion cube). In order, before the
+# delivery reduction and still in 10-bit: the picture drops to the gauge's resolution (a Super 8
+# frame resolves roughly 480 lines across its height, 0.45 of a 1920 deliverable), a slight lens and
+# printer softness, dye-cloud colour noise at that scale, gate weave as a per-frame crop wander, and
+# 18 fps. Pinned to 10-bit YUV first: behind the halation stage the picture is float RGB, where
+# `noise` would scatter colour at full scale across R and B. Luma grain is the shared grain stage's, at the preset's strength.
+gauge_super8() {  # gauge_super8 <w> <h>  -> a prefix with its trailing comma
+	local gw gh
+	gw=$(( $1 * 9 / 20 / 2 * 2 )); gh=$(( $2 * 9 / 20 / 2 * 2 ))
+	printf "format=yuv444p10le,scale=w=%s:h=%s:flags=area,gblur=sigma=0.7,noise=c1s=8:c1f=t+u:c2s=8:c2f=t+u," "$gw" "$gh"
+	printf "crop=w=iw-8:h=ih-8:x='4+1.5*sin(n*0.9)+(random(1)-0.5)':y='4+2*sin(n*0.37)+1.5*(random(2)-0.5)',fps=18,"
+}
+
+# After the reduction: projector flicker as a per-frame brightness wobble (`hue`, whose
+# expressions are evaluated per frame, where `lutyuv` builds its table once and holds still), the
+# lens vignette, and back to the clip's rate by repeating frames, so 18 fps judders as a projector
+# does. Without a rate the stream stays at 18.
+gauge_super8_tail() {  # gauge_super8_tail [fps]
+	printf "hue=b='0.25*(random(3)-0.5)',vignette=angle=PI/5"
+	[ -z "${1:-}" ] || printf ",fps=%s" "$1"
 }
 
 # CLUSTERED grain, not per-pixel, generated on a half-resolution plate and blended. Measured:

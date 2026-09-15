@@ -75,6 +75,8 @@ final class GradeModel: ObservableObject {
     /// The cubes on disk, read once: the interface offers what is there.
     let availableLooks: [String]
     let availablePrints: [String]
+    /// The engine's `presets/`, offered in every project, including one saved before they existed.
+    let shippedPresets: [Project.Preset]
 
     // MARK: - the live tier
 
@@ -99,10 +101,6 @@ final class GradeModel: ObservableObject {
     /// the look was tuned at — so the interface shows both rather than letting the readout claim a
     /// value nothing applies.
     @Published var appliedGamma: Double?
-
-    /// Apple's conversion, read once. It is 65 points and parsing it takes long enough to be worth
-    /// not doing on a drag.
-    private let conversionCube: Cube3D?
 
     // TOUCHED ONLY ON `liveQueue`, from here to `convertedFrom`. They were built on the main
     // thread, and the correction cube alone costs 10 ms on the Intel Mac — every tick of an
@@ -133,6 +131,7 @@ final class GradeModel: ObservableObject {
 
     /// Everything the colour stages depend on, so a tone drag reuses them and nothing else does.
     private struct ColourKey: Equatable {
+        let convertCube: String
         let correct: Look.Correct
         let halation: Look.Halation
         let lookLUT: String
@@ -140,7 +139,9 @@ final class GradeModel: ObservableObject {
         let printLUT: String
         let printStrength: Double
 
+        /// `look`'s correction is the one the frame was converted with, metering included.
         init(_ look: Look) {
+            convertCube = look.convertCube
             correct = look.correct
             halation = look.halation
             lookLUT = look.lookLUT
@@ -161,6 +162,12 @@ final class GradeModel: ObservableObject {
 
     private func printCube(for stem: String) -> Cube3D? {
         filmCube(at: engine.printCube(named: stem))
+    }
+
+    /// Apple's cube or a film one, through the same cache: each is 65 points, and parsing one
+    /// costs more than a frame does, so it is read once rather than on a drag.
+    private func conversionCube(for stem: String) -> Cube3D? {
+        filmCube(at: engine.conversionCube(named: stem))
     }
 
     /// KEYED BY FILE, NOT BY STEM. A stem names a cube within its own folder, and nothing stops a
@@ -248,12 +255,11 @@ final class GradeModel: ObservableObject {
     }
 
     private func startGradeIfIdle() {
-        guard !gradeInFlight, let wanted = pendingLook, let source = sourceImage,
-            let conversion = conversionCube
-        else { return }
+        guard !gradeInFlight, let wanted = pendingLook, let source = sourceImage else { return }
         pendingLook = nil
         gradeInFlight = true
         let measuredYAVG = matchedYAVG
+        let metered = matchedMetering
 
         // OFF THE MAIN THREAD, all of it. The main thread's job during a drag is to redraw the
         // slider; any work here is a frame the thumb doesn't get, which reads as the control being
@@ -261,8 +267,7 @@ final class GradeModel: ObservableObject {
         liveQueue.async { [weak self] in
             guard let self else { return }
             let outcome = self.grade(
-                wanted, source: source, conversion: conversion,
-                measuredYAVG: measuredYAVG)
+                wanted, source: source, measuredYAVG: measuredYAVG, metered: metered)
             DispatchQueue.main.async {
                 self.gradeInFlight = false
                 switch outcome {
@@ -296,9 +301,20 @@ final class GradeModel: ObservableObject {
 
     /// One live frame. Runs on `liveQueue`, where the caches it reads live.
     private func grade(
-        _ wanted: Look, source: CGImage, conversion: Cube3D,
-        measuredYAVG: Double?
+        _ requested: Look, source: CGImage, measuredYAVG: Double?,
+        metered: PreviewRenderer.Metered?
     ) -> LiveOutcome {
+        // The engine adds a film conversion's metered exposure and white balance to the look's
+        // correction before building the cube, so the live picture does the same.
+        var wanted = requested
+        if wanted.isFilmConversion, let metered {
+            wanted.correct = metered.applied(to: wanted.correct)
+        }
+        guard let conversion = conversionCube(for: wanted.convertCube) else {
+            return wanted.isFilmConversion
+                ? .refused("The film conversion “\(wanted.convertCube)” couldn’t be read.")
+                : .failed
+        }
         if correctionFor != wanted.correct {
             correctionCube =
                 wanted.correct.isNeutral
@@ -408,6 +424,7 @@ final class GradeModel: ObservableObject {
             // here means the curve is the rendered one from the first drag rather than from the
             // first render.
             if let size = frame.sourceSize { self.frameSizes[clip.stem] = size }
+            self.measuredMetering[clip.url] = frame.metered
             if let yavg = frame.yavg {
                 self.measuredYAVG[clip.url] = yavg
                 self.refreshCurve()
@@ -446,16 +463,15 @@ final class GradeModel: ObservableObject {
         self.look = look
         self.availableLooks = engine.availableLooks()
         self.availablePrints = engine.availablePrints()
+        let shipped = engine.shippedPresets()
+        self.shippedPresets = shipped
         self.project = Project(
-            presets: [.init(name: "shipped", look: look)],
+            presets: [.init(name: "shipped", look: look)] + shipped,
             activePreset: "shipped")
         let work = FileManager.default.temporaryDirectory
             .appendingPathComponent("loggrade-preview", isDirectory: true)
         self.workDirectory = work
         self.renderer = PreviewRenderer(engine: engine, workDirectory: work)
-        // Read once, here: it is 65 points and parsing it costs more than a frame does. A missing
-        // cube is not fatal — preflight reports it, and the live tier simply does not start.
-        self.conversionCube = try? Cube3D(contentsOf: engine.appleCube)
         if let remembered = UserDefaults.standard.stringArray(forKey: DefaultsKey.openStages) {
             // "Trims" is what the inspector called this section before it was renamed
             // "Colour" — read as the new title, so an already-open section stays open.
@@ -517,9 +533,18 @@ final class GradeModel: ObservableObject {
         return measuredYAVG[clip]
     }
 
+    /// What the engine metered for the selected clip, when the render will meter it.
+    private var matchedMetering: PreviewRenderer.Metered? {
+        guard Look.matchesExposure(bypassing: bypassed), let clip = selectedClip?.url else {
+            return nil
+        }
+        return measuredMetering[clip]
+    }
+
+    /// Under a film conversion the engine solves no gamma: exposure is metered before the cube.
     static func appliedTone(_ look: Look, measuredYAVG: Double?) -> Look.Tone {
         var tone = look.tone
-        if let measuredYAVG {
+        if let measuredYAVG, !look.isFilmConversion {
             tone.gamma = ToneCurve.solvedGamma(
                 clipYAVG: measuredYAVG,
                 referenceYAVG: look.matchReferenceYAVG,
@@ -543,6 +568,7 @@ final class GradeModel: ObservableObject {
     /// What the engine measured for each clip, mirrored here so the solve above needs no render
     /// and no cross-thread read of the renderer's own cache.
     private var measuredYAVG: [URL: Double] = [:]
+    private var measuredMetering: [URL: PreviewRenderer.Metered] = [:]
 
     // MARK: - presets and the project file
 
@@ -581,7 +607,7 @@ final class GradeModel: ObservableObject {
     func autoTone() {
         guard !autoToneInFlight else { return }
         guard selectedClip != nil else { return }
-        guard isLiveHere, let source = sourceImage, let conversion = conversionCube else {
+        guard isLiveHere, let source = sourceImage else {
             preview.say("Preparing preview…")
             return
         }
@@ -590,6 +616,7 @@ final class GradeModel: ObservableObject {
         let seconds = sourceSeconds
         let base = effectiveLook
         let measuredYAVG = matchedYAVG
+        let metered = matchedMetering
         liveQueue.async { [weak self] in
             guard let self else { return }
 
@@ -607,7 +634,7 @@ final class GradeModel: ObservableObject {
             baseline.tone.contrast = 1
             guard
                 case .graded(_, let histogram?, _, _) = self.grade(
-                    baseline, source: source, conversion: conversion, measuredYAVG: measuredYAVG),
+                    baseline, source: source, measuredYAVG: measuredYAVG, metered: metered),
                 let solved = AutoTone.solve(histogram: histogram)
             else {
                 finish()
@@ -620,7 +647,7 @@ final class GradeModel: ObservableObject {
             candidate.tone.contrast = solved.contrast
             var final = solved
             if case .graded(_, let verify?, _, _) = self.grade(
-                candidate, source: source, conversion: conversion, measuredYAVG: measuredYAVG),
+                candidate, source: source, measuredYAVG: measuredYAVG, metered: metered),
                 let corrected = AutoTone.solve(
                     histogram: verify, baseExposure: solved.exposure,
                     baseContrast: solved.contrast)
@@ -660,7 +687,12 @@ final class GradeModel: ObservableObject {
     }
 
     func openProject(at url: URL) throws {
-        project = try Project(data: try Data(contentsOf: url))
+        var opened = try Project(data: try Data(contentsOf: url))
+        for preset in shippedPresets
+        where !opened.presets.contains(where: { $0.name == preset.name }) {
+            opened.presets.append(preset)
+        }
+        project = opened
         projectURL = url
         UserDefaults.standard.set(url, forKey: DefaultsKey.lastProject)
         if let active = project.active {
@@ -898,6 +930,7 @@ final class GradeModel: ObservableObject {
                     // lands there is no solved gamma and the graph beside the sliders is drawing
                     // the reference curve. Record it and regenerate.
                     if let yavg = frame.yavg { self.measuredYAVG[clip.url] = yavg }
+                    self.measuredMetering[clip.url] = frame.metered
                     if let size = frame.sourceSize { self.frameSizes[clip.stem] = size }
                     self.refreshCurve()
                 }
