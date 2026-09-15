@@ -20,11 +20,6 @@ non-technical photographer could use the result.
 ## The app, as it feels to use
 
 - **Export is slow on the Intel Mac.** Measure where the time goes first.
-- **Control sections in a logical order.**
-- **The print stage:** the user doesn't see why to add a print look to video. Explain it plainly or
-  hide it; the engine keeps it.
-- **A brief splash instead of the startup screen,** like Photoshop's licence splash.
-- **Short, plain labels and help text** anyone understands.
 
 ## Open work
 

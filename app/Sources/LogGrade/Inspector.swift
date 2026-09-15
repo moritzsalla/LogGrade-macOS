@@ -1,9 +1,10 @@
 import GradeKit
 import SwiftUI
 
-/// The chain, one stage per section, top to bottom in the order it runs. The order is a measured
-/// artefact — corrections before the conversion, tone after the look and on luma only — so the
-/// sections are never reordered.
+/// The chain, one stage per section, ordered by how often a session reaches for it rather than by
+/// execution order — the everyday tonal moves first, the two lookup stages and the effect after,
+/// export settings last. Execution order is unchanged and stays in `grade_chain()` (scripts/lib.sh);
+/// nothing here decides it.
 struct InspectorView: View {
     @ObservedObject var model: GradeModel
     /// Bound from `presetRow`'s name field. Clicking a slider or a button already moves focus
@@ -18,13 +19,12 @@ struct InspectorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 presetRow
-                convertStage
+                convertNote
                 correctStage
-                halationStage
-                filmLookStage
-                printStage
                 toneStage
                 trimsStage
+                filmLookStage
+                halationStage
                 deliveryStage
             }
             .padding(.vertical, 18)
@@ -41,24 +41,30 @@ struct InspectorView: View {
         .background(Palette.panel)
     }
 
-    private var convertStage: some View {
-        stage(
-            "Convert",
-            help: "Apple Log to Rec.709, using Apple's own conversion. It is always "
-                + "applied and cannot be adjusted: its colour is more accurate than "
-                + "anything this app could do instead, and the cube carries a display "
-                + "rendering Apple has not published."
-        ) {
-            Text("Apple Log to Rec.709")
+    /// A CAPTION, NOT A STAGE. It has no controls — always on, nothing to switch or open — so a
+    /// full collapsible section made you skip past an empty row before reaching the first control
+    /// that does something. Still worth the one line, and the help button: it is real colour work
+    /// on the way to the picture, and someone will ask why nothing here is adjustable.
+    private var convertNote: some View {
+        HStack(spacing: Space.xs) {
+            Text("Converted from Apple Log to Rec.709 first, always.")
                 .font(Type.caption)
                 .foregroundColor(Palette.inkTertiary)
+            HelpButton(
+                text: "Using Apple's own conversion. It is always applied and cannot be "
+                    + "adjusted: its colour is more accurate than anything this app could do "
+                    + "instead, and the cube carries a display rendering Apple has not "
+                    + "published.")
         }
+        .padding(.leading, Self.inset)
+        .padding(.bottom, Space.l)
     }
 
     private var correctStage: some View {
         stage(
             "Correct", bypass: .correct,
-            help: "Exposure, white balance and the three wheels run before the "
+            help: "Exposure, white balance and the three wheels — shadows, midtones and "
+                + "highlights, lift/gamma/gain in ASC CDL terms — run before the "
                 + "conversion, on the log picture, where the highlights above white "
                 + "still exist. Brightening here keeps the highlights instead of "
                 + "flattening them against a ceiling.\n\nLuminance mix decides how much "
@@ -75,9 +81,9 @@ struct InspectorView: View {
             control(
                 "Tint", $model.look.correct.tint, -1...1,
                 default: model.defaultLook.correct.tint)
-            wheel(.offset, "Lift")
-            wheel(.power, "Gamma")
-            wheel(.slope, "Gain")
+            wheel(.offset, "Shadows")
+            wheel(.power, "Midtones")
+            wheel(.slope, "Highlights")
             control(
                 "Luminance", $model.look.correct.lumMix, 0...1,
                 default: model.defaultLook.correct.lumMix)
@@ -127,23 +133,47 @@ struct InspectorView: View {
             control(
                 "Strength", $model.look.lookStrength, 0...1, format: "%.2f",
                 default: model.defaultLook.lookStrength)
+            printSubsection
         }
     }
 
-    private var printStage: some View {
-        stage(
-            "Print", bypass: .print,
-            help: "A print-film emulation — Kodak 2383 is the cinema print stock — "
-                + "applied after the film look, the way a negative is printed.\n\nIt "
-                + "adds the print's contrast and colour, which at full strength over a "
-                + "tuned tone curve is usually too much. Strength blends it back toward "
-                + "the picture it was given."
-        ) {
-            cubePicker($model.look.printLUT, options: model.availablePrints)
-            control(
-                "Strength", $model.look.printStrength, 0...1, format: "%.2f",
-                default: model.defaultLook.printStrength)
+    /// FOLDED INTO FILM LOOK, NOT ITS OWN STAGE. The default is "none" — off — and a whole
+    /// section that is usually empty was a row to explain or hide rather than one worth reading
+    /// (backlog). It still needs its own switch: a look can stay on with the print off.
+    private var printSubsection: some View {
+        let enabled = !model.bypassed.contains(.print)
+        return VStack(alignment: .leading, spacing: Space.s) {
+            HStack(spacing: Space.xs) {
+                Text("Print")
+                    .font(Type.label)
+                    .foregroundColor(enabled ? Palette.inkSecondary : Palette.inkTertiary)
+                HelpButton(
+                    text: "The paper stock the negative was printed on — Kodak 2383 is the "
+                        + "cinema print stock — applied after the film look. Off by default: "
+                        + "it adds the print's own contrast and colour, which at full strength "
+                        + "over a tuned tone curve is usually too much.")
+                Spacer(minLength: 0)
+                Toggle(
+                    "",
+                    isOn: Binding(
+                        get: { enabled },
+                        set: { model.setEnabled(.print, $0) })
+                )
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .tint(Palette.inkSecondary)
+            }
+            VStack(alignment: .leading, spacing: Space.s) {
+                cubePicker($model.look.printLUT, options: model.availablePrints)
+                control(
+                    "Strength", $model.look.printStrength, 0...1, format: "%.2f",
+                    default: model.defaultLook.printStrength)
+            }
+            .opacity(enabled ? 1 : 0.4)
+            .disabled(!enabled)
         }
+        .padding(.top, Space.xs)
     }
 
     private var toneStage: some View {
@@ -179,7 +209,7 @@ struct InspectorView: View {
 
     private var trimsStage: some View {
         stage(
-            "Trims", bypass: .trims,
+            "Colour", bypass: .trims,
             help: "The last small moves, after the curve. Warmth acts on the midtones "
                 + "only, so it barely moves a bright sky or a deep shadow."
         ) {
