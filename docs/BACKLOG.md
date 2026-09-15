@@ -20,7 +20,6 @@ non-technical photographer could use the result.
 
 ## The app, as it feels to use
 
-- **An auto button:** one press gives a good starting grade.
 - **Export is slow on the Intel Mac.** Measure where the time goes first.
 - **Control sections in a logical order.**
 - **The print stage:** the user doesn't see why to add a print look to video. Explain it plainly or
