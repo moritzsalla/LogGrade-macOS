@@ -1,9 +1,10 @@
 import GradeKit
 import SwiftUI
 
-/// The chain, one stage per section, top to bottom in the order it runs. The order is a measured
-/// artefact — corrections before the conversion, tone after the look and on luma only — so the
-/// sections are never reordered.
+/// The chain, one stage per section, ordered by how often a session reaches for it rather than by
+/// execution order — the everyday tonal moves first, the two lookup stages and the effect after,
+/// export settings last. Execution order is unchanged and stays in `grade_chain()` (scripts/lib.sh);
+/// nothing here decides it.
 struct InspectorView: View {
     @ObservedObject var model: GradeModel
     /// Bound from `presetRow`'s name field. Clicking a slider or a button already moves focus
@@ -18,13 +19,12 @@ struct InspectorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 presetRow
-                convertStage
+                convertNote
                 correctStage
-                halationStage
-                filmLookStage
-                printStage
                 toneStage
                 trimsStage
+                filmLookStage
+                halationStage
                 deliveryStage
             }
             .padding(.vertical, 18)
@@ -41,24 +41,30 @@ struct InspectorView: View {
         .background(Palette.panel)
     }
 
-    private var convertStage: some View {
-        stage(
-            "Convert",
-            help: "Apple Log to Rec.709, using Apple's own conversion. It is always "
-                + "applied and cannot be adjusted: its colour is more accurate than "
-                + "anything this app could do instead, and the cube carries a display "
-                + "rendering Apple has not published."
-        ) {
-            Text("Apple Log to Rec.709")
+    /// A CAPTION, NOT A STAGE. It has no controls — always on, nothing to switch or open — so a
+    /// full collapsible section made you skip past an empty row before reaching the first control
+    /// that does something. Still worth the one line, and the help button: it is real colour work
+    /// on the way to the picture, and someone will ask why nothing here is adjustable.
+    private var convertNote: some View {
+        HStack(spacing: Space.xs) {
+            Text("Converted from Apple Log to Rec.709 first, always.")
                 .font(Type.caption)
                 .foregroundColor(Palette.inkTertiary)
+            HelpButton(
+                text: "Using Apple's own conversion. It is always applied and cannot be "
+                    + "adjusted: its colour is more accurate than anything this app could do "
+                    + "instead, and the cube carries a display rendering Apple has not "
+                    + "published.")
         }
+        .padding(.leading, Self.inset)
+        .padding(.bottom, Space.l)
     }
 
     private var correctStage: some View {
         stage(
             "Correct", bypass: .correct,
-            help: "Exposure, white balance and the three wheels run before the "
+            help: "Exposure, white balance and the three wheels — shadows, midtones and "
+                + "highlights, lift/gamma/gain in ASC CDL terms — run before the "
                 + "conversion, on the log picture, where the highlights above white "
                 + "still exist. Brightening here keeps the highlights instead of "
                 + "flattening them against a ceiling.\n\nLuminance mix decides how much "
@@ -75,9 +81,9 @@ struct InspectorView: View {
             control(
                 "Tint", $model.look.correct.tint, -1...1,
                 default: model.defaultLook.correct.tint)
-            wheel(.offset, "Lift")
-            wheel(.power, "Gamma")
-            wheel(.slope, "Gain")
+            wheel(.offset, "Shadows")
+            wheel(.power, "Midtones")
+            wheel(.slope, "Highlights")
             control(
                 "Luminance", $model.look.correct.lumMix, 0...1,
                 default: model.defaultLook.correct.lumMix)
@@ -127,23 +133,49 @@ struct InspectorView: View {
             control(
                 "Strength", $model.look.lookStrength, 0...1, format: "%.2f",
                 default: model.defaultLook.lookStrength)
+            printSubsection
         }
     }
 
-    private var printStage: some View {
-        stage(
-            "Print", bypass: .print,
-            help: "A print-film emulation — Kodak 2383 is the cinema print stock — "
-                + "applied after the film look, the way a negative is printed.\n\nIt "
-                + "adds the print's contrast and colour, which at full strength over a "
-                + "tuned tone curve is usually too much. Strength blends it back toward "
-                + "the picture it was given."
-        ) {
-            cubePicker($model.look.printLUT, options: model.availablePrints)
-            control(
-                "Strength", $model.look.printStrength, 0...1, format: "%.2f",
-                default: model.defaultLook.printStrength)
+    /// FOLDED INTO FILM LOOK, NOT ITS OWN STAGE. The default is "none" — off — and a whole
+    /// section that is usually empty was a row to explain or hide rather than one worth reading
+    /// (backlog). It still needs its own switch: `.print` bypasses independently of `.filmLook`
+    /// at the engine (`Look.bypassing`), so a look can stay on with the print off, or the print
+    /// can stay reachable with the look off — the switch below overrides Film look's own
+    /// `.disabled(!enabled)` for exactly that reason.
+    private var printSubsection: some View {
+        let enabled = !model.bypassed.contains(.print)
+        return VStack(alignment: .leading, spacing: Space.s) {
+            HStack(spacing: Space.xs) {
+                Text("Print")
+                    .font(Type.label)
+                    .foregroundColor(enabled ? Palette.inkSecondary : Palette.inkTertiary)
+                HelpButton(
+                    text: "The paper stock the negative was printed on — Kodak 2383 is the "
+                        + "cinema print stock — applied after the film look. Off by default: "
+                        + "it adds the print's own contrast and colour, which at full strength "
+                        + "over a tuned tone curve is usually too much.")
+                Spacer(minLength: 0)
+                bypassToggle(
+                    isOn: Binding(
+                        get: { enabled },
+                        set: { model.setEnabled(.print, $0) }),
+                    label: "print")
+            }
+            VStack(alignment: .leading, spacing: Space.s) {
+                cubePicker($model.look.printLUT, options: model.availablePrints)
+                control(
+                    "Strength", $model.look.printStrength, 0...1, format: "%.2f",
+                    default: model.defaultLook.printStrength)
+            }
+            .opacity(enabled ? 1 : 0.4)
+            .disabled(!enabled)
         }
+        .padding(.top, Space.xs)
+        // OVERRIDES FILM LOOK'S OWN `.disabled`, for the whole subsection. `.print` bypasses
+        // independently of `.filmLook` at the engine, so this switch — and, when it is on, the
+        // picker and strength above it — must stay reachable even with the look switched off.
+        .disabled(false)
     }
 
     private var toneStage: some View {
@@ -179,7 +211,7 @@ struct InspectorView: View {
 
     private var trimsStage: some View {
         stage(
-            "Trims", bypass: .trims,
+            "Colour", bypass: .trims,
             help: "The last small moves, after the curve. Warmth acts on the midtones "
                 + "only, so it barely moves a bright sky or a deep shadow."
         ) {
@@ -324,19 +356,20 @@ struct InspectorView: View {
     /// puts reference text in a popover rather than in the panel, and a paragraph of prose under
     /// every control is the fastest way to make a dense inspector unreadable.
     ///
-    /// A stage without `bypass` is the conversion, which is locked on.
+    /// EVERY STAGE HERE BYPASSES. Convert doesn't — it has no controls — so it is `convertNote`,
+    /// not this.
     ///
     /// SWITCHED OFF, THE CONTROLS DIM BUT KEEP THEIR VALUES, so switching back is the grade you
     /// had. A slider left live while its stage is off moves nothing, which reads as broken.
     private func stage<Content: View>(
-        _ title: String, bypass: Look.Stage? = nil,
+        _ title: String, bypass: Look.Stage,
         help: String? = nil, last: Bool = false,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         let open = Binding(
             get: { model.openStages.contains(title) },
             set: { model.setStage(title, open: $0) })
-        let enabled = bypass.map { !model.bypassed.contains($0) } ?? true
+        let enabled = !model.bypassed.contains(bypass)
         return DisclosureGroup(isExpanded: open) {
             VStack(alignment: .leading, spacing: Space.s) { content() }
                 .padding(.top, Space.s)
@@ -347,35 +380,32 @@ struct InspectorView: View {
                 Text(title)
                     .font(Type.heading)
                     .foregroundColor(enabled ? Palette.ink : Palette.inkTertiary)
-                if bypass == nil {
-                    Image(systemName: "lock.fill")
-                        .font(Type.glyph)
-                        .foregroundColor(Palette.inkTertiary)
-                }
                 if let help { HelpButton(text: help) }
                 Spacer(minLength: 0)
-                if let bypass {
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { enabled },
-                            set: { model.setEnabled(bypass, $0) })
-                    )
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    // Neutral, not the accent (docs/APP_DESIGN.md).
-                    .tint(Palette.inkSecondary)
-                    .help(
-                        enabled
-                            ? "Switch \(title.lowercased()) off" : "Switch \(title.lowercased()) on"
-                    )
-                }
+                bypassToggle(
+                    isOn: Binding(
+                        get: { enabled },
+                        set: { model.setEnabled(bypass, $0) }),
+                    label: title)
             }
             .contentShape(Rectangle())
         }
         .padding(.leading, Self.inset)
         .padding(.bottom, last ? 0 : Space.l)
+    }
+
+    /// The small switch beside a stage's name, and beside Print's inside Film look — same look
+    /// wherever a bypass is offered, built once so the two cannot drift.
+    private func bypassToggle(isOn: Binding<Bool>, label: String) -> some View {
+        Toggle("", isOn: isOn)
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            // Neutral, not the accent (docs/APP_DESIGN.md).
+            .tint(Palette.inkSecondary)
+            .help(
+                isOn.wrappedValue
+                    ? "Switch \(label.lowercased()) off" : "Switch \(label.lowercased()) on")
     }
 
     /// A film cube by stem, or none. The look and the print are the same control over different

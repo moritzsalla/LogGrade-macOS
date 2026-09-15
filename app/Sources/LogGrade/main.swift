@@ -23,17 +23,34 @@ struct RootView: View {
     /// The clips' portrait 9:16, derived rather than typed.
     private static let thumbnailHeight = (thumbnailWidth * 16 / 9).rounded()
 
+    /// A BRIEF SPLASH, NOT ANOTHER STARTUP SCREEN. `problems` skips it outright: a broken engine
+    /// is a sentence worth reading immediately, not a beat to sit through first (`StartupView`'s
+    /// own reasoning for naming problems before convert time applies here too).
+    @State private var showSplash = true
+    private static let splashDuration = 1.2
+
     var body: some View {
-        content
-            // ON THE WHOLE WINDOW, not on a dashed box inside one column. The startup screen says
-            // "or drag them onto this window" and it replaces that column entirely, so the only
-            // drop target in the app disappeared exactly when it was being advertised.
-            .onDrop(of: [.fileURL], isTargeted: nil) { providers in accept(providers) }
-            // Top trailing, which is where macOS puts a notification, and clear of both the clip
-            // list and the controls.
-            .overlay(alignment: .topTrailing) {
-                ToastView(toaster: toaster).padding(Space.l)
+        Group {
+            if showSplash && problems.isEmpty {
+                SplashView()
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + Self.splashDuration) {
+                            withAnimation(.easeOut(duration: 0.25)) { showSplash = false }
+                        }
+                    }
+            } else {
+                content
+                    // Top trailing, which is where macOS puts a notification, and clear of both
+                    // the clip list and the controls.
+                    .overlay(alignment: .topTrailing) {
+                        ToastView(toaster: toaster).padding(Space.l)
+                    }
             }
+        }
+        // ON THE WHOLE WINDOW, not on a dashed box inside one column, and on the splash too — a
+        // drop in the first 1.2 seconds is the drop target disappearing exactly when the empty
+        // state's "or drag them onto this window" is about to advertise it.
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in accept(providers) }
     }
 
     private var content: some View {
