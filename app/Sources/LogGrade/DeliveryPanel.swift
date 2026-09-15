@@ -292,7 +292,8 @@ struct DeliveryPanel: View {
                         .font(Type.caption).foregroundColor(Palette.lamp)
                 }
             } else {
-                Text("select a clip first")
+                // The box waits for the engine to measure the decoded frame (`GradeModel.cropGeometry`).
+                Text(model.selectedClip == nil ? "select a clip first" : "measuring the clip…")
                     .font(Type.caption).foregroundColor(Palette.inkTertiary)
             }
         }
