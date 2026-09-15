@@ -338,6 +338,49 @@ public struct Look: Equatable {
                                           options: [.prettyPrinted, .sortedKeys])
     }
 
+    /// A stage of the chain that can be switched off. The raw value is the inspector's title,
+    /// which is also the key its open state is remembered under.
+    public enum Stage: String, CaseIterable {
+        case correct = "Correct"
+        case halation = "Halation"
+        case filmLook = "Film look"
+        case print = "Print"
+        case tone = "Tone"
+        case trims = "Trims"
+        case grain = "Delivery"
+    }
+
+    /// This look with the given stages written as the values the engine leaves out, so a bypass
+    /// is a look like any other and the live tier, the exact frame and the export all agree.
+    ///
+    /// TONE IS NOT OFF THROUGH THE LOOK ALONE. Exposure matching solves the gamma per clip and
+    /// clamps it to at least 1.2, so an identity curve here still renders a curve unless the
+    /// render also runs with `MATCH=0` — see `matchesExposure(bypassing:)`.
+    ///
+    /// Grain only, for Delivery: the stabiliser has its own per-clip switch, and a second one
+    /// fighting it is worse than none.
+    public func bypassing(_ stages: Set<Stage>) -> Look {
+        var out = self
+        for stage in stages {
+            switch stage {
+            case .correct: out.correct = Correct()
+            case .halation: out.halation.strength = 0
+            case .filmLook: out.lookLUT = "none"
+            case .print: out.printLUT = "none"
+            case .tone:
+                out.tone = Tone(gamma: 1, pivot: tone.pivot, contrast: 1, toe: 0, shoulder: 0,
+                                black: 0)
+            case .trims: out.colour = Colour(saturation: 1, warmth: 0)
+            case .grain: out.grainStrength = 0
+            }
+        }
+        return out
+    }
+
+    public static func matchesExposure(bypassing stages: Set<Stage>) -> Bool {
+        !stages.contains(.tone)
+    }
+
     /// Writes a complete look.json somewhere the engine can be pointed at with LOOK_FILE, so a
     /// render never edits the checkout's own file.
     public func write(to url: URL) throws {

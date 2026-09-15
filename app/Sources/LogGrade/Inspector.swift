@@ -1,28 +1,13 @@
 import GradeKit
 import SwiftUI
 
-/// The chain, drawn as a spine.
-///
-/// A hairline rail runs down the inspector with one dot per stage: filled for the conversion,
-/// which is locked, open for the stages you can move, and hollow-dotted for the ones a still
-/// cannot show. Resolve shows a node graph and Baselight a layer stack for the same reason — the
-/// ORDER is the grade — and here the order is also a measured artefact: corrections before the
-/// conversion, tone after the look and on luma only. Drawing it as a line means the structure
-/// carries that rather than a paragraph having to.
+/// The chain, one stage per section, top to bottom in the order it runs. The order is a measured
+/// artefact — corrections before the conversion, tone after the look and on luma only — so the
+/// sections are never reordered.
 struct InspectorView: View {
     @ObservedObject var model: GradeModel
 
-    /// The height of a stage's title row, shared by the rail so the dot lines up with the words
-    /// rather than with a guess.
-    static let headingRow: CGFloat = 18
-
     private static let appliedGammaTolerance = 0.005
-
-    enum Mark {
-        case locked      // filled: not yours to move
-        case editable    // open
-        case unpreviewed // dotted: real, but a still cannot show it
-    }
 
     var body: some View {
         ScrollView {
@@ -44,7 +29,7 @@ struct InspectorView: View {
     }
 
     private var convertStage: some View {
-        stage("Convert", mark: .locked,
+        stage("Convert",
               help: "Apple Log to Rec.709, using Apple's own conversion. It is always "
                   + "applied and cannot be adjusted: its colour is more accurate than "
                   + "anything this app could do instead, and the cube carries a display "
@@ -56,7 +41,7 @@ struct InspectorView: View {
     }
 
     private var correctStage: some View {
-        stage("Correct", mark: .editable,
+        stage("Correct", bypass: .correct,
               help: "Exposure, white balance and the three wheels run before the "
                   + "conversion, on the log picture, where the highlights above white "
                   + "still exist. Brightening here keeps the highlights instead of "
@@ -79,7 +64,7 @@ struct InspectorView: View {
     }
 
     private var halationStage: some View {
-        stage("Halation", mark: .editable,
+        stage("Halation", bypass: .halation,
               help: "The warm glow film grows around bright things, where light reflects "
                   + "off the film base and exposes the red layer a second time.\n\nIt is "
                   + "added in linear light before the conversion, and only past edges: a "
@@ -103,7 +88,7 @@ struct InspectorView: View {
     }
 
     private var filmLookStage: some View {
-        stage("Film look", mark: .editable,
+        stage("Film look", bypass: .filmLook,
               help: "A film-emulation lookup, applied after the conversion.\n\nThe tone "
                   + "curve below was set with this cube already in the chain, so changing "
                   + "one without the other is a different grade rather than another "
@@ -115,7 +100,7 @@ struct InspectorView: View {
     }
 
     private var printStage: some View {
-        stage("Print", mark: .editable,
+        stage("Print", bypass: .print,
               help: "A print-film emulation — Kodak 2383 is the cinema print stock — "
                   + "applied after the film look, the way a negative is printed.\n\nIt "
                   + "adds the print's contrast and colour, which at full strength over a "
@@ -128,7 +113,7 @@ struct InspectorView: View {
     }
 
     private var toneStage: some View {
-        stage("Tone", mark: .editable,
+        stage("Tone", bypass: .tone,
               help: "Brightness and contrast, applied to the luma plane only so the "
                   + "colour is untouched. Applying a curve per channel crushes a "
                   + "saturated colour's two low channels harder than its high one, which "
@@ -151,7 +136,7 @@ struct InspectorView: View {
     }
 
     private var trimsStage: some View {
-        stage("Trims", mark: .editable,
+        stage("Trims", bypass: .trims,
               help: "The last small moves, after the curve. Warmth acts on the midtones "
                   + "only, so it barely moves a bright sky or a deep shadow.") {
             control("Saturation", $model.look.colour.saturation, 0.6...1.6,
@@ -162,13 +147,14 @@ struct InspectorView: View {
     }
 
     private var deliveryStage: some View {
-        stage("Delivery", mark: .unpreviewed,
+        stage("Delivery", bypass: .grain,
               help: "Grain and stabilisation are applied to the video, never to the "
                   + "preview. Both need moving footage to judge, so a still leaves them "
                   + "out rather than showing a version that is not what renders.\n\n"
                   + "Grain shadows and highlights set how much grain reaches black and "
                   + "white, as film prints do: most in the midtones, less at either end. "
-                  + "Both at 1 is flat grain.",
+                  + "Both at 1 is flat grain.\n\nThe switch turns grain off; the stabiliser "
+                  + "is switched per clip.",
               last: true) {
             control("Grain", $model.look.grainStrength, 0...20, format: "%.0f",
                     default: model.defaultLook.grainStrength)
@@ -205,7 +191,7 @@ struct InspectorView: View {
     /// print a value nothing applies. Exposure matching solves a gamma per clip from this one, so
     /// that every clip in a shoot gets the same look instead of the same curve.
     @ViewBuilder private var appliedGammaNote: some View {
-        if let applied = model.appliedGamma,
+        if !model.bypassed.contains(.tone), let applied = model.appliedGamma,
            abs(applied - model.look.tone.gamma) > Self.appliedGammaTolerance {
             Text(String(format: "This clip renders at %.3f. The slider sets the midtone for the "
                         + "shoot; each clip is solved from its own brightness so they match.",
@@ -246,13 +232,13 @@ struct InspectorView: View {
                 .buttonStyle(.borderless).font(Type.label)
             }
         }
-        // Aligned with the stage titles: the rail's inset, its dot, and the gap `stage` leaves.
-        .padding(.leading, Rail.inset + Rail.dot + Space.m)
+        .padding(.leading, Self.inset)
         .padding(.bottom, 18)
     }
 
-    /// One stage of the chain, collapsible, with its dot on the rail. The rail continues through
-    /// the row, so the chain reads as one line from the conversion down to delivery.
+    static let inset: CGFloat = 18
+
+    /// One stage of the chain, collapsible, with a switch that takes it out of the grade.
     ///
     /// COLLAPSIBLE BECAUSE MOST OF IT IS NOT IN USE AT ONCE. Thirty-four controls in one column is
     /// a wall, and a grading session touches one stage at a time. Which ones are open is
@@ -261,33 +247,49 @@ struct InspectorView: View {
     /// The long explanation that used to sit under each stage is behind the help button now. Apple
     /// puts reference text in a popover rather than in the panel, and a paragraph of prose under
     /// every control is the fastest way to make a dense inspector unreadable.
-    private func stage<Content: View>(_ title: String, mark: Mark, help: String? = nil,
-                                      last: Bool = false,
+    ///
+    /// A stage without `bypass` is the conversion, which is locked on.
+    ///
+    /// SWITCHED OFF, THE CONTROLS DIM BUT KEEP THEIR VALUES, so switching back is the grade you
+    /// had. A slider left live while its stage is off moves nothing, which reads as broken.
+    private func stage<Content: View>(_ title: String, bypass: Look.Stage? = nil,
+                                      help: String? = nil, last: Bool = false,
                                       @ViewBuilder content: @escaping () -> Content) -> some View {
         let open = Binding(get: { model.openStages.contains(title) },
                            set: { model.setStage(title, open: $0) })
-        return HStack(alignment: .top, spacing: Space.m) {
-            Rail(mark: mark, last: last)
-            DisclosureGroup(isExpanded: open) {
-                VStack(alignment: .leading, spacing: Space.s) { content() }
-                    .padding(.top, Space.s)
-            } label: {
-                HStack(spacing: Space.xs) {
-                    Text(title)
-                        .font(Type.heading)
-                        .foregroundColor(Palette.ink)
-                    if mark == .locked {
-                        Image(systemName: "lock.fill")
-                            .font(Type.glyph)
-                            .foregroundColor(Palette.inkTertiary)
-                    }
-                    if let help { HelpButton(text: help) }
-                    Spacer(minLength: 0)
+        let enabled = bypass.map { !model.bypassed.contains($0) } ?? true
+        return DisclosureGroup(isExpanded: open) {
+            VStack(alignment: .leading, spacing: Space.s) { content() }
+                .padding(.top, Space.s)
+                .opacity(enabled ? 1 : 0.4)
+                .disabled(!enabled)
+        } label: {
+            HStack(spacing: Space.xs) {
+                Text(title)
+                    .font(Type.heading)
+                    .foregroundColor(enabled ? Palette.ink : Palette.inkTertiary)
+                if bypass == nil {
+                    Image(systemName: "lock.fill")
+                        .font(Type.glyph)
+                        .foregroundColor(Palette.inkTertiary)
                 }
-                .contentShape(Rectangle())
+                if let help { HelpButton(text: help) }
+                Spacer(minLength: 0)
+                if let bypass {
+                    Toggle("", isOn: Binding(get: { enabled },
+                                             set: { model.setEnabled(bypass, $0) }))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        // Neutral, not the accent (docs/APP_DESIGN.md).
+                        .tint(Palette.inkSecondary)
+                        .help(enabled ? "Switch \(title.lowercased()) off" : "Switch \(title.lowercased()) on")
+                }
             }
-            .padding(.bottom, last ? 0 : Space.l)
+            .contentShape(Rectangle())
         }
+        .padding(.leading, Self.inset)
+        .padding(.bottom, last ? 0 : Space.l)
     }
 
     /// A film cube by stem, or none. The look and the print are the same control over different
@@ -402,45 +404,6 @@ struct InspectorView: View {
         f.maximumFractionDigits = precision
         f.positivePrefix = format.contains("+") ? "+" : ""
         return f
-    }
-}
-
-/// The rail: a dot for this stage and the line to the next one.
-private struct Rail: View {
-    let mark: InspectorView.Mark
-    let last: Bool
-
-    static let inset: CGFloat = 18
-    static let dot: CGFloat = 7
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Group {
-                switch mark {
-                case .locked:
-                    Circle().fill(Palette.plate).frame(width: Self.dot, height: Self.dot)
-                case .editable:
-                    Circle().strokeBorder(Palette.inkSecondary, lineWidth: 1.2)
-                        .frame(width: Self.dot, height: Self.dot)
-                case .unpreviewed:
-                    Circle().strokeBorder(Palette.inkTertiary, style: StrokeStyle(lineWidth: 1.2,
-                                                                                  dash: [1.6, 1.6]))
-                        .frame(width: Self.dot, height: Self.dot)
-                }
-            }
-            // CENTRED ON THE TITLE'S LINE, not nudged down by a magic number. The dot used to
-            // carry a hand-tuned top padding that was correct for the old flat layout and wrong
-            // once each stage became a disclosure group with its own chevron and insets.
-            .frame(height: InspectorView.headingRow)
-            if !last {
-                Rectangle()
-                    .fill(mark == .unpreviewed ? Palette.hairline.opacity(0.5) : Palette.hairline)
-                    .frame(width: 1)
-                    .frame(maxHeight: .infinity)   // the line IS the chain; it has to reach
-            }
-        }
-        .frame(width: Self.dot)
-        .padding(.leading, Self.inset)
     }
 }
 

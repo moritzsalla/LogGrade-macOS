@@ -113,6 +113,29 @@ final class LookTests: XCTestCase {
         XCTAssertEqual(written["_comment"] as? [String], original["_comment"] as? [String],
                        "the commentary came back changed")
     }
+
+    /// A switched-off stage must be one the engine leaves out, not a small move nobody chose.
+    func testABypassedStageIsOneTheEngineLeavesOut() throws {
+        var look = try lookFixture()
+        look.correct.exposure = 0.5
+        look.halation.strength = 0.8
+        look.printLUT = "kodak_2383"
+        look.tone.toe = 0.3
+        let off = look.bypassing(Set(Look.Stage.allCases))
+        XCTAssertTrue(off.correct.isNeutral)
+        XCTAssertTrue(off.halation.isNeutral)
+        XCTAssertEqual(off.lookLUT, "none")
+        XCTAssertEqual(off.printLUT, "none")
+        XCTAssertEqual(off.colour, Look.Colour(saturation: 1, warmth: 0))
+        XCTAssertEqual(off.grainStrength, 0)
+        let curve = ToneCurve.generated(tone: off.tone)
+        for x in stride(from: 0.0, through: 1.0, by: 0.05) {
+            XCTAssertEqual(curve.value(at: x), x, accuracy: 1e-3, "tone off is not identity at \(x)")
+        }
+        XCTAssertFalse(Look.matchesExposure(bypassing: [.tone]),
+                       "matching would re-solve the identity gamma into a curve")
+        XCTAssertEqual(look.bypassing([]), look)
+    }
 }
 
 final class ProjectTests: XCTestCase {
@@ -421,4 +444,5 @@ final class WheelTests: XCTestCase {
         correct.setValue(.slope, 0, 1.3)
         XCTAssertEqual(correct.slope, "1.3,1.2,1.2")
     }
+
 }
