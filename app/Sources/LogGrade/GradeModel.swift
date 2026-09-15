@@ -27,7 +27,23 @@ final class GradeModel: ObservableObject {
 
     var isStale: Bool {
         guard let rendered = renderedLook, preview.image != nil else { return false }
-        return rendered != look
+        return rendered != effectiveLook
+    }
+
+    /// Stages switched off in the inspector. Everything that renders — live, exact and export —
+    /// reads `effectiveLook`, so what you see with a stage off is what the shoot renders.
+    ///
+    /// NOT SAVED, deliberately: not in the preset, the project or the defaults. A bypass left on
+    /// from yesterday's comparison silently renders a whole shoot without its film look.
+    @Published var bypassed: Set<Look.Stage> = []
+
+    var effectiveLook: Look { look.bypassing(bypassed) }
+
+    func setEnabled(_ stage: Look.Stage, _ enabled: Bool) {
+        if enabled { bypassed.remove(stage) } else { bypassed.insert(stage) }
+        refreshCurve()
+        liveUpdate()
+        renderPreview()
     }
 
     /// The project: presets, delivery, and what is decided per clip. Held here because the crop
@@ -198,7 +214,7 @@ final class GradeModel: ObservableObject {
             return
         }
         refreshCurve()
-        pendingLook = look
+        pendingLook = effectiveLook
         startGradeIfIdle()
     }
 
@@ -391,8 +407,10 @@ final class GradeModel: ObservableObject {
     /// it so that every clip lands where the look was tuned. Drawing the slider value gives a
     /// graph of a curve nothing applies.
     func refreshCurve() {
+        let look = effectiveLook
         var tone = look.tone
-        if let clip = selectedClip?.url, let measured = measuredYAVG[clip] {
+        if Look.matchesExposure(bypassing: bypassed),
+           let clip = selectedClip?.url, let measured = measuredYAVG[clip] {
             tone.gamma = ToneCurve.solvedGamma(clipYAVG: measured,
                                                referenceYAVG: look.matchReferenceYAVG,
                                                referenceGamma: tone.gamma)
@@ -478,6 +496,7 @@ final class GradeModel: ObservableObject {
     func convert(queue: RenderQueue) {
         guard let clips = clipEntries, let destination = outputDirectory else { return }
         let project = self.project
+        let match = Look.matchesExposure(bypassing: bypassed)
         // The look file is scratch and stays in the scratch directory; the RENDER goes where the
         // person said, or beside their footage.
         let lookFile = workDirectory.appendingPathComponent("render-look.json")
@@ -487,7 +506,7 @@ final class GradeModel: ObservableObject {
         do {
             try FileManager.default.createDirectory(at: workDirectory,
                                                     withIntermediateDirectories: true)
-            try look.write(to: lookFile)
+            try effectiveLook.write(to: lookFile)
             try FileManager.default.createDirectory(at: destination,
                                                     withIntermediateDirectories: true)
         } catch {
@@ -502,6 +521,7 @@ final class GradeModel: ObservableObject {
             queue.start(environment: { stem in
                 var env = project.environment(for: stem, lookFile: lookFile)
                 env["GRADE_WORK_DIR"] = destination.path
+                if !match { env["MATCH"] = "0" }
                 return env
             })
         }
@@ -622,7 +642,8 @@ final class GradeModel: ObservableObject {
 
     func renderPreview() {
         guard let clip = selectedClip, clip.isUsable else { return }
-        let look = self.look
+        let look = effectiveLook
+        let match = Look.matchesExposure(bypassing: bypassed)
         let seconds = previewSeconds
 
         // A NEWER REQUEST CANCELS THE ONE IN FLIGHT. Moving three controls in a row used to mean
@@ -645,7 +666,7 @@ final class GradeModel: ObservableObject {
             guard let self else { return }
             do {
                 let frame = try self.renderer.render(
-                    clip: clip.url, seconds: seconds, look: look,
+                    clip: clip.url, seconds: seconds, look: look, match: match,
                     onStart: { [weak self] process in self?.previewProcess = process })
                 guard generation == self.previewGeneration else { return }
                 let image = NSImage(contentsOf: frame.url)

@@ -4,8 +4,8 @@ Each rule came from grading real clips or from a screenshot, not from theory.
 
 - **The photograph is the only saturated thing on screen.** Surround, panels and ink are neutral
   greys, because any cast in the chrome biases judgement.
-- **The accent is spent on three things only:** the rail's locked-stage dot, the selected clip's
-  edge, and the curve. A yellow slider track everywhere competes with the picture. The lamp colour
+- **The accent is spent sparingly:** the selected clip's edge and the curve, not controls. A
+  yellow slider track or stage switch everywhere competes with the picture. The lamp colour
   is for refusals only, and there is no green.
 - **Numbers use a POSIX formatter.** Values are written into `look.json` with dots, and a locale
   decimal comma made the panel disagree with the file.
