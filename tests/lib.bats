@@ -2727,6 +2727,33 @@ sys.exit("; ".join(problems) or None)
 		|| fail "strength-0 grain moved the picture: $(cmp -l "$dir/clean.yuv" "$dir/grained.yuv" | head -3)"
 }
 
+@test "10-bit weighted grain at strength 0 leaves the picture byte-identical" {
+	# Every grey the grain path writes is in code values: 8-bit numbers on a 10-bit plane put the
+	# merge's zero at 128 of 1023, and the delivery goes dark with no grain to blame. Weighted, so the
+	# mask and the flat plate are both in the graph.
+	local dir="$BATS_TEST_TMPDIR/plate10" w=64 h=64 src
+	mkdir -p "$dir"
+	DELIVERY_BITS=10
+	src="nullsrc=s=${w}x${h}:d=0.1:r=24,geq=lum='64+876*X/W':cb=512:cr=512,format=yuv420p10le,${DELIVERY_SETPARAMS}"
+	ffmpeg -v error -y -f lavfi -i "$src" -frames:v 1 -f rawvideo -pix_fmt yuv420p10le "$dir/clean.yuv"
+	ffmpeg -v error -y -f lavfi -i "$src" -f lavfi -i "$(grain_plate "$w" "$h" 24)" \
+		-filter_complex "[0:v]null[b];[1:v]$(delivery_grain_branch "$w" "$h" 0)[g];$(delivery_grain_merge b g o 0.35 0.5)" \
+		-map "[o]" -frames:v 1 -f rawvideo -pix_fmt yuv420p10le "$dir/grained.yuv"
+	cmp -s "$dir/clean.yuv" "$dir/grained.yuv" \
+		|| fail "10-bit strength-0 grain moved the picture: $(cmp -l "$dir/clean.yuv" "$dir/grained.yuv" | head -3)"
+}
+
+@test "a DELIVERY_BITS that is not 8 or 10 is refused before anything renders" {
+	local work="$BATS_TEST_TMPDIR/bad-bits"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	DELIVERY_BITS=12 FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -ne 0 ] || fail "rendered with DELIVERY_BITS=12"
+	[[ "$output" == *"DELIVERY_BITS must be 8 or 10"* ]] || fail "refused without naming DELIVERY_BITS: $output"
+	[ ! -d "$work/dist/frames" ] || fail "DELIVERY_BITS=12 got as far as rendering"
+}
+
 @test "flat grain weights leave the mask out of the graph" {
 	# Absent, not idle: flat grain is the plain blend, with no mask built for nothing.
 	[ "$(delivery_grain_merge b g o 1 1)" = "[b][g]${DELIVERY_BLEND}[o]" ] \

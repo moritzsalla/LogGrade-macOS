@@ -245,6 +245,7 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(env["CROP_OFFSET"], "600")
         XCTAssertEqual(env["HEIGHT"], "1080")
         XCTAssertEqual(env["FPS_OUT"], "12")
+        XCTAssertEqual(env["DELIVERY_BITS"], "8")
         XCTAssertEqual(env["STAB"], "0")
         XCTAssertEqual(env["LOOK_FILE"], "/tmp/look.json")
         // The app sets variables the engine documents; it does not describe the image.
@@ -324,7 +325,7 @@ final class PresetTests: XCTestCase {
         var project = Project(
             presets: [.init(name: "shipped", look: try aLook())],
             activePreset: "shipped",
-            delivery: .init(targets: [.reels, .feed], height: 2560, fps: 24))
+            delivery: .init(targets: [.reels, .feed], height: 2560, fps: 24, tenBit: true))
         project.clips["IMG_0609"] = .init(cropOffset: 812, previewSeconds: 4, stabilise: false)
         project.clips["IMG_0610"] = .init(cropOffset: nil)
 
@@ -341,6 +342,7 @@ final class PresetTests: XCTestCase {
         XCTAssertEqual(reopened.clips["IMG_0609"]?.previewSeconds, 4)
         XCTAssertEqual(reopened.delivery.height, 2560)
         XCTAssertEqual(reopened.delivery.fps, 24)
+        XCTAssertTrue(reopened.delivery.tenBit)
         XCTAssertEqual(reopened.presets.map(\.name), ["shipped"])
         XCTAssertEqual(reopened.active?.look.tone.gamma, 2.02)
     }

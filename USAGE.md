@@ -30,6 +30,7 @@ Apple's conversion LUT is not in the repo; see [`luts/apple/SOURCE.txt`](luts/ap
 | `HEIGHT=<px>` | 9:16 reference height, default 1920 |
 | `CROP_OFFSET=<px\|centre>` | offset for cropping deliverables without their own: from the top, or from the left on a frame wider than the window. No default |
 | `FPS_OUT=<n>` | output rate; integer relations only |
+| `DELIVERY_BITS=8\|10` | 8: H.264, default. 10: HEVC Main 10, for a destination that keeps it (a Mac, a phone, an editor); social platforms re-encode to 8-bit |
 | `AUDIO_HIGHPASS_HZ=<hz\|0>` | delivered-audio high-pass, default 60; 0 off. Never applied to the master |
 | `LOOK=<name\|none>` | film cube from `luts/looks/` |
 | `PRINT=<name\|none>` | print cube from `luts/print/` |

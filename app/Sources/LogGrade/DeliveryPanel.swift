@@ -31,6 +31,7 @@ struct DeliveryPanel: View {
             customTargetsSection
             sizeRow
             sizeCostNote
+            depthRow
             stabiliseRow
             cropSection
             workloadNote
@@ -147,6 +148,31 @@ struct DeliveryPanel: View {
         let linear = Double(model.project.delivery.height) / 1920
         let ratio = linear * linear
         return String(format: ratio == ratio.rounded() ? "%.0f" : "%.1f", ratio)
+    }
+
+    // Says where it helps and where it does not, because "10-bit" alone reads as simply better, and a
+    // file re-encoded by a platform gains nothing from it.
+    private var depthRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(
+                "10-bit file (HEVC)",
+                isOn: Binding(
+                    get: { model.project.delivery.tenBit },
+                    set: { model.project.delivery.tenBit = $0 })
+            )
+            .toggleStyle(.checkbox)
+            .font(Type.label)
+            .foregroundColor(Palette.inkSecondary)
+            if model.project.delivery.tenBit {
+                Text(
+                    "Smoother skies and gradients on a Mac, an iPhone or in an editor. Social "
+                        + "platforms convert uploads to 8-bit, so it gains nothing there."
+                )
+                .font(Type.caption)
+                .foregroundColor(Palette.inkTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     @ViewBuilder private var cropSection: some View {

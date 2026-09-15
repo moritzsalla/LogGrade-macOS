@@ -61,6 +61,9 @@ public struct Project: Equatable {
         public var height: Int
         /// Nil keeps the source's rate, which is the only lossless answer.
         public var fps: Int?
+        /// HEVC Main 10 rather than 8-bit H.264. Off by default because the platforms re-encode to
+        /// 8-bit; a project file without the key predates the choice and was 8-bit.
+        public var tenBit: Bool
         /// 1080 wide at 9:16: what Instagram re-encodes to, and the size the grain and the
         /// sharpener were tuned at. A project that names no height gets it, and the interface
         /// warns about anything larger.
@@ -68,11 +71,12 @@ public struct Project: Equatable {
 
         public init(
             targets: [Deliverable] = [.reels], height: Int = defaultHeight,
-            fps: Int? = nil
+            fps: Int? = nil, tenBit: Bool = false
         ) {
             self.targets = targets
             self.height = height
             self.fps = fps
+            self.tenBit = tenBit
         }
 
         /// Whether anything selected crops this clip, and so has a box to draw. Per clip, because
@@ -244,6 +248,7 @@ public struct Project: Equatable {
         var env: [String: String] = ["LOOK_FILE": lookFile.path]
         env["HEIGHT"] = String(delivery.height)
         if let fps = delivery.fps { env["FPS_OUT"] = String(fps) }
+        env["DELIVERY_BITS"] = delivery.tenBit ? "10" : "8"
         // The whole set, comma separated, in order. This was `FEED=1`, which could only ever say
         // one thing about one shape.
         env["DELIVERABLES"] = delivery.targets.map(\.spec).joined(separator: ",")
@@ -328,6 +333,7 @@ extension Project {
             "height": delivery.height,
         ]
         if let fps = delivery.fps { deliveryBlock["fps"] = fps }
+        if delivery.tenBit { deliveryBlock["ten_bit"] = true }
         var root: [String: Any] = [
             "version": Self.fileVersion,
             "presets": presetList,
@@ -407,7 +413,8 @@ extension Project {
                 targets: targets,
                 height: (d["height"] as? NSNumber)?.intValue
                     ?? Delivery.defaultHeight,
-                fps: (d["fps"] as? NSNumber)?.intValue),
+                fps: (d["fps"] as? NSNumber)?.intValue,
+                tenBit: (d["ten_bit"] as? NSNumber)?.boolValue ?? false),
             clips: clipMap,
             outputDirectory: (root["output_directory"] as? String).map {
                 URL(fileURLWithPath: $0)

@@ -23,6 +23,14 @@ non-technical photographer could use the result.
 
 ## Open work
 
+- **Grade the shipped look before Apple's cube, not after it.** Tone, saturation and warmth run on
+  the Rec.709 picture, after `AppleLogToRec709` has squeezed +2.4 to +6 stops into outputs 0.85–1.0
+  and hard-clipped colour outside Rec.709. Move them into log or linear, rendering last. The film
+  conversions (cinema-pipeline) already do this for their path, with exposure metered in linear and
+  an Oklab gamut fit; the Apple path still takes exposure from MATCH's gamma after the cube. Measure
+  first: the same tone move before and after the cube, above +2 stops.
+- **Local adjustments** (a sky or a face held separately). Global grading uses Apple Log's latitude
+  only across the whole frame. A product decision before a design: what a non-technical user draws.
 - **Judge sharpen and grain at other heights by eye.** Measured (`docs/PIPELINE.md`, sheets in
   `dist/measure-sizes/`). Grain stays ~1 output px, so it is 1.7× coarser relative to the picture at
   960 than at 1920.
