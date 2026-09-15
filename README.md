@@ -14,6 +14,12 @@ professional software. This tool gets about as much image quality out of iPhone 
 format actually holds, without opening an NLE. The final look is Kodak Portra, but that's one line
 in `look.json`.
 
+**Why not an existing app?** Log files are ordinary video, so any app opens them, but they look
+flat and grey until they are converted and graded. The free tool that does that properly is
+DaVinci Resolve, a full professional suite. Final Cut Pro converts Apple Log, but it is a paid
+editor and the look is still yours to build. Editors that accept LUTs expect you to bring one. None
+of them is quick: footage in, a good look, a file out.
+
 **How?** Apple Log → graded Rec.709 in one ffmpeg pass. 10-bit preserved to delivery, tone curve
 applied to luma only, LUTs generated rather than guessed. The app is a window over that chain — it
 sets environment variables and reads the engine's events, and never builds a filter graph itself.
