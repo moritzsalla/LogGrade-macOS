@@ -2689,6 +2689,20 @@ sys.exit("; ".join(problems) or None)
 	[ "$verdict" = "chroma-untouched" ] || fail "weighted grain moved the chroma planes"
 }
 
+@test "grain at strength 0 leaves the picture byte-identical" {
+	# grainmerge is A+B-128. `color=c=gray` is Y=126, which darkened every final by 2 code values
+	# with no grain visible to blame. Byte-identical, because any offset is the plate's.
+	local dir="$BATS_TEST_TMPDIR/plate" w=64 h=64 src
+	mkdir -p "$dir"
+	src="nullsrc=s=${w}x${h}:d=0.1:r=24,geq=lum='16+219*X/W':cb=128:cr=128,format=yuv420p,${DELIVERY_SETPARAMS}"
+	ffmpeg -v error -y -f lavfi -i "$src" -frames:v 1 -f rawvideo -pix_fmt yuv420p "$dir/clean.yuv"
+	ffmpeg -v error -y -f lavfi -i "$src" -f lavfi -i "$(grain_plate "$w" "$h" 24)" \
+		-filter_complex "[0:v]null[b];[1:v]$(delivery_grain_branch "$w" "$h" 0)[g];$(delivery_grain_merge b g o 1 1)" \
+		-map "[o]" -frames:v 1 -f rawvideo -pix_fmt yuv420p "$dir/grained.yuv"
+	cmp -s "$dir/clean.yuv" "$dir/grained.yuv" \
+		|| fail "strength-0 grain moved the picture: $(cmp -l "$dir/clean.yuv" "$dir/grained.yuv" | head -3)"
+}
+
 @test "flat grain weights leave the mask out of the graph" {
 	# Absent, not idle: flat grain is the plain blend, with no mask built for nothing.
 	[ "$(delivery_grain_merge b g o 1 1)" = "[b][g]${DELIVERY_BLEND}[o]" ] \

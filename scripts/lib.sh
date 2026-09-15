@@ -1289,11 +1289,15 @@ delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-pre
 # planes — measured U-plane residual sd 0.000, i.e. verifiably luma-only. That matters because the
 # hqdn3d pass exists to clean chroma up, and grain must not put any back.
 #
+# THE PLATE'S LUMA IS SET TO 128, not left at `gray`'s. grainmerge is A+B-128, and `color=c=gray`
+# converts to Y=126, so every final came out 2 code values darker with nothing on screen to blame.
+#
 # c0s is the one number that wants an eye rather than a measurement, so it is look.json's
 # grain.strength rather than a constant here. Clustered grain reads stronger per unit amplitude than
 # per-pixel, so a strength carried over from per-pixel grain renders heavier than it did.
 grain_plate() {  # grain_plate <w> <h> <fps>
-	printf 'color=c=gray:s=%sx%s:r=%s' "$(( $1 / 2 ))" "$(( $2 / 2 ))" "$3"
+	printf 'color=c=gray:s=%sx%s:r=%s,format=yuv420p,lutyuv=y=128:u=128:v=128' \
+		"$(( $1 / 2 ))" "$(( $2 / 2 ))" "$3"
 }
 
 delivery_grain_branch() {  # delivery_grain_branch <w> <h> <strength>
