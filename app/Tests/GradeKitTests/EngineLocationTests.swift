@@ -23,6 +23,25 @@ final class EngineLocationTests: XCTestCase {
         XCTAssertTrue(unexpected.isEmpty, "unexpected preflight problems: \(unexpected)")
     }
 
+    /// The app offers presets/ as it finds them, so a file that fails to read as a complete look
+    /// would vanish from the menu in silence.
+    func testEveryShippedPresetLoadsAndItsConversionResolves() throws {
+        let engine = try engineCheckout()
+        let files = try FileManager.default.contentsOfDirectory(
+            at: engine.presetFolder, includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "json" }
+        let presets = engine.shippedPresets()
+        XCTAssertEqual(presets.count, files.count, "a preset file did not load")
+        XCTAssertGreaterThanOrEqual(presets.count, 4)
+        for preset in presets {
+            XCTAssertTrue(preset.look.isFilmConversion, preset.name)
+            XCTAssertNotNil(
+                engine.conversionCube(named: preset.look.convertCube),
+                "\(preset.name) names a cube that is not there")
+        }
+        XCTAssertNil(engine.conversionCube(named: "../apple/AppleLogToRec709-v1.0"))
+    }
+
     func testPreflightNamesEveryMissingPiece() throws {
         let empty = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)

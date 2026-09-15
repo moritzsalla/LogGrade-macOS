@@ -27,8 +27,32 @@ public final class PreviewRenderer {
         /// the SOLVED one, or they describe a render that never happens.
         public let yavg: Double?
         public let gamma: Double?
+        /// Under a film conversion, the exposure and white balance the engine metered for this clip
+        /// and added to the look's correction. Zero under Apple's conversion or without matching.
+        public let metered: Metered
         /// The decoded frame, which is how the app learns a clip's orientation.
         public let sourceSize: FrameSize?
+    }
+
+    public struct Metered: Equatable {
+        public var exposure: Double
+        public var temp: Double
+        public var tint: Double
+
+        public init(exposure: Double = 0, temp: Double = 0, tint: Double = 0) {
+            self.exposure = exposure
+            self.temp = temp
+            self.tint = tint
+        }
+
+        /// A correction with this added, as `correction_args` adds it in the engine.
+        public func applied(to correct: Look.Correct) -> Look.Correct {
+            var out = correct
+            out.exposure += exposure
+            out.temp += temp
+            out.tint += tint
+            return out
+        }
     }
 
     /// The clip's post-CST mean, measured once by the engine and remembered here. It does not
@@ -106,6 +130,10 @@ public final class PreviewRenderer {
             seconds: seconds,
             yavg: planned?.double("yavg"),
             gamma: planned?.double("gamma"),
+            metered: Metered(
+                exposure: planned?.double("metered_exposure") ?? 0,
+                temp: planned?.double("metered_temp") ?? 0,
+                tint: planned?.double("metered_tint") ?? 0),
             sourceSize: planned.flatMap { p in
                 p.int("width").flatMap { w in
                     p.int("height").map { FrameSize(width: w, height: $0) }

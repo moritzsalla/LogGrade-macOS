@@ -67,6 +67,16 @@ overshoots. The curve is applied to luma and the original chroma is kept, via `m
 - **The filmic route** (`make-filmic-lut.py`, log → linear → filmic → Rec.709). It gave a better
   tone range, but lost on colour. A per-channel curve cannot do a BT.2020 gamut matrix, so it
   desaturated, and the compensating saturation overshot blue to 2.45.
+- **Grading after Apple's CST for a film look.** The CST lands log 0.75–1.0 on output 0.89–1.0, so
+  a look after it works on highlights already squeezed; a scene-referred rendering of the same
+  frame measured 38% more sky contrast at matched colour. The film presets replace the CST instead.
+- **Kodak 2383/2393 print on Vision3 for the large-format look.** Authentic, but the sky went cream
+  and reds muted. The preset scans the negative instead (`luts/film/CHANGELOG.txt`).
+- **A two-point scanner balance** (mid grey and +2 stops) left a stock's fogged toe magenta. The
+  scan balances every channel onto the green layer's grey curve, then adds back crossover measured
+  from −5 stops and mid grey.
+- **Other denoisers for the log denoise.** `hqdn3d` chroma tinted static colour and smeared red
+  while panning; `nlmeans`, `removegrain` and `dctdnoiz` negotiate 8-bit.
 - **A uniform saturation boost.** `hue=s` 1.2→1.3 took red purity from 0.33 to 0.22: neon again. A
   multiplier amplifies whatever is already most saturated.
 - **`curves` with more than about 3 uneven points.** The spline overshoots above identity: a

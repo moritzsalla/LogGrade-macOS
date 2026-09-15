@@ -63,6 +63,7 @@ OUT="$(graded_master_path "$WORK" "$CLIP")"
 #
 # Both answers are taken BEFORE the test, never inside it: a generator that fails inside `[ ... ]`
 # answers with an empty string, which compares as "not active" and waves the master through.
+# shellcheck disable=SC2119  # no metered offsets: this path never meters
 CORRECT_STATE="$(correction_state)" || exit 1
 HAL_STATE="$(halation_state)" || exit 1
 if [ "$CORRECT_STATE" = "active" ] || [ "$HAL_STATE" = "active" ]; then

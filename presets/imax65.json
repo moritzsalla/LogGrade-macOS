@@ -1,0 +1,68 @@
+{
+  "_comment": [
+    "A film preset. convert.cube renders Apple Log straight through a stock baked from spektrafilm",
+    "(luts/film/CHANGELOG.txt), so look, print and tone are neutral: a curve on top would bend the",
+    "stock's own. Each clip's exposure and white balance are metered in linear before the cube",
+    "(scripts/solve-exposure.py) against match.reference_stops; correct.* still adds on top.",
+    "",
+    "Vision3 250D scanned as a digital-intermediate 65mm finish: neutral, deep blacks, a sky",
+    "that holds. At 65mm the grain is barely there, and Vision3's rem-jet backing all but",
+    "stops halation, so both are faint; the sharpener is the strongest of the presets."
+  ],
+  "convert": {
+    "cube": "imax65"
+  },
+  "correct": {
+    "exposure": 0.0,
+    "temp": 0.0,
+    "tint": 0.0,
+    "slope": "1,1,1",
+    "offset": "0,0,0",
+    "power": "1,1,1",
+    "lum_mix": 1.0
+  },
+  "halation": {
+    "strength": 0.04,
+    "threshold": 1.0,
+    "radius": 0.006,
+    "tint": "1,0.3,0.05"
+  },
+  "look": {
+    "lut": "none",
+    "strength": 1.0
+  },
+  "print": {
+    "lut": "none",
+    "strength": 1.0
+  },
+  "tone": {
+    "gamma": 1.0,
+    "pivot": 0.5,
+    "contrast": 1.0,
+    "toe": 0.0,
+    "shoulder": 0.0,
+    "black": 0.0
+  },
+  "colour": {
+    "saturation": 1.0,
+    "warmth": 0.0
+  },
+  "grain": {
+    "strength": 2,
+    "shadows": 1.0,
+    "highlights": 0.5
+  },
+  "stabilisation": {
+    "smoothing": 30
+  },
+  "match": {
+    "reference_yavg": 609,
+    "reference_stops": -0.4
+  },
+  "finish": {
+    "denoise": 1,
+    "sharpen": 1.0,
+    "gauge": "none"
+  },
+  "name": "IMAX 65mm"
+}

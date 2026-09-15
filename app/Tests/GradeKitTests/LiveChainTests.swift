@@ -117,10 +117,16 @@ final class LiveChainTests: XCTestCase {
         // `ToneCurvePortTests` checks separately. Taking it from the event keeps this a test of
         // the picture rather than of the solve.
         if let gamma = exact.gamma { tone.gamma = gamma }
+        // Under a film conversion the engine adds what it metered to the correction, as the app does.
+        let correct = look.isFilmConversion ? exact.metered.applied(to: look.correct) : look.correct
         let correction =
-            look.correct.isNeutral
+            correct.isNeutral
             ? nil
-            : CorrectionCube.cube(for: look.correct, size: 33)
+            : CorrectionCube.cube(for: correct, size: 33)
+        let conversion =
+            look.isFilmConversion
+            ? try Cube3D(contentsOf: XCTUnwrap(rig.engine.conversionCube(named: look.convertCube)))
+            : rig.conversion
         let sourceImage = try source(rig)
         let chain = LiveChain(
             stages: LiveChain.colourStages(
@@ -128,7 +134,7 @@ final class LiveChainTests: XCTestCase {
                 halation: LiveHalation(
                     look.halation,
                     frameLongEdge: max(sourceImage.width, sourceImage.height)),
-                conversion: rig.conversion,
+                conversion: conversion,
                 look: look.lookLUT == "none" ? nil : rig.lookCube,
                 lookStrength: look.lookStrength,
                 print: rig.engine.printCube(named: look.printLUT)
@@ -177,6 +183,9 @@ final class LiveChainTests: XCTestCase {
         withHalation.halation = Look.Halation(
             strength: 0.8, threshold: 1, radius: 0.006,
             tint: "1,0.3,0.05")
+        let filmPreset = try XCTUnwrap(
+            rig.engine.shippedPresets().first { $0.look.convertCube == "rz67_portra400" }
+        ).look
 
         // The percentile each case is held to; see above for why a print needs more.
         let edgeBound = 24.0
@@ -194,6 +203,9 @@ final class LiveChainTests: XCTestCase {
             ("halation", withHalation, edgeBound),
             ("a print over a weakened look", withPrint, printedEdgeBound),
             ("no film look", withoutLook, edgeBound),
+            // The conversion swapped for a film cube, with the engine's metered exposure and white
+            // balance in the correction.
+            ("a film preset", filmPreset, edgeBound),
         ]
         for (name, look, percentileBound) in cases {
             let (mean, p999, worst) = try compare(rig, look: look)

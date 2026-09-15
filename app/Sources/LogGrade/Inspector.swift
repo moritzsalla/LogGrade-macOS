@@ -45,16 +45,29 @@ struct InspectorView: View {
     /// full collapsible section made you skip past an empty row before reaching the first control
     /// that does something. Still worth the one line, and the help button: it is real colour work
     /// on the way to the picture, and someone will ask why nothing here is adjustable.
-    private var convertNote: some View {
+    @ViewBuilder private var convertNote: some View {
         HStack(spacing: Space.xs) {
-            Text("Converted from Apple Log to Rec.709 first, always.")
-                .font(Type.caption)
-                .foregroundColor(Palette.inkTertiary)
-            HelpButton(
-                text: "Using Apple's own conversion. It is always applied and cannot be "
-                    + "adjusted: its colour is more accurate than anything this app could do "
-                    + "instead, and the cube carries a display rendering Apple has not "
-                    + "published.")
+            if model.look.isFilmConversion {
+                Text("Rendered through film: \(model.look.convertCube).")
+                    .font(Type.caption)
+                    .foregroundColor(Palette.inkTertiary)
+                HelpButton(
+                    text: "This preset replaces Apple's conversion with a film stock simulated "
+                        + "from its datasheets (spektrafilm), rendered straight from the log "
+                        + "picture so the highlights keep their latitude. The stock is the tone "
+                        + "and colour, so leave the film look and tone neutral. Each clip's "
+                        + "exposure and white balance are metered before it; Correct adds to "
+                        + "that.")
+            } else {
+                Text("Converted from Apple Log to Rec.709 first, always.")
+                    .font(Type.caption)
+                    .foregroundColor(Palette.inkTertiary)
+                HelpButton(
+                    text: "Using Apple's own conversion. It is always applied and cannot be "
+                        + "adjusted: its colour is more accurate than anything this app could do "
+                        + "instead, and the cube carries a display rendering Apple has not "
+                        + "published. The film presets replace it.")
+            }
         }
         .padding(.leading, Self.inset)
         .padding(.bottom, Space.l)
