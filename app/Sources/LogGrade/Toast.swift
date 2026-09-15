@@ -2,11 +2,12 @@ import SwiftUI
 
 /// A short message that appears, says one thing, and leaves.
 ///
-/// WHAT IT IS FOR. Two moments in this app finish while you are looking somewhere else: a clip
-/// finishing its first decode so it can be graded, and an export finishing. Both used to be
-/// visible only as a row changing colour in a panel you may not have open. A notification that
-/// dismisses itself is what macOS uses for exactly this — something worth knowing, not worth
-/// interrupting for.
+/// WHAT IT IS FOR. An export finishes while you are looking somewhere else — used to be visible
+/// only as a row changing colour in the queue panel, which you may not have open — and a project
+/// that failed to save or open needs saying, not just refusing. A notification that dismisses
+/// itself is what macOS uses for exactly this — something worth knowing, not worth interrupting
+/// for. NOT for a clip's first decode: the controls going live is that moment's own notice, and a
+/// toast in the corner only sat on top of them (`GradeModel.refreshSource`).
 struct Toast: Identifiable, Equatable {
     let id = UUID()
     let symbol: String

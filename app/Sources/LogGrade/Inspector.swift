@@ -6,6 +6,11 @@ import SwiftUI
 /// sections are never reordered.
 struct InspectorView: View {
     @ObservedObject var model: GradeModel
+    /// Bound from `presetRow`'s name field. Clicking a slider or a button already moves focus
+    /// away on its own; this catches the rest of the panel — labels, padding, anywhere without its
+    /// own control — so the field does not keep the keyboard forever just because the next click
+    /// landed on inert space.
+    @FocusState private var presetNameFocused: Bool
 
     private static let appliedGammaTolerance = 0.005
 
@@ -24,7 +29,15 @@ struct InspectorView: View {
             }
             .padding(.vertical, 18)
             .padding(.trailing, 16)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
+        // ON THE SCROLL VIEW, not its content. Most stages start collapsed (`openStages`
+        // defaults to only Tone), so the content is far shorter than the panel; a gesture on the
+        // content alone misses every tap below the last row. The scroll view's own frame already
+        // fills the column, and giving its CONTENT `maxHeight: .infinity` instead would collapse
+        // scrolling to the viewport rather than the stages' true height.
+        .contentShape(Rectangle())
+        .onTapGesture { presetNameFocused = false }
         .background(Palette.panel)
     }
 
@@ -263,8 +276,11 @@ struct InspectorView: View {
                     ForEach(model.project.presets.map(\.name), id: \.self) { Text($0).tag($0) }
                 }
                 .labelsHidden().frame(width: 150)
+                // BORDERED, NOT TINTED. The accent is spent on the picture only — the selected
+                // clip's edge and the curve, not a control (docs/APP_DESIGN.md) — so prominence
+                // here comes from shape against "save"'s plain text, not colour.
                 Button("auto") { model.autoTone() }
-                    .buttonStyle(.borderless).font(Type.label)
+                    .buttonStyle(.bordered).controlSize(.small).font(Type.label)
                     .disabled(model.selectedClip == nil)
                 if model.hasUnsavedChanges {
                     Text("adjusted").font(Type.caption).foregroundColor(Palette.plate)
@@ -275,9 +291,11 @@ struct InspectorView: View {
                     .textFieldStyle(.roundedBorder)
                     .font(Type.label)
                     .frame(width: 160)
+                    .focused($presetNameFocused)
                     .onSubmit {
                         model.savePreset(named: newPresetName)
                         newPresetName = ""
+                        presetNameFocused = false
                     }
                 Button("save") {
                     model.savePreset(
@@ -285,6 +303,7 @@ struct InspectorView: View {
                             ? model.project.activePreset
                             : newPresetName)
                     newPresetName = ""
+                    presetNameFocused = false
                 }
                 .buttonStyle(.borderless).font(Type.label)
             }
