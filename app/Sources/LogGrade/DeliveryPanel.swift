@@ -89,13 +89,13 @@ struct DeliveryPanel: View {
         HStack(spacing: 8) {
             Text("size").font(Type.label).foregroundColor(Palette.inkSecondary)
                 .fixedSize()
-            // Spelled as dimensions, not as "1080p". The output is portrait, so 1080p means a
-            // height of 1920 — which is the number stored, and labelling it "height: 1080p" was a
-            // fresh contradiction in a pass meant to remove them.
+            // Spelled as the WIDTH every deliverable shares, not as "1080p" or a portrait size: each
+            // shape's height follows its own aspect, so "1080 × 1920" was only true of reels. The
+            // tag stays the 9:16 reference height the engine's HEIGHT takes.
             Picker("", selection: $model.project.delivery.height) {
-                Text("1080 × 1920").tag(1920)
-                Text("1440 × 2560").tag(2560)
-                Text("2160 × 3840").tag(3840)
+                Text("1080 wide").tag(1920)
+                Text("1440 wide").tag(2560)
+                Text("2160 wide").tag(3840)
             }
             .labelsHidden().frame(width: 108)
             Spacer(minLength: 4)
@@ -136,17 +136,17 @@ struct DeliveryPanel: View {
     }
 
     @ViewBuilder private var cropSection: some View {
-        if model.project.delivery.anyTargetNeedsClipOffset {
+        if model.project.delivery.anyTargetNeedsClipOffset(model.selectedFrameSize) {
             cropRow
-        } else if let centred = model.project.delivery.cropBoxTarget {
+        } else if let centred = model.project.delivery.cropBoxTarget(model.selectedFrameSize) {
             Text("The \(centred.aspectWidth):\(centred.aspectHeight) crop sits at the centre of "
                  + "every clip, so there is nothing to place.")
                 .font(Type.caption)
                 .foregroundColor(Palette.inkTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         } else {
-            Text("Nothing selected crops the frame, so there is no crop to place. Tick a "
-                 + "shape that is not 9:16 and it appears here.")
+            Text("Nothing selected crops this clip, so there is no crop to place. Tick a "
+                 + "shape that is not the clip's own and it appears here.")
                 .font(Type.caption)
                 .foregroundColor(Palette.inkTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -231,7 +231,7 @@ struct DeliveryPanel: View {
     /// Named for the shape being placed rather than for "4:5", which stopped being the only
     /// croppable aspect the moment the set opened up.
     private var cropLabel: String {
-        model.project.delivery.clipFramedTargets.first
+        model.project.delivery.clipFramedTargets(model.selectedFrameSize).first
             .map { "\($0.aspectWidth):\($0.aspectHeight) crop" } ?? "crop"
     }
 
@@ -241,7 +241,7 @@ struct DeliveryPanel: View {
     }
 
     private func label(for deliverable: Deliverable) -> String {
-        deliverable.cropsPortraitMaster
+        deliverable.crops(model.selectedFrameSize)
             ? "\(deliverable.name), cropped to \(deliverable.aspectWidth):\(deliverable.aspectHeight)"
             : "\(deliverable.name), full frame"
     }
@@ -269,14 +269,17 @@ struct DeliveryPanel: View {
                         .foregroundColor(Palette.ink)
                         .frame(width: 46)
                     // A String, not the Int: an interpolated Int is locale-grouped ("1.140").
-                    Text("of \(String(geometry.maximumOffset)) px from the top")
+                    Text("of \(String(geometry.maximumOffset)) px from the "
+                         + (geometry.axis == .y ? "top" : "left"))
                         .font(Type.caption).foregroundColor(Palette.inkTertiary)
-                    // INVERTED ON PURPOSE. The offset counts down from the top, so the stepper's
-                    // up arrow has to shrink it to move the window up, as the Up key does.
+                    // INVERTED ON THE Y AXIS. The offset counts down from the top, so the stepper's
+                    // up arrow has to shrink it to move the window up, as the Up key does. On the
+                    // x axis it counts from the left, and up reads as "more".
+                    let upward = geometry.axis == .y ? -Self.cropStepperPixels : Self.cropStepperPixels
                     Stepper("") {
-                        model.nudgeCrop(by: -Self.cropStepperPixels)
+                        model.nudgeCrop(by: upward)
                     } onDecrement: {
-                        model.nudgeCrop(by: Self.cropStepperPixels)
+                        model.nudgeCrop(by: -upward)
                     }
                     .labelsHidden()
                     Button("clear") { model.cropOffset = nil }
@@ -289,7 +292,8 @@ struct DeliveryPanel: View {
                         .font(Type.caption).foregroundColor(Palette.lamp)
                 }
             } else {
-                Text("select a clip first")
+                // The box waits for the engine to measure the decoded frame (`GradeModel.cropGeometry`).
+                Text(model.selectedClip == nil ? "select a clip first" : "measuring the clip…")
                     .font(Type.caption).foregroundColor(Palette.inkTertiary)
             }
         }
@@ -327,8 +331,8 @@ struct DeliveryPanel: View {
 /// The crop window, in the first cropping deliverable's shape, dragged on the picture.
 ///
 /// Drawn over the preview because that is the only way to judge a crop: the question is what is in
-/// the frame, and no number answers it. The box is the engine's window — as wide as the master and
-/// as tall as the aspect makes it — so what is inside it is what gets delivered.
+/// the frame, and no number answers it. The box is the engine's window — filling the master along one
+/// axis and moving along the other — so what is inside it is what gets delivered.
 struct CropOverlay: View {
     @ObservedObject var model: GradeModel
     let geometry: CropGeometry
@@ -345,26 +349,31 @@ struct CropOverlay: View {
 
     var body: some View {
         GeometryReader { geo in
-            let height = geo.size.height * geometry.windowFraction
+            let vertical = geometry.axis == .y
+            // The frame's length along the axis the window moves, and the window's along it.
+            let span = vertical ? geo.size.height : geo.size.width
+            let length = span * geometry.windowFraction
             let offset = geometry.fraction(
                 forOffset: framedPerClip ? model.cropOffset ?? 0 : geometry.centreOffset
-            ) * geo.size.height
-            ZStack(alignment: .top) {
+            ) * span
+            let boxWidth = vertical ? geo.size.width : length
+            let boxHeight = vertical ? length : geo.size.height
+            ZStack(alignment: .topLeading) {
                 // Everything outside the window is dimmed rather than hidden: you are choosing
                 // what to leave out, so you have to see it.
                 Rectangle().fill(Color.black.opacity(0.55))
                     .mask(
-                        ZStack {
+                        ZStack(alignment: .topLeading) {
                             Rectangle()
-                            Rectangle().frame(height: height)
-                                .offset(y: offset - (geo.size.height - height) / 2)
+                            Rectangle().frame(width: boxWidth, height: boxHeight)
+                                .offset(x: vertical ? 0 : offset, y: vertical ? offset : 0)
                                 .blendMode(.destinationOut)
                         }.compositingGroup()
                     )
                 Rectangle()
                     .strokeBorder(Palette.plate, lineWidth: 1)
-                    .frame(height: height)
-                    .offset(y: offset)
+                    .frame(width: boxWidth, height: boxHeight)
+                    .offset(x: vertical ? 0 : offset, y: vertical ? offset : 0)
             }
             // THE WHOLE PICTURE IS THE HANDLE. The gesture used to live on the box's own outline,
             // and `strokeBorder` draws nothing but that outline, so the only draggable part of the
@@ -378,7 +387,9 @@ struct CropOverlay: View {
                     .onChanged { value in
                         let from = startedAt ?? model.cropOffset ?? 0
                         if startedAt == nil { startedAt = from }
-                        let travelled = value.translation.height / geo.size.height
+                        let travelled = geometry.axis == .y
+                            ? value.translation.height / geo.size.height
+                            : value.translation.width / geo.size.width
                         model.cropOffset = geometry.offset(
                             forFraction: geometry.fraction(forOffset: from) + travelled)
                     }

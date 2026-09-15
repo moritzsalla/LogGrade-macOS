@@ -109,7 +109,7 @@ final class LiveChainTests: XCTestCase {
         let chain = LiveChain(
             stages: LiveChain.colourStages(correction: correction,
                                            halation: LiveHalation(look.halation,
-                                                                  frameHeight: sourceImage.height),
+                                                                  frameLongEdge: max(sourceImage.width, sourceImage.height)),
                                            conversion: rig.conversion,
                                            look: look.lookLUT == "none" ? nil : rig.lookCube,
                                            lookStrength: look.lookStrength,

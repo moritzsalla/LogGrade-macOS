@@ -74,7 +74,7 @@ final class LiveHalationTests: XCTestCase {
         // Sigma 4 pixels on a 16-line frame.
         let halation = try XCTUnwrap(LiveHalation(
             Look.Halation(strength: 1, threshold: 1, radius: 0.25, tint: "1,0,0"),
-            frameHeight: height))
+            frameLongEdge: height))
         halation.apply(to: &log, width: width, height: height)
         func at(_ x: Int, _ c: Int) -> Float { log[((height / 2) * width + x) * 3 + c] }
 
@@ -91,8 +91,8 @@ final class LiveHalationTests: XCTestCase {
     }
 
     func testANeutralOrMalformedHalationHasNoLiveStage() {
-        XCTAssertNil(LiveHalation(Look.Halation(strength: 0), frameHeight: 480))
-        XCTAssertNil(LiveHalation(Look.Halation(strength: 0.5, tint: "1,0.3"), frameHeight: 480),
+        XCTAssertNil(LiveHalation(Look.Halation(strength: 0), frameLongEdge: 480))
+        XCTAssertNil(LiveHalation(Look.Halation(strength: 0.5, tint: "1,0.3"), frameLongEdge: 480),
                      "a tint the engine refuses got a live picture")
     }
 }

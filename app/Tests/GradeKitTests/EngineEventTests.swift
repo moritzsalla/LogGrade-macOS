@@ -13,7 +13,7 @@ final class EngineEventTests: XCTestCase {
             if let event = try EngineEvent.decode(line: String(line)) { events.append(event) }
         }
         XCTAssertEqual(events.map(\.name),
-                       ["disk", "run_start", "stabilisation", "clip_planned", "clip_skipped",
+                       ["disk", "run_start", "clip_skipped", "stabilisation", "clip_planned",
                         "run_done"],
                        "the recorded stream's shape is the contract the interface is built on")
 
@@ -26,9 +26,12 @@ final class EngineEventTests: XCTestCase {
         // The placeholder that broke the emitter once: MATCH=0 leaves YAVG a literal "-", which a
         // laxer emitter wrote as a bare number and produced invalid JSON on that one path.
         XCTAssertEqual(planned.string("yavg"), "-")
+        // The decoded frame, which is where the app learns orientation.
+        XCTAssertEqual(planned.int("width"), 72)
+        XCTAssertEqual(planned.int("height"), 128)
 
         let skipped = try XCTUnwrap(events.first { $0.name == "clip_skipped" })
-        XCTAssertEqual(EngineCode(rawValue: skipped.string("code") ?? ""), .notPortrait)
+        XCTAssertEqual(EngineCode(rawValue: skipped.string("code") ?? ""), .unmeasured)
 
         let done = try XCTUnwrap(events.last)
         XCTAssertEqual(done.name, "run_done", "a consumer needs to know the run ended")

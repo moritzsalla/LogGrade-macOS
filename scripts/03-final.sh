@@ -1,6 +1,6 @@
 #!/bin/bash
 # Stage 3: graded master -> delivery.
-# Usage: ./03-final.sh IMG_XXXX [deliverable] [CROP_Y]
+# Usage: ./03-final.sh IMG_XXXX [deliverable] [offset]
 #
 #   deliverable  a preset — `reels` (9:16, the default) or `feed` (4:5) — or an arbitrary shape
 #          written `name:aspect-w:aspect-h[:offset]`, e.g. `square:1:1` or `wide:16:9:400`. The
@@ -9,8 +9,9 @@
 #          width, and HEIGHT=<px> the 9:16 frame it defaults from, exactly as for grade.sh (1080 wide
 #          if neither is given); the height follows the aspect.
 #
-#   CROP_Y applies to whichever deliverables actually crop this master: the vertical offset, in
-#          pixels on the master, where the crop window starts. THERE IS NO DEFAULT — it used to be
+#   offset (or CROP_OFFSET) applies to whichever deliverables actually crop this master: where the
+#          crop window starts, in pixels on the master — from the top on a master taller than the
+#          window, from the left on one wider. THERE IS NO DEFAULT — it used to be
 #          750, which is IMG_0609's biased-up crop and nobody else's, so a deliverable that crops is
 #          refused without one. Eyeball a crop preview per clip and pass the right offset, or pass
 #          `centre` to say explicitly that this clip does not need one. A deliverable that is
@@ -31,7 +32,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 # `${1:-}` so a no-argument run says what it wanted — see 00-stabilise-detect.sh.
 CLIP="${1:-}"
-[ -n "$CLIP" ] || { echo "usage: ./03-final.sh IMG_XXXX [deliverable] [CROP_Y]" >&2; exit 1; }
+[ -n "$CLIP" ] || { echo "usage: ./03-final.sh IMG_XXXX [deliverable] [offset]" >&2; exit 1; }
 # ...and then the name itself: it becomes a path component AND reaches the filter graph.
 CLIP="$(require_clip_name "$CLIP")"
 TARGET="${2:-reels}"
@@ -55,10 +56,10 @@ read -r NAME AW AH OFF SUFFIX <<< "$SPEC"
 W="$(delivery_width)" || exit 1
 H="$(deliverable_height "$W" "$AW" "$AH")"
 # The positional offset wins over the spec's own, because it is the more specific thing the caller
-# just typed; CROP_Y from the environment is the fallback. `centre` passes through as a word and is
+# just typed; CROP_OFFSET from the environment is the fallback. `centre` passes through as a word and is
 # resolved per clip by crop_prefix, against the frame it actually measured. An offset that is never
 # supplied stays empty, and crop_prefix refuses it rather than inventing one.
-_arg_off="$(crop_offset CROP_Y "${3:-${CROP_Y:-}}")" || exit 1
+_arg_off="$(crop_offset CROP_OFFSET "${3:-${CROP_OFFSET:-}}")" || exit 1
 [ "$_arg_off" = "-" ] || OFF="$_arg_off"
 [ "$OFF" != "-" ] || OFF=""
 
@@ -73,15 +74,11 @@ check_disk_space "$WORK/dist" 2
 # Create the output directory. This used to rely on a checked-in dist/*/.gitkeep marker, which
 # is wrong the moment a work dir is set: the marker was in the repo and the output was not.
 mkdir -p "$(dirname "$OUT")"
-# Refuses a landscape master rather than squashing it into a vertical delivery, or cropping past
-# the frame edge. See require_portrait in lib.sh. The size it hands back is what the crop window is
-# computed from — measured, never assumed to be 2160x3840.
-IN_SIZE="$(require_portrait "$IN")"
+# The crop window is computed from the measured master, never assumed to be 2160x3840, and crop_prefix
+# refuses one past the frame edge.
+IN_SIZE="$(require_frame_size "$IN")"
 CROP="$(crop_prefix "${IN_SIZE% *}" "${IN_SIZE#* }" "$AW" "$AH" "$OFF")"
-# The RESOLVED row, read back out of the filter, not the word that was asked for: `centre` is
-# computed against the measured master, so printing "centre" would hide where the window landed.
-CROP_AT="${CROP%,}"; CROP_AT="${CROP_AT##*:}"
-echo "deliverable: $NAME  ${W}x${H}${CROP:+  cropped at $CROP_AT}"
+echo "deliverable: $NAME  ${W}x${H}${CROP:+  $(crop_description "$CROP")}"
 
 # --- optional stabilisation -------------------------------------------------
 # If a transform exists (from 00-stabilise-detect.sh), the sway is smoothed out before the

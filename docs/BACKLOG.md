@@ -16,8 +16,7 @@ non-technical photographer could use the result.
    LogGrade and ffmpeg; one render with stabilisation; how far it differs from this Mac's render
    (arm64 ffmpeg is OSXExperts 9.0, x86 is evermeet 9.0.1); jq 1.8.2 (minos 14) runs if that Mac is
    on macOS 13. `docs/UNIVERSAL_APP_PLAN.md`.
-3. **Landscape footage.** Reverses the portrait-only guard; still never squash. Unblocks 2D crop.
-4. **Every film stage switchable off,** down to a plain CST export. Check what already works first.
+3. **Every film stage switchable off,** down to a plain CST export. Check what already works first.
 
 ## The app, as it feels to use
 
@@ -43,7 +42,6 @@ non-technical photographer could use the result.
 - **Optional: tighten the parity ceilings.** A dry-run remeasure found seven loose by 0.1–0.9 code
   values and `extreme` 0.25 above its ceiling (inside the margin).
   `tests/grade-parity.py --remeasure "<why>"`.
-- **2D crop geometry**, once landscape is accepted.
 - **Defaults kept only for the precursor's sake** (ADR 0014): `MATCH=1`, the probe's `-ss 1` and
   `scale=320:-1`, and the stabiliser's `unsharp=5:5:0.2`.
 

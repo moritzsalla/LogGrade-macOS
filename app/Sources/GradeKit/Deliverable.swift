@@ -1,6 +1,6 @@
 import Foundation
 
-/// A crop offset a deliverable carries for itself, which the engine lets beat the run's `CROP_Y`.
+/// A crop offset a deliverable carries for itself, which the engine lets beat the run's `CROP_OFFSET`.
 ///
 /// ONLY CENTRE, not a pixel count. A pixel offset is a composition call about one clip, and this
 /// value applies to every clip in the project; `centre` is resolved per clip against the frame the
@@ -40,9 +40,9 @@ public struct Deliverable: Equatable, Hashable {
         self.cropOffset = cropOffset
     }
 
-    /// 9:16 — Reels and Stories, the whole portrait frame.
+    /// 9:16 — Reels and Stories.
     public static let reels = Deliverable(name: "reels", aspectWidth: 9, aspectHeight: 16)
-    /// 4:5 — a Feed post, cropped out of the portrait master.
+    /// 4:5 — a Feed post.
     public static let feed = Deliverable(name: "feed", aspectWidth: 4, aspectHeight: 5)
 
     /// The shapes the interface offers as checkboxes. The panel is generated from this list, so a
@@ -61,24 +61,28 @@ public struct Deliverable: Equatable, Hashable {
         return cropOffset == .centre ? shape + ":centre" : shape
     }
 
-    /// Whether this shape is a crop of a 9:16 master, by cross-multiplication rather than by name:
-    /// 4:5 is a crop of a 9:16 master and the whole frame of a 4:5 one, so the question is about
-    /// ratios and never about which preset it is.
+    /// Whether this shape crops a clip, by geometry rather than by name: 4:5 is a crop of a 9:16
+    /// master and the whole frame of a 4:5 one, and 9:16 is a crop of a landscape one.
     ///
-    /// THE ENGINE IS STILL THE AUTHORITY. It decides per clip, from the frame it actually decoded,
-    /// and refuses a window that does not fit. This is the interface's cheaper question — "must I
-    /// ask for a crop offset before Convert can run?" — answered against the 9:16 master this
-    /// pipeline takes, so the app can say it before a render starts instead of discovering it from
-    /// an exit code.
-    public var cropsPortraitMaster: Bool {
-        aspectWidth * 16 != aspectHeight * 9
+    /// THE ENGINE IS STILL THE AUTHORITY. It decides per clip, from the frame it decoded. This is
+    /// the interface's cheaper question — "must I ask for a crop offset before Convert can run?" —
+    /// so the app can say it before a render starts instead of discovering it from an exit code.
+    ///
+    /// A CLIP NOT YET MEASURED is answered as a 9:16 master, the shape this camera shoots portrait.
+    /// The size arrives with the clip's first preview. Answering "crops" instead would block every
+    /// unpreviewed clip on reels; the cost of this guess is that a landscape clip nobody previewed
+    /// reaches the engine, which refuses it by name (`REFUSE_CROP_NO_OFFSET`) rather than
+    /// rendering it.
+    public func crops(_ source: FrameSize?) -> Bool {
+        guard let source else { return aspectWidth * 16 != aspectHeight * 9 }
+        return CropGeometry(source: source, deliverable: self).crops
     }
 
-    /// Whether this shape crops AND takes its offset from the clip's `CROP_Y`, which is what has to
-    /// be decided per clip before Convert can run. A shape carrying `centre` still crops — its box
-    /// is still drawn — but the engine lets its own offset beat `CROP_Y`, so there is nothing to
-    /// ask.
-    public var needsClipOffset: Bool {
-        cropsPortraitMaster && cropOffset == nil
+    /// Whether this shape crops the clip AND takes its offset from the clip's `CROP_OFFSET`, which
+    /// is what has to be decided per clip before Convert can run. A shape carrying `centre` still
+    /// crops — its box is still drawn — but the engine lets its own offset win, so there is
+    /// nothing to ask.
+    public func needsClipOffset(_ source: FrameSize?) -> Bool {
+        crops(source) && cropOffset == nil
     }
 }

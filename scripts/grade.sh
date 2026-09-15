@@ -10,9 +10,10 @@
 #                     preset — 'reels' (9:16) or 'feed' (4:5) — or 'name:aspect-w:aspect-h[:offset]',
 #                     e.g. 'reels,feed' or 'square:1:1,wide:16:9:400'. Height follows the aspect off
 #                     the shared delivery width; see WIDTH.
-#   CROP_Y=<px>       vertical offset for every deliverable that crops and does not carry its own.
+#   CROP_OFFSET=<px>  crop offset for every deliverable that crops and does not carry its own: from
+#                     the top on a frame taller than the window, from the left on one wider.
 #                     There is NO DEFAULT: a deliverable that crops is refused without one, because
-#                     where the window sits is a composition call per clip. CROP_Y=centre says
+#                     where the window sits is a composition call per clip. CROP_OFFSET=centre says
 #                     explicitly that this clip does not need one, resolved against each frame.
 #   WIDTH=<px>        the delivery width every deliverable shares. Defaults to HEIGHT's 9:16 width,
 #                     so the default run is 1080 wide exactly as before.
@@ -60,7 +61,7 @@
 #
 # WHAT IS AUTOMATIC vs WHAT THIS REFUSES TO GUESS:
 #   automatic  exposure match, stabilisation, the whole grade, tag verification
-#   refuses    a clip that does not decode as portrait, and a cropped deliverable with no offset —
+#   refuses    a clip whose frame cannot be measured, and a cropped deliverable with no offset —
 #              that offset is a composition call per clip, so there is nothing sensible to default
 #
 # Orientation is NOT handled here or anywhere: it is an ingest concern and the source is trusted.
@@ -222,8 +223,8 @@ G_GAMMA_REF="$(require_number gamma "$(look .tone.gamma)")"   # gamma the look w
 Y_REF="$(require_number reference_yavg "$(look .match.reference_yavg)")"  # ...against this mean
 STAB="${STAB:-1}"; MATCH="${MATCH:-1}"; DRY="${DRY:-0}"
 # Empty means NOT GIVEN, which is a different thing from 0; see crop_offset.
-CROP_Y_OK="$(crop_offset CROP_Y "${CROP_Y:-}")" || exit 1
-[ "$CROP_Y_OK" != "-" ] || CROP_Y_OK=""
+CROP_OFFSET_OK="$(crop_offset CROP_OFFSET "${CROP_OFFSET:-}")" || exit 1
+[ "$CROP_OFFSET_OK" != "-" ] || CROP_OFFSET_OK=""
 case "$MATCH" in
 	0|1|batch) ;;
 	*)
@@ -291,7 +292,7 @@ fi
 #
 # So the default is GONE rather than replaced. Centre was the obvious substitute and is refused as
 # one: a batch centred by default gives files that all look finished and are all framed wrong. It
-# is available as `CROP_Y=centre`, which is the same picture arrived at by a decision somebody made
+# is available as `CROP_OFFSET=centre`, which is the same picture arrived at by a decision somebody made
 # rather than by a default nobody saw. The app never relied on the default — it blocks a render
 # whose cropping deliverable has no per-clip offset, which is the rule this now matches.
 #
@@ -300,38 +301,43 @@ fi
 # of IMG_0609.
 #
 # WHICH deliverables crop is a fact about the SOURCE's shape, not about their names: a 4:5 frame is
-# a crop of a 9:16 master and the whole frame of a 4:5 one. So it needs one measurement, taken here
-# because this refusal has to land before anything is created — a run that refuses halfway through
-# has already written files someone has to reason about. It costs one decode (~0.6s), against three
-# minutes a clip.
+# a crop of a 9:16 master and the whole frame of a 4:5 one, and 9:16 is a crop of a landscape one.
+# So it needs measurements, taken here because this refusal has to land before anything is created —
+# a run that refuses halfway through has already written files someone has to reason about. It
+# costs one decode a clip (~0.6s), against three minutes a clip.
 #
-# If that measurement fails, every deliverable is ASSUMED to crop. The guard then fires when it did
-# not strictly need to, which costs a re-run; guessing the other way costs a batch of silently
-# reframed files, which is the failure this exists to prevent.
 # EVERY clip, not just the first. Whether a deliverable crops depends on the shape of the clip in
-# front of it, so one clip's answer is not the batch's — and the first clip is exactly the one that
-# might be about to be skipped, which would decide the run on a frame it never renders. A clip that
-# is not portrait is left out for that reason: the loop below skips it, so it has no vote on a
+# front of it, and a batch can mix portrait and landscape. The sizes are kept, aligned with CLIPS,
+# so the loop below reuses them rather than decoding each clip a second time. A clip that cannot be
+# measured is stored as "-" and left out of the vote: the loop skips it, so it has no say in a
 # refusal about files that will exist.
-PROBE_SIZE=""
+T_MEASURE_T0=$(now_ms)
+CLIP_SIZES=()
 for _src in "${CLIPS[@]}"; do
 	_size="$(source_frame_size "$_src" 2>/dev/null || true)"
 	case "$_size" in
-		*' '*) size_is_portrait "$_size" || continue;;
+		*' '*) ;;
+		*) _size="-";;
 	esac
-	# The first shape that will actually be rendered decides, and an unmeasurable one is left empty
-	# so deliverable_crops answers conservatively.
-	PROBE_SIZE="$_size"
-	break
+	CLIP_SIZES+=("$_size")
 done
+T_MEASURE=$(( $(now_ms) - T_MEASURE_T0 ))
 _i=0
 while [ "$_i" -lt "${#D_NAME[@]}" ]; do
-	if [ "${D_OFF[$_i]}" = "-" ] && [ -z "$CROP_Y_OK" ] \
-		&& deliverable_crops "$PROBE_SIZE" "${D_AW[$_i]}" "${D_AH[$_i]}"; then
+	_crops=0
+	if [ "${D_OFF[$_i]}" = "-" ] && [ -z "$CROP_OFFSET_OK" ]; then
+		for _size in "${CLIP_SIZES[@]}"; do
+			[ "$_size" != "-" ] || continue
+			if deliverable_crops "$_size" "${D_AW[$_i]}" "${D_AH[$_i]}"; then
+				_crops=1; break
+			fi
+		done
+	fi
+	if [ "$_crops" = "1" ]; then
 		echo "REFUSING: '${D_NAME[$_i]}' crops, and no offset was given." >&2
 		echo "  Where the window sits is a composition call per clip — there is no sensible" >&2
 		echo "  default, so this is refused rather than guessed." >&2
-		echo "  Pass CROP_Y=<pixels>, or CROP_Y=centre to say that explicitly, or give this" >&2
+		echo "  Pass CROP_OFFSET=<pixels>, or CROP_OFFSET=centre to say that explicitly, or give this" >&2
 		echo "  deliverable its own: ${D_NAME[$_i]}:${D_AW[$_i]}:${D_AH[$_i]}:<px|centre>." >&2
 		emit_code REFUSE_CROP_NO_OFFSET
 		emit refused code REFUSE_CROP_NO_OFFSET clips "${#CLIPS[@]}" deliverable "${D_NAME[$_i]}"
@@ -386,7 +392,7 @@ fi
 # Phase totals for the report's summary, in integer milliseconds (see now_ms). Everything from the
 # first line of this script to here — argument checks, the crop probe, the correction cube — is
 # "preflight".
-T_PREFLIGHT=$(( $(now_ms) - RUN_T0 )); T_ORIENT=0; T_PROBE=0; T_STAB=0; T_TONE=0; T_ENCODE=0; T_FRAME=0
+T_PREFLIGHT=$(( $(now_ms) - RUN_T0 - T_MEASURE )); T_PROBE=0; T_STAB=0; T_TONE=0; T_ENCODE=0; T_FRAME=0
 BATCH_YAVGS=()
 if [ "$MATCH" = "batch" ]; then
 	say "measuring ${#CLIPS[@]} clip(s) for a batch exposure reference"
@@ -422,7 +428,7 @@ say "film: look=${LOOK_LUT:-none}@$LOOK_STRENGTH print=${PRINT_LUT:-none}@$PRINT
 [ -n "$FRAME" ] || report_environment "$ROOT"
 # The EFFECTIVE values, after defaults and look.json, which is what a report read weeks later needs:
 # the environment that launched the run is gone by then.
-report_line "knobs:   deliverables=$(IFS=,; printf '%s' "${D_NAME[*]}") width=$WIDTH height=$HEIGHT crop_y=${CROP_Y_OK:--} match=$MATCH reference_yavg=$Y_REF stab=$STAB smoothing=$SMOOTHING grain=$GRAIN_STRENGTH fps_out=${FPS_OUT:--} proof=${PROOF:--} frame=${FRAME:--} frame_height=$FRAME_HEIGHT frame_stage=$FRAME_STAGE look_lut=${LOOK_LUT:-none}@$LOOK_STRENGTH print_lut=${PRINT_LUT:-none}@$PRINT_STRENGTH halation=${HAL_STRENGTH}/${HAL_THRESHOLD}/${HAL_RADIUS}/${HAL_TINT} grain_weights=${GRAIN_SHADOWS}/${GRAIN_HIGHLIGHTS} audio_highpass=${AUDIO_HIGHPASS_HZ} correct_size=$CORRECT_SIZE dry=$DRY json=$JSON"
+report_line "knobs:   deliverables=$(IFS=,; printf '%s' "${D_NAME[*]}") width=$WIDTH height=$HEIGHT crop_offset=${CROP_OFFSET_OK:--} match=$MATCH reference_yavg=$Y_REF stab=$STAB smoothing=$SMOOTHING grain=$GRAIN_STRENGTH fps_out=${FPS_OUT:--} proof=${PROOF:--} frame=${FRAME:--} frame_height=$FRAME_HEIGHT frame_stage=$FRAME_STAGE look_lut=${LOOK_LUT:-none}@$LOOK_STRENGTH print_lut=${PRINT_LUT:-none}@$PRINT_STRENGTH halation=${HAL_STRENGTH}/${HAL_THRESHOLD}/${HAL_RADIUS}/${HAL_TINT} grain_weights=${GRAIN_SHADOWS}/${GRAIN_HIGHLIGHTS} audio_highpass=${AUDIO_HIGHPASS_HZ} correct_size=$CORRECT_SIZE dry=$DRY json=$JSON"
 report_line "work:    $WORK"
 report_line "preflight took $(fmt_ms "$T_PREFLIGHT")"
 say ""
@@ -446,20 +452,19 @@ for SRC in "${CLIPS[@]}"; do
 	# tone LUT and the transform path. It is the one input nobody types.
 	CLIP="$(require_clip_name "$(basename "${SRC%.*}")")"
 
-	# Orientation is the source's business. Refuse a clip that would render sideways rather than
-	# producing a confidently wrong file; require_portrait decodes a frame and measures it.
-	if ! SRC_SIZE="$(require_portrait "$SRC" 2>/dev/null)"; then
-		say "SKIP  $CLIP — not portrait. Fix the source orientation, then retry."
-		emit_code REFUSE_NOT_PORTRAIT
-		emit clip_skipped clip "$CLIP" code REFUSE_NOT_PORTRAIT source "$SRC"
+	# Measured up front, with the crop refusal. Every crop and the halation radius come from these
+	# two numbers, so a clip without them is skipped rather than guessed at.
+	SRC_SIZE="${CLIP_SIZES[$BI]}"
+	if [ "$SRC_SIZE" = "-" ]; then
+		say "SKIP  $CLIP — could not measure a decoded frame. Check the file plays, then retry."
+		emit_code REFUSE_UNMEASURED
+		emit clip_skipped clip "$CLIP" code REFUSE_UNMEASURED source "$SRC"
 		SKIPPED=$((SKIPPED+1)); continue
 	fi
 	SRC_W="${SRC_SIZE% *}"; SRC_H="${SRC_SIZE#* }"
 	HALATION_PREFIX=""
 	[ -z "$HAL_DIR" ] || HALATION_PREFIX="$(halation_prefix "$HAL_DIR" \
-		"$(halation_sigma "$SRC_H" "$HAL_RADIUS")" "$HAL_STRENGTH" "$HAL_TINT")"
-	_t=$(( $(now_ms) - CLIP_T0 )); T_ORIENT=$(( T_ORIENT + _t ))
-	report_line "      orientation check took $(fmt_ms "$_t")"
+		"$(halation_sigma "$SRC_W" "$SRC_H" "$HAL_RADIUS")" "$HAL_STRENGTH" "$HAL_TINT")"
 
 	# --- exposure match: one cheap probe, not a full pass --------------------------------
 	# The solve lives in scripts/solve-gamma.py, not in a python3 -c string here: a degenerate
@@ -546,8 +551,10 @@ for SRC in "${CLIPS[@]}"; do
 	say "$CLIP  post-CST YAVG=${YAVG}  gamma=${GAMMA}$([ "$MATCHED" = "1" ] && echo " (matched)")"
 	# matched is 1/0 rather than true/false: emit() writes a bare number or a quoted string, and a
 	# JSON boolean would need a third case for one field.
+	# width and height are the DECODED frame, which is how the app learns a clip's orientation
+	# without a second guard of its own (ClipProbe reads the container, which lies about rotation).
 	emit clip_planned clip "$CLIP" source "$SRC" yavg "$YAVG" gamma "$GAMMA" \
-		matched "$MATCHED" fps "$FPS"
+		matched "$MATCHED" fps "$FPS" width "$SRC_W" height "$SRC_H"
 	# Frame count and duration are what tell a slow run on a long clip from a slow machine. Not for
 	# FRAME: the app runs that once per preview, where two ffprobes (~120ms) buy nothing it uses.
 	if [ -z "$FRAME" ]; then
@@ -644,7 +651,7 @@ $(delivery_image_chain "$w" "$h" "$SFX" "$crop")${FPS_FILTER}" \
 	# untouched and returns non-zero, but a bare call propagates through `set -e` and kills the loop
 	# — measured: a two-clip run whose first render failed never attempted the second, printed no
 	# summary, and left the report ending mid-file. In a 19-clip unattended run a failure at clip 3
-	# silently costs the other 16. The non-portrait path a few lines up already skips and continues;
+	# silently costs the other 16. The unmeasured path a few lines up already skips and continues;
 	# this gives the render path the same treatment, and the exit status below makes sure a run with
 	# failures in it can never be read as a clean one.
 	# Every deliverable in the set, in the order it was given. The set used to be one `if` with
@@ -662,18 +669,18 @@ $(delivery_image_chain "$w" "$h" "$SFX" "$crop")${FPS_FILTER}" \
 		# The deliverable's own offset if it carries one, otherwise the run's. A deliverable that
 		# does not crop ignores both, and crop_prefix is what decides that.
 		_off="${D_OFF[$_i]}"
-		[ "$_off" != "-" ] || _off="$CROP_Y_OK"
+		[ "$_off" != "-" ] || _off="$CROP_OFFSET_OK"
 		if ! _crop="$(crop_prefix "$SRC_W" "$SRC_H" "${D_AW[$_i]}" "${D_AH[$_i]}" "$_off")"; then
 			say "FAIL  $CLIP — ${D_NAME[$_i]}: that crop does not fit ${SRC_W}x${SRC_H}."
 			emit_code REFUSE_CROP_WINDOW
 			emit clip_failed clip "$CLIP" source "$SRC" deliverable "${D_NAME[$_i]}"
 			CLIP_OK=0; break
 		fi
-		# The RESOLVED row, read back out of the filter, not the word that was asked for. `centre`
-		# is computed per clip against the measured frame, so printing "centre" would hide which
-		# row it actually landed on — the same silence the derived height is printed to avoid.
-		_at="${_crop%,}"; _at="${_at##*:}"
-		say "      ${D_NAME[$_i]}: ${WIDTH}x${_h}${_crop:+ cropped at $_at}"
+		# The RESOLVED window, read back out of the filter, not the word that was asked for. `centre`
+		# is computed per clip against the measured frame, so printing "centre" would hide where it
+		# actually landed — the same silence the derived height is printed to avoid. The window's
+		# size is printed too, because a small source is upscaled to the delivery width without it.
+		say "      ${D_NAME[$_i]}: ${WIDTH}x${_h}${_crop:+ $(crop_description "$_crop")}"
 		render "$WIDTH" "$_h" "${D_SUFFIX[$_i]}" "$_crop" || { CLIP_OK=0; break; }
 		_i=$(( _i + 1 ))
 	done
@@ -695,13 +702,13 @@ say "done: $OK rendered, $SKIPPED skipped, $FAILED failed"
 RUN_MS=$(( $(now_ms) - RUN_T0 ))
 report_line "finished $(date '+%Y-%m-%d %H:%M:%S'), wall time $(fmt_ms "$RUN_MS")"
 report_line "  preflight       $(fmt_ms "$T_PREFLIGHT")"
-report_line "  orientation     $(fmt_ms "$T_ORIENT")"
+report_line "  frame measure   $(fmt_ms "$T_MEASURE")"
 report_line "  exposure probe  $(fmt_ms "$T_PROBE")"
 report_line "  stabilisation   $(fmt_ms "$T_STAB")"
 report_line "  tone cube       $(fmt_ms "$T_TONE")"
 report_line "  encode          $(fmt_ms "$T_ENCODE")"
 report_line "  frame render    $(fmt_ms "$T_FRAME")"
-report_line "  other           $(fmt_ms $(( RUN_MS - T_PREFLIGHT - T_ORIENT - T_PROBE - T_STAB - T_TONE - T_ENCODE - T_FRAME )))"
+report_line "  other           $(fmt_ms $(( RUN_MS - T_PREFLIGHT - T_MEASURE - T_PROBE - T_STAB - T_TONE - T_ENCODE - T_FRAME )))"
 say "report: $REPORT"
 emit run_done rendered "$OK" skipped "$SKIPPED" failed "$FAILED" report "$REPORT"
 [ "$FAILED" -eq 0 ] || exit 1

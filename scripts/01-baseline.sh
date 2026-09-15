@@ -3,11 +3,8 @@
 # Usage: ./01-baseline.sh IMG_XXXX
 #
 # Rotation is NOT handled anywhere in this pipeline. Orientation is an ingest concern and the
-# source is trusted — see docs/adr/0005 and CLAUDE.md. This stage does not check it either: a
-# baseline is not a deliverable, so a sideways clip here is merely sideways. The refusal lives in
-# the two render paths that deliver, 03-final.sh and grade.sh, where a landscape frame would be silently squashed into a vertical
-# delivery. That is the failure worth catching, and catching it costs a decode, so it is paid once
-# at the point where it matters.
+# source is trusted — see docs/adr/0005 and CLAUDE.md. The frame is measured only where a crop is
+# computed from it, in the two render paths that deliver.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"

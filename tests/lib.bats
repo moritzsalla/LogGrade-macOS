@@ -88,19 +88,20 @@ setup_file() {
 	# The level is a HEX COLOUR, not `gray@n`: the `@n` suffix is ALPHA, so three clips built that
 	# way are three identical greys and a median test over them proves nothing. Caught by a test
 	# that asserted the middle clip was the anchor and found all three reading 552.
-	_mk_probeable() {  # _mk_probeable <hex grey> <w> <h> <out>
-		ffmpeg -y -f lavfi -i "color=c=$1:s=${2}x${3}:d=2:r=24" \
-			-frames:v 48 -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le \
+	_mk_probeable() {  # _mk_probeable <hex grey> <w> <h> <out> [rate]
+		ffmpeg -y -f lavfi -i "color=c=$1:s=${2}x${3}:d=2:r=${5:-24}" \
+			-frames:v $(( 2 * ${5:-24} )) -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le \
 			"$4" -v error
 	}
 	_mk_probeable 0x303030 72 128 "$FIXTURES/probe_dark.mov"
 	_mk_probeable 0x808080 72 128 "$FIXTURES/probe_mid.mov"
 	_mk_probeable 0xc0c0c0 72 128 "$FIXTURES/probe_bright.mov"
-	# Landscape AND measurable, so that a clip which gets skipped still occupies a slot carrying a
-	# distinctly different exposure. A skipped clip whose probe came back empty cannot tell a
-	# misaligned index from a correct one — the alignment test passed against a removed guard for
-	# exactly that reason.
-	_mk_probeable 0x303030 128 72 "$FIXTURES/probe_dark_landscape.mov"
+	# At a rate FPS_OUT=12 cannot divide AND measurable, so that a clip which gets skipped still
+	# occupies a slot carrying a distinctly different exposure. A skipped clip whose probe came back
+	# empty cannot tell a misaligned index from a correct one — the alignment test passed against a
+	# removed guard for exactly that reason.
+	_mk_probeable 0x303030 72 128 "$FIXTURES/probe_dark_25fps.mov" 25
+	_mk_probeable 0x808080 128 72 "$FIXTURES/probe_mid_landscape.mov"
 
 	make_tagged_clip 72 128 bt709 bt709 bt709 "$FIXTURES/portrait_tagged.mov"
 	make_tagged_clip 128 72 bt709 bt709 bt709 "$FIXTURES/landscape_tagged.mov"
@@ -170,27 +171,10 @@ fail() {
 	[ "$status" -ne 0 ]
 }
 
-# --- require_portrait --------------------------------------------------------
-# The guard that stops a landscape master being silently squashed into 1080x1920.
-# 11 of this shoot's 19 clips are landscape, so this is not a hypothetical.
+# --- require_frame_size ------------------------------------------------------
 
-@test "require_portrait refuses a landscape clip" {
-	run require_portrait "$FIXTURES/landscape_tagged.mov"
-	[ "$status" -ne 0 ]
-	[[ "$output" == *"REFUSING"* ]] || fail "[[ \"$output\" == *\"REFUSING\"* ]]"
-	# The refusal's own words. "landscape" only ever matched the fixture's FILENAME in the message,
-	# so it held whatever the guard said.
-	[[ "$output" == *"not portrait"* ]] || fail "not refused as non-portrait: $output"
-}
-
-@test "require_portrait reports the real dimensions, not a guess" {
-	run require_portrait "$FIXTURES/landscape_tagged.mov"
-	[[ "$output" == *"128x72"* ]] || fail "[[ \"$output\" == *\"128x72\"* ]]"
-}
-
-@test "require_portrait refuses a clip it cannot measure" {
-	# The guard's whole job is to refuse rather than let a landscape clip be squashed silently, so
-	# "I could not tell" must land on refuse. It did not: an empty dimension makes the numeric test
+@test "require_frame_size refuses a clip it cannot measure" {
+	# Every crop is computed from the measurement, so "I could not tell" must land on refuse. It did not: an empty dimension makes the numeric test
 	# ERROR, and an `if` reads an erroring condition as false, so the clip was accepted. Same
 	# fail-open shape as the trailing comma on this camera's csv output, which is what this guard
 	# was written to replace in the first place.
@@ -203,7 +187,7 @@ fail() {
 	mkdir -p "$bin"
 	printf '#!/bin/sh\nexit 0\n' > "$bin/ffmpeg"
 	chmod +x "$bin/ffmpeg"
-	PATH="$bin:$PATH" run require_portrait "$FIXTURES/portrait_tagged.mov"
+	PATH="$bin:$PATH" run require_frame_size "$FIXTURES/portrait_tagged.mov"
 	[ "$status" -ne 0 ]
 	[[ "$output" == *"REFUSING"* ]] || fail "[[ \"$output\" == *\"REFUSING\"* ]]"
 }
@@ -478,7 +462,7 @@ fail() {
 		grep -qx "$fn" <<< "$called" || missing="$missing $fn"
 	done
 	[ -z "$missing" ] || fail "the call extraction missed lib.sh functions the scripts use:$missing"
-	for fn in render_deliverable grade_chain require_portrait deliverable_crops size_is_portrait; do
+	for fn in render_deliverable grade_chain require_frame_size deliverable_crops crop_description; do
 		grep -qx "$fn" <<< "$called" || fail "the call extraction did not find $fn: $called"
 	done
 
@@ -966,7 +950,7 @@ JSON
 # bats test_tags=slow
 @test "a clip whose render fails does not take the rest of the batch with it" {
 	# Measured: a two-clip run whose first render failed never attempted the second, printed no
-	# summary line, and left the report ending mid-file. grade.sh already skips a non-portrait clip
+	# summary line, and left the report ending mid-file. grade.sh already skips an unmeasurable clip
 	# and continues; a render failure went straight through `set -e` instead. In a 19-clip
 	# unattended run a failure at clip 3 silently costs the other 16.
 	#
@@ -1191,7 +1175,7 @@ JSON
 	[ "$status" -ne 0 ]
 	# The words, not just the status: this fixture cannot complete the delivery chain, so a non-zero
 	# exit and an absent marker are both true whether or not the offset was refused.
-	[[ "$output" == *"CROP_Y must be numeric"* ]] || fail "not refused at the offset: $output"
+	[[ "$output" == *"CROP_OFFSET must be numeric"* ]] || fail "not refused at the offset: $output"
 	[ ! -f "$marker" ] || fail "the spliced filter ran and wrote $marker"
 }
 
@@ -1386,14 +1370,14 @@ PY
 @test "a skipped clip and a missing transform are both named" {
 	local work="$BATS_TEST_TMPDIR/codes2"
 	mkdir -p "$work/src"
-	cp "$FIXTURES/landscape_tagged.mov" "$work/src/WIDE.mov"
+	printf 'not a video\n' > "$work/src/BROKEN.mov"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/TALL.mov"
 	# STAB=1 with no transform is the degraded state the engine already prints about; a wrapper has
 	# to be able to surface it, because it is the one decision that costs ~65s per clip to get
 	# wrong and it used to be made silently.
 	DRY=1 MATCH=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src"
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"GRADE_CODE=REFUSE_NOT_PORTRAIT"* ]] || fail "unnamed skip: $output"
+	[[ "$output" == *"GRADE_CODE=REFUSE_UNMEASURED"* ]] || fail "unnamed skip: $output"
 	[[ "$output" == *"GRADE_CODE=NO_TRANSFORM"* ]] || fail "unnamed missing transform: $output"
 }
 
@@ -1402,7 +1386,7 @@ PY
 	# finishes. One skipped and one planned, from a folder argument.
 	local work="$BATS_TEST_TMPDIR/json-batch"
 	mkdir -p "$work/src"
-	cp "$FIXTURES/landscape_tagged.mov" "$work/src/WIDE.mov"
+	printf 'not a video\n' > "$work/src/BROKEN.mov"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/TALL.mov"
 	JSON=1 DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" \
 		run --separate-stderr "$SCRIPTS/grade.sh" "$work/src"
@@ -1749,8 +1733,7 @@ PY
 }
 
 @test "crop_prefix refuses an offset past the frame edge, before any render starts" {
-	# 03-final.sh claimed the portrait guard covered this. It does not: that guard only compares
-	# width against height. Unvalidated, the offset failed inside ffmpeg seconds into a render.
+	# Unvalidated, the offset failed inside ffmpeg seconds into a render.
 	run crop_prefix 2160 3840 4 5 1141
 	[ "$status" -ne 0 ] || fail "accepted an offset one pixel past the edge"
 	[[ "$output" == *"0..1140"* ]] || fail "did not say what the bound is: $output"
@@ -1798,12 +1781,6 @@ PY
 	[ -z "$(ls -A "$work/dist/03-final" 2>/dev/null)" ] || fail "delivered anyway"
 }
 
-@test "require_portrait hands back the size it measured" {
-	# So a caller that needs the source's dimensions does not decode a second frame to ask again.
-	run require_portrait "$FIXTURES/portrait_tagged.mov"
-	[ "$status" -eq 0 ]
-	[ "$output" = "72 128" ] || fail "expected the measured size, got: $output"
-}
 # --- deliverables as data ------------------------------------------------------
 # A deliverable was a `case` branch carrying its own pixel sizes, so the set was closed at two and
 # every shape in it assumed this camera's frame. These cover the replacement: the shapes are data,
@@ -1883,6 +1860,8 @@ PY
 	deliverable_crops "2160 3840" 9 16 && fail "said 9:16 crops a 9:16 source"
 	deliverable_crops "2160 3840" 4 5 || fail "said 4:5 does not crop a 9:16 source"
 	deliverable_crops "2160 2700" 4 5 && fail "said 4:5 crops a 4:5 source"
+	deliverable_crops "3840 2160" 9 16 || fail "said 9:16 does not crop a landscape source"
+	deliverable_crops "3840 2160" 16 9 && fail "said 16:9 crops a 16:9 source"
 	# An unmeasurable source is ASSUMED to crop: the guard then fires when it need not have, which
 	# costs a re-run, where guessing the other way costs a batch of silently reframed files.
 	deliverable_crops "" 9 16 || fail "an unmeasurable source was assumed safe"
@@ -1908,8 +1887,8 @@ PY
 	local work="$BATS_TEST_TMPDIR/toofit"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	# 1:4 is TALLER than the 9:16 source, so there is no window to take.
-	DELIVERABLES=tall:1:4:0 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" \
+	# A 1:4 window on 72x128 is 32 wide, so it can move 40 pixels and no further.
+	DELIVERABLES=tall:1:4:41 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[[ "$output" == *"does not fit"* ]] || fail "gave no reason: $output"
 	[ -z "$(ls -A "$work/dist/03-final" 2>/dev/null)" ] || fail "delivered anyway"
@@ -1928,9 +1907,9 @@ PY
 	[[ "$output" == *"no sensible"* ]] || fail "did not say why there is no default: $output"
 	[ -z "$(ls -A "$work/dist/03-final" 2>/dev/null)" ] || fail "delivered anyway"
 	# An explicit offset still works, and so does an explicit "I do not need one".
-	DELIVERABLES=feed CROP_Y=centre MATCH=0 STAB=0 DRY=1 GRADE_WORK_DIR="$work" \
+	DELIVERABLES=feed CROP_OFFSET=centre MATCH=0 STAB=0 DRY=1 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/ONE.mov"
-	[ "$status" -eq 0 ] || fail "CROP_Y=centre was not accepted: $output"
+	[ "$status" -eq 0 ] || fail "CROP_OFFSET=centre was not accepted: $output"
 }
 
 @test "centre is resolved against each clip's own frame, not once for the run" {
@@ -1940,18 +1919,65 @@ PY
 	[ "$output" = "crop=2160:2700:0:570," ] || fail "not centred on a 3840-tall source: $output"
 	run crop_prefix 2160 2880 4 5 centre
 	[ "$output" = "crop=2160:2700:0:90," ] || fail "centre did not follow the source height: $output"
-	# Even, because an odd vertical offset shifts the chroma siting on 4:2:0.
+	# Even, because an odd offset shifts the chroma siting on 4:2:0.
 	run crop_prefix 2160 3841 4 5 centre
 	[ "${output##*:}" = "570," ] || fail "centre landed on an odd row: $output"
 }
 
+@test "a landscape source is cropped left to right, never squashed" {
+	# A window of the deliverable's aspect fills one source axis, so on a landscape frame a 9:16
+	# window is full height and moves horizontally. The y path is tried first, which is what keeps
+	# a portrait source's filter byte-identical.
+	run crop_window 3840 2160 9 16
+	[ "$output" = "1214 2160 x" ] || fail "wrong landscape window: $output"
+	run crop_prefix 3840 2160 9 16 centre
+	[ "$output" = "crop=1214:2160:1312:0," ] || fail "not centred horizontally: $output"
+	run crop_prefix 3840 2160 9 16 2626
+	[ "$output" = "crop=1214:2160:2626:0," ] || fail "refused the last valid offset: $output"
+	run crop_prefix 3840 2160 9 16 2627
+	[ "$status" -ne 0 ] || fail "accepted an offset past the right edge: $output"
+	[[ "$output" == *"0..2626"* ]] || fail "did not say what the bound is: $output"
+	run crop_prefix 3840 2160 16 9 centre
+	[ -z "$output" ] || fail "cropped a landscape source to its own shape: $output"
+	run crop_prefix 3841 2160 9 16 centre
+	[ "$output" = "crop=1214:2160:1312:0," ] || fail "centre landed on an odd column: $output"
+}
+
+@test "a batch is refused when only a later clip's shape makes a deliverable crop" {
+	# The first clip is 9:16 and takes reels whole; the second is landscape and needs a window.
+	# Deciding on the first clip alone let the landscape one through with no offset.
+	local work="$BATS_TEST_TMPDIR/mixed"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/A.mov"
+	cp "$FIXTURES/landscape_tagged.mov" "$work/src/B.mov"
+	DELIVERABLES=reels MATCH=0 STAB=0 DRY=1 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/A.mov" "$work/src/B.mov"
+	[ "$status" -ne 0 ] || fail "a landscape clip went through reels with no offset: $output"
+	[[ "$output" == *"GRADE_CODE=REFUSE_CROP_NO_OFFSET"* ]] || fail "unnamed refusal: $output"
+}
+
+# HEIGHT=128 so a fixture finishes the delivery chain; see the run report test.
+# bats test_tags=slow
+@test "a landscape clip renders into a portrait deliverable at the deliverable's size" {
+	local work="$BATS_TEST_TMPDIR/landscape-render" out w h
+	mkdir -p "$work/src"
+	cp "$FIXTURES/probe_mid_landscape.mov" "$work/src/WIDE.mov"
+	CROP_OFFSET=centre HEIGHT=128 PROOF=0.5 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/WIDE.mov"
+	[ "$status" -eq 0 ] || fail "render failed: $output"
+	[[ "$output" == *"cropped 40x72 at 44,0"* ]] || fail "did not report the horizontal window: $output"
+	out=$(ls "$work"/dist/proofs/*.mp4 2>/dev/null | head -1) || true
+	[ -n "$out" ] || fail "no proof was written: $output"
+	w=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=nw=1:nk=1 "$out" | head -1)
+	h=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=nw=1:nk=1 "$out" | head -1)
+	[ "$w" = "72" ] && [ "$h" = "128" ] || fail "delivered ${w}x${h}, wanted 72x128"
+}
+
 @test "crop_prefix refuses an offset it was never given, rather than inventing one" {
-	# Reachable past the run's up-front check, which reads the first renderable clip: a later clip
-	# of another shape can need a crop where that one did not.
 	run crop_prefix 2160 3840 4 5 ""
 	[ "$status" -ne 0 ] || fail "accepted an empty offset: $output"
-	[[ "$output" == *"needs a vertical offset"* ]] || fail "gave no reason: $output"
-	[[ "$output" == *"CROP_Y=centre"* ]] || fail "did not say how to say 'no preference': $output"
+	[[ "$output" == *"needs an offset"* ]] || fail "gave no reason: $output"
+	[[ "$output" == *"CROP_OFFSET=centre"* ]] || fail "did not say how to say 'no preference': $output"
 }
 
 @test "a deliverable's own offset may be centre, and it beats the run's" {
@@ -2001,16 +2027,16 @@ PY
 	# finished, which is the whole failure class this pipeline is built against.
 	local work="$BATS_TEST_TMPDIR/align"
 	mkdir -p "$work/src"
-	# A is skipped for being landscape, and is DARK. B renders, and is BRIGHT. The lower median of
+	# A is skipped for a frame rate FPS_OUT=12 cannot divide, and is DARK. B renders, and is BRIGHT. The lower median of
 	# the two measurements is A's, so if B reads A's slot it reports the reference exposure back
 	# and looks perfectly matched — the wrong grade on a file that looks finished.
-	cp "$FIXTURES/probe_dark_landscape.mov" "$work/src/A_skipped.mov"
+	cp "$FIXTURES/probe_dark_25fps.mov" "$work/src/A_skipped.mov"
 	cp "$FIXTURES/probe_bright.mov" "$work/src/B_kept.mov"
-	MATCH=batch STAB=0 DRY=1 JSON=1 GRADE_WORK_DIR="$work" \
+	FPS_OUT=12 MATCH=batch STAB=0 DRY=1 JSON=1 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/A_skipped.mov" "$work/src/B_kept.mov"
 	[ "$status" -eq 0 ] || fail "the run failed: $output"
-	[[ "$output" == *'"clip":"A_skipped"'*'"code":"REFUSE_NOT_PORTRAIT"'* ]] \
-		|| fail "the landscape clip was not skipped: $output"
+	[[ "$output" == *'"clip":"A_skipped"'*'"code":"REFUSE_FPS_RETIME"'* ]] \
+		|| fail "the 25fps clip was not skipped: $output"
 	local reference b_yavg
 	reference="$(printf '%s' "$output" | sed -n 's/.*"exposure_reference":\([0-9.]*\).*/\1/p' | head -1)"
 	b_yavg="$(printf '%s' "$output" | sed -n 's/.*"clip":"B_kept","source":"[^"]*","yavg":\([0-9.]*\).*/\1/p')"

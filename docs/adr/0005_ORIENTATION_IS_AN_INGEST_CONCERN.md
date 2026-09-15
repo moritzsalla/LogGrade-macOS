@@ -8,12 +8,14 @@ losslessly.
 
 ## Consequences
 
-- **The guard measures the decoded frame, never the metadata or the container.** The container says
-  3840x2160 for a clip that decodes 2160x3840. The danger is a clip silently scaled into another
-  shape (*squashed*).
-- **It fails closed.** It once shipped accepting everything when its probe returned nothing, because
-  an empty dimension made the comparison error and the `if` read that as false. A guard that cannot
-  measure must refuse.
+- **Orientation is measured from the decoded frame, never the metadata or the container.** The
+  container says 3840x2160 for a clip that decodes 2160x3840. Any orientation is accepted and cropped
+  to the deliverable's shape, never scaled into it (*squashed*). The app learns the size from
+  `clip_planned`.
+- **It fails closed.** A clip whose frame cannot be measured is skipped (`REFUSE_UNMEASURED`). The
+  old portrait guard once accepted everything when its probe returned nothing, because an empty
+  dimension made the comparison error and the `if` read that as false.
+- **A portrait shot stored on its side renders sideways.** Nothing refuses it; the preview shows it.
 - **Look at a frame before reasoning about metadata.** Eleven clips arrived with no rotation matrix,
   portrait content lying on its side, and were misdiagnosed as landscape for hours. One rendered
   frame would have settled it.

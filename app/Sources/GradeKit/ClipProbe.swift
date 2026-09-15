@@ -19,8 +19,8 @@ import Foundation
 /// the filter graph sees: this camera stores rotation as a display-matrix flag and ffmpeg
 /// autorotates on decode, so a vertical clip measures 3840x2160 here — measured, on real
 /// footage, which is how the first version of this type got it wrong. Orientation is decided
-/// by decoding a frame, which is what the engine's own guard does, and the app surfaces that
-/// refusal rather than duplicating it. See docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md.
+/// by decoding a frame, which the engine does and reports in `clip_planned`
+/// (`PreviewRenderer.Frame.sourceSize`). See docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md.
 public struct ClipProbe {
     public let ffprobe: URL
     public init(ffprobe: URL) { self.ffprobe = ffprobe }

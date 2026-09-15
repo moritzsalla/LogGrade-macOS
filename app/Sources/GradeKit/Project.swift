@@ -23,7 +23,8 @@ public struct Project: Equatable {
 
     /// What is decided per clip, and nowhere else.
     public struct ClipSettings: Equatable {
-        /// The vertical offset of the crop window, shared by every selected deliverable that crops.
+        /// The offset of the crop window along whichever axis it moves, shared by every selected
+        /// deliverable that crops.
         /// Nil means undecided, which is not the same as zero: the engine refuses a cropping render
         /// across several clips without one, because the offset is a composition call and one
         /// clip's framing applied to eighteen others produces files that all look done.
@@ -65,24 +66,33 @@ public struct Project: Equatable {
             self.targets = targets; self.height = height; self.fps = fps
         }
 
-        /// Whether anything selected crops the master, and so has a box to draw.
-        public var anyTargetCrops: Bool { targets.contains { $0.cropsPortraitMaster } }
+        /// Whether anything selected crops this clip, and so has a box to draw. Per clip, because
+        /// the same shape crops a landscape clip and takes a portrait one whole.
+        public func anyTargetCrops(_ source: FrameSize?) -> Bool {
+            targets.contains { $0.crops(source) }
+        }
 
-        public var croppingTargets: [Deliverable] { targets.filter { $0.cropsPortraitMaster } }
+        public func croppingTargets(_ source: FrameSize?) -> [Deliverable] {
+            targets.filter { $0.crops(source) }
+        }
 
         /// The cropping shapes that take their offset from the clip, for the blocker that names
         /// them. KEPT APART FROM `croppingTargets`: when these were one predicate, excluding a
         /// `centre` shape from the blocker also removed its box from the picture and made the
         /// panel say nothing crops.
-        public var clipFramedTargets: [Deliverable] { targets.filter { $0.needsClipOffset } }
+        public func clipFramedTargets(_ source: FrameSize?) -> [Deliverable] {
+            targets.filter { $0.needsClipOffset(source) }
+        }
 
-        public var anyTargetNeedsClipOffset: Bool { targets.contains { $0.needsClipOffset } }
+        public func anyTargetNeedsClipOffset(_ source: FrameSize?) -> Bool {
+            targets.contains { $0.needsClipOffset(source) }
+        }
 
         /// The shape the one crop box is drawn in. One the clip frames wins over a `centre` one,
         /// because it is the box that has to be dragged; a `centre` shape alone still gets a box,
         /// fixed, so what it will cut is visible before it is rendered.
-        public var cropBoxTarget: Deliverable? {
-            clipFramedTargets.first ?? croppingTargets.first
+        public func cropBoxTarget(_ source: FrameSize?) -> Deliverable? {
+            clipFramedTargets(source).first ?? croppingTargets(source).first
         }
 
         public func isSelected(_ deliverable: Deliverable) -> Bool {
@@ -199,15 +209,19 @@ public struct Project: Equatable {
         }
     }
 
-    public func blockers(for clipNames: [String]) -> [Blocker] {
+    /// `sizes` holds each clip's measured frame, by name. A clip missing from it is answered as
+    /// `Deliverable.crops` answers an unmeasured one.
+    public func blockers(for clipNames: [String], sizes: [String: FrameSize] = [:]) -> [Blocker] {
         var found: [Blocker] = []
         if active == nil { found.append(.noActivePreset(activePreset)) }
-        if delivery.anyTargetNeedsClipOffset {
-            let undecided = clipNames.filter { clips[$0]?.cropOffset == nil }
-            if !undecided.isEmpty {
-                found.append(.cropWithoutOffset(deliverables: delivery.clipFramedTargets,
-                                                clips: undecided))
+        let undecided = clipNames.filter {
+            clips[$0]?.cropOffset == nil && delivery.anyTargetNeedsClipOffset(sizes[$0])
+        }
+        if !undecided.isEmpty {
+            let shapes = delivery.targets.filter { target in
+                undecided.contains { target.needsClipOffset(sizes[$0]) }
             }
+            found.append(.cropWithoutOffset(deliverables: shapes, clips: undecided))
         }
         return found
     }
@@ -221,7 +235,7 @@ public struct Project: Equatable {
         // The whole set, comma separated, in order. This was `FEED=1`, which could only ever say
         // one thing about one shape.
         env["DELIVERABLES"] = delivery.targets.map(\.spec).joined(separator: ",")
-        if let offset = clips[clip]?.cropOffset { env["CROP_Y"] = String(offset) }
+        if let offset = clips[clip]?.cropOffset { env["CROP_OFFSET"] = String(offset) }
         env["STAB"] = settings(for: clip).stabilise ? "1" : "0"
         return env
     }
@@ -245,7 +259,7 @@ extension Project.Delivery {
                       let h = ($0["aspect_height"] as? NSNumber)?.intValue,
                       w > 0, h > 0 else { return nil }
                 // A file without the key was written before a shape could carry an offset, and
-                // every shape then followed CROP_Y, which is what nil still means.
+                // every shape then followed the clip's offset, which is what nil still means.
                 let offset: DeliverableCropOffset? =
                     ($0["crop_offset"] as? String) == "centre" ? .centre : nil
                 return Deliverable(name: name, aspectWidth: w, aspectHeight: h,

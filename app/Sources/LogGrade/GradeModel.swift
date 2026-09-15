@@ -73,6 +73,9 @@ final class GradeModel: ObservableObject {
     private var sourceSeconds: Double?
     private var isFetchingSource = false
     private static let sourceFrameHeight = 480
+    /// Each clip's decoded frame, by stem, as the engine reported it. What decides which shapes
+    /// crop a clip and along which axis; see `cropGeometry`.
+    @Published private(set) var frameSizes: [String: FrameSize] = [:]
     /// The gamma the engine will apply to this clip. The midtone slider holds the REFERENCE
     /// gamma, and the two are different numbers on every clip that was not shot at the exposure
     /// the look was tuned at — so the interface shows both rather than letting the readout claim a
@@ -221,7 +224,7 @@ final class GradeModel: ObservableObject {
         }
         // Built against the SOURCE frame's height, because the look stores the glow's radius as a
         // fraction of the frame and the frame this grades is the preview-sized one.
-        let halation = LiveHalation(wanted.halation, frameHeight: source.height)
+        let halation = LiveHalation(wanted.halation, frameLongEdge: max(source.width, source.height))
         if !wanted.halation.isNeutral && halation == nil {
             gradeInFlight = false
             preview.isLive = false
@@ -322,6 +325,7 @@ final class GradeModel: ObservableObject {
             // The probe this render paid for. It is what the gamma solve needs, and recording it
             // here means the curve is the rendered one from the first drag rather than from the
             // first render.
+            if let size = frame.sourceSize { self.frameSizes[clip.stem] = size }
             if let yavg = frame.yavg {
                 self.measuredYAVG[clip.url] = yavg
                 self.refreshCurve()
@@ -578,20 +582,25 @@ final class GradeModel: ObservableObject {
     /// all there is to draw; drawing it in the first one's shape is at least a window the render
     /// produces. Two cropping deliverables wanting different framing is the case this does
     /// not cover, and it needs a second offset before it needs a second box.
+    ///
+    /// NIL UNTIL THE ENGINE HAS MEASURED THE CLIP. The container's dimensions are unrotated on this
+    /// camera, so no box is better than one guessed from them: a portrait clip and a landscape one
+    /// report the same 3840x2160.
     var cropGeometry: CropGeometry? {
-        guard let f = selectedClip?.fields,
-              let target = project.delivery.cropBoxTarget else { return nil }
-        // The container reports these clips landscape, because rotation is a display-matrix flag.
-        // The master the engine crops is the DECODED frame, so the two are swapped here.
-        let w = min(f.width, f.height), h = max(f.width, f.height)
-        return CropGeometry(sourceWidth: w, sourceHeight: h,
-                            aspectWidth: target.aspectWidth, aspectHeight: target.aspectHeight)
+        guard let size = selectedFrameSize,
+              let target = project.delivery.cropBoxTarget(size) else { return nil }
+        return CropGeometry(source: size, deliverable: target)
+    }
+
+    /// The selected clip's decoded frame, once a preview has measured it.
+    var selectedFrameSize: FrameSize? {
+        selectedClip.flatMap { frameSizes[$0.stem] }
     }
 
     /// Whether the box on the picture is this clip's to place. False when the only cropping shapes
     /// carry `centre`, whose box is drawn fixed.
     var cropIsPerClip: Bool {
-        project.delivery.cropBoxTarget?.needsClipOffset ?? false
+        project.delivery.cropBoxTarget(selectedFrameSize)?.needsClipOffset(selectedFrameSize) ?? false
     }
 
     /// Saves a shape from the editor through the engine's own resolver, or says why not. A copy is
@@ -608,7 +617,7 @@ final class GradeModel: ObservableObject {
 
     /// What would stop a render, named before one starts.
     var blockers: [Project.Blocker] {
-        project.blockers(for: clipNames)
+        project.blockers(for: clipNames, sizes: frameSizes)
     }
 
     func renderPreview() {
@@ -659,6 +668,7 @@ final class GradeModel: ObservableObject {
                     // lands there is no solved gamma and the graph beside the sliders is drawing
                     // the reference curve. Record it and regenerate.
                     if let yavg = frame.yavg { self.measuredYAVG[clip.url] = yavg }
+                    if let size = frame.sourceSize { self.frameSizes[clip.stem] = size }
                     self.refreshCurve()
                 }
                 // AFTER the exact frame is on screen. The source is only needed for the next drag,

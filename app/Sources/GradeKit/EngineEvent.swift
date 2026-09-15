@@ -109,7 +109,7 @@ public struct EngineEvent: Equatable {
 /// which already broke a test in the precursor silently. `unknown` carries the raw name so a code
 /// added to the engine shows up in the interface instead of vanishing.
 public enum EngineCode: Equatable {
-    case notPortrait
+    case unmeasured
     case cropWithoutOffset
     case cropWindowDoesNotFit
     case unknownDeliverable
@@ -132,7 +132,7 @@ public enum EngineCode: Equatable {
     /// against what the scripts actually emit in both directions: a code the engine gained, and a
     /// code the engine dropped that this would go on waiting for.
     static let byRawValue: [String: EngineCode] = [
-        "REFUSE_NOT_PORTRAIT": .notPortrait,
+        "REFUSE_UNMEASURED": .unmeasured,
         // Was REFUSE_FEED_NO_CROP_Y. The refusal is not about the Feed deliverable — it is about
         // ANY deliverable that crops, which is a fact about the source's shape rather than about
         // a name. Renamed rather than aliased: two spellings of one code is how a consumer ends up
@@ -164,7 +164,7 @@ public enum EngineCode: Equatable {
     /// rendered. A new skip in the engine needs adding here, or the queue shows it as done.
     var skipsTheClip: Bool {
         switch self {
-        case .notPortrait, .fpsWouldNeedRetiming: return true
+        case .unmeasured, .fpsWouldNeedRetiming: return true
         default: return false
         }
     }
@@ -173,8 +173,8 @@ public enum EngineCode: Equatable {
     /// restating it. Prose that explains WHY is a copy, and a copy drifts.
     public var message: String {
         switch self {
-        case .notPortrait:
-            return "not portrait — see docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md"
+        case .unmeasured:
+            return "couldn’t read a frame from this clip — check that it plays"
         case .cropWithoutOffset:
             return "a crop offset is a per-clip framing call — pick one per clip"
         case .cropWindowDoesNotFit:
