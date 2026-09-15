@@ -311,38 +311,69 @@ struct InspectorView: View {
     private func control(_ label: String, _ value: Binding<Double>,
                          _ range: ClosedRange<Double>, format: String = "%.3f",
                          default original: Double? = nil) -> some View {
-        HStack(spacing: Space.s) {
-            Text(label)
-                .font(Type.label)
-                .foregroundColor(Palette.inkSecondary)
-                .frame(width: 84, alignment: .leading)
-                // DOUBLE-CLICK THE NAME TO PUT IT BACK. Every grading tool does this, and without
-                // it the only way to undo one control is to remember the number it held. The name
-                // is the target rather than the track, so the gesture cannot be confused with a
-                // drag that happens to start with two quick clicks.
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) {
-                    guard let original else { return }
-                    value.wrappedValue = original
+        ControlRow(label: label, value: value.wrappedValue, range: range, format: format,
+                   original: original, model: model, set: { value.wrappedValue = $0 })
+            .equatable()
+    }
+
+    /// EQUATABLE, SO A DRAG UPDATES ONE ROW. The inspector rebuilds on every look write, and
+    /// without this every visible slider, label and readout was re-diffed and re-laid-out through
+    /// AppKit on each tick of a drag on any one of them. Equality is the row's values only: `set`
+    /// and `model` write through a key path, so a kept old closure writes to the same place.
+    private struct ControlRow: View, Equatable {
+        let label: String
+        let value: Double
+        let range: ClosedRange<Double>
+        let format: String
+        let original: Double?
+        let model: GradeModel
+        let set: (Double) -> Void
+
+        static func == (a: Self, b: Self) -> Bool {
+            a.value == b.value && a.label == b.label && a.range == b.range
+                && a.format == b.format && a.original == b.original
+        }
+
+        var body: some View {
+            let binding = Binding(get: { value }, set: set)
+            HStack(spacing: Space.s) {
+                Text(label)
+                    .font(Type.label)
+                    .foregroundColor(Palette.inkSecondary)
+                    .frame(width: 84, alignment: .leading)
+                    // DOUBLE-CLICK THE NAME TO PUT IT BACK. Every grading tool does this, and
+                    // without it the only way to undo one control is to remember the number it
+                    // held. The name is the target rather than the track, so the gesture cannot be
+                    // confused with a drag that happens to start with two quick clicks.
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
+                        guard let original else { return }
+                        set(original)
+                        model.refreshCurve()
+                        model.liveUpdate()
+                        model.renderPreview()
+                    }
+                    .help(original == nil ? "" : "Double-click to reset")
+                Slider(value: binding, in: range) { editing in
+                    if editing {
+                        model.beginDrag()
+                    } else {
+                        model.refreshCurve()
+                        model.renderPreview()   // on release: the exact render confirms the live one
+                    }
+                }
+                .controlSize(.mini)
+                .tint(Palette.inkTertiary)
+                // DURING the drag, not only after it. A grading control that shows nothing until
+                // you let go is a control you cannot find a value with.
+                .onChange(of: value) { _ in model.liveUpdate() }
+                // A typed value is final, like a release, so it gets the exact render a release
+                // gets.
+                ValueField(value: binding, format: format) {
                     model.refreshCurve()
-                    model.liveUpdate()
                     model.renderPreview()
                 }
-                .help(original == nil ? "" : "Double-click to reset")
-            Slider(value: value, in: range) { editing in
-                if editing {
-                    model.beginDrag()
-                } else {
-                    model.refreshCurve()
-                    model.renderPreview()   // on release: the exact render confirms the live one
-                }
             }
-            .controlSize(.mini)
-            .tint(Palette.inkTertiary)
-            // DURING the drag, not only after it. A grading control that shows nothing until you
-            // let go is a control you cannot find a value with.
-            .onChange(of: value.wrappedValue) { _ in model.liveUpdate() }
-            ValueField(value: value, format: format)
         }
     }
 
@@ -355,7 +386,9 @@ struct InspectorView: View {
     private struct ValueField: View {
         @Binding var value: Double
         let format: String
+        let commit: () -> Void
         @State private var editing = false
+        @State private var valueWhenOpened: Double?
         @FocusState private var focused: Bool
 
         var body: some View {
@@ -366,7 +399,12 @@ struct InspectorView: View {
                         .focused($focused)
                         .onSubmit { editing = false }
                         .onChange(of: focused) { if !$0 { editing = false } }
-                        .onAppear { focused = true }
+                        // On leaving the field, not on submit: the formatter writes the value
+                        // when focus goes, and clicking away is also how a typed value is kept.
+                        // Only for a changed value: clicking a readout to look at it is not
+                        // worth a three-second render.
+                        .onDisappear { if value != valueWhenOpened { commit() } }
+                        .onAppear { valueWhenOpened = value; focused = true }
                 } else {
                     Text(String(format: format, value))
                         .contentShape(Rectangle())

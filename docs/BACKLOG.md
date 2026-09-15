@@ -21,8 +21,6 @@ non-technical photographer could use the result.
 ## The app, as it feels to use
 
 - **An auto button:** one press gives a good starting grade.
-- **Sliders feel instant on the Intel Mac.** The UI currently waits on the preview; the slider
-  should move immediately and the picture follow (optimistic UI).
 - **Export is slow on the Intel Mac.** Measure where the time goes first.
 - **Control sections in a logical order.**
 - **Remove the time-progression UI** next to the control sections.

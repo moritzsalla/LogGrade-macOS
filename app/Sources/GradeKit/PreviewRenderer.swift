@@ -51,7 +51,8 @@ public final class PreviewRenderer {
     }
 
     /// Renders a still for one clip at one timecode with one look. Synchronous: the caller decides
-    /// which queue it wants to wait on, and the interface debounces rather than pipelining.
+    /// which queue it wants to wait on, and the interface cancels a superseded render rather than
+    /// pipelining.
     ///
     /// `match` is the engine's exposure matching. It defaults on, because every render this app
     /// performs has it on. It is turned OFF for exactly one caller: the base frame the live tier
