@@ -457,7 +457,10 @@ final class GradeModel: ObservableObject {
         // cube is not fatal — preflight reports it, and the live tier simply does not start.
         self.conversionCube = try? Cube3D(contentsOf: engine.appleCube)
         if let remembered = UserDefaults.standard.stringArray(forKey: DefaultsKey.openStages) {
-            self.openStages = Set(remembered)
+            // "Trims" is what the inspector called this section before it was renamed
+            // "Colour" — read as the new title, so an already-open section stays open.
+            self.openStages = Set(
+                remembered.map { $0 == "Trims" ? "Colour" : $0 })
         }
         refreshCurve()
 

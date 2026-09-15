@@ -23,11 +23,7 @@ struct StartupView: View {
         VStack(spacing: Space.xl) {
             Spacer()
             VStack(spacing: Space.m) {
-                Image(nsImage: NSApp.applicationIconImage)
-                    .resizable()
-                    .frame(width: 72, height: 72)
-                Text("LogGrade").font(Type.splash)
-                    .foregroundColor(Palette.ink)
+                AppMark()
                 Text("A grading tool for iPhone ProRes Apple Log footage.")
                     .font(Type.label)
                     .foregroundColor(Palette.inkSecondary)

@@ -9,6 +9,16 @@ import SwiftUI
 /// carries no action of its own, so there is nothing here to click past.
 struct SplashView: View {
     var body: some View {
+        AppMark()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Palette.surround)
+    }
+}
+
+/// The icon and the name, the one thing this splash and the startup screen both open with —
+/// built once so a size or font change cannot update one and miss the other.
+struct AppMark: View {
+    var body: some View {
         VStack(spacing: Space.m) {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
@@ -16,7 +26,5 @@ struct SplashView: View {
             Text("LogGrade").font(Type.splash)
                 .foregroundColor(Palette.ink)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Palette.surround)
     }
 }

@@ -40,11 +40,6 @@ struct RootView: View {
                     }
             } else {
                 content
-                    // ON THE WHOLE WINDOW, not on a dashed box inside one column. The startup
-                    // screen says "or drag them onto this window" and it replaces that column
-                    // entirely, so the only drop target in the app disappeared exactly when it
-                    // was being advertised.
-                    .onDrop(of: [.fileURL], isTargeted: nil) { providers in accept(providers) }
                     // Top trailing, which is where macOS puts a notification, and clear of both
                     // the clip list and the controls.
                     .overlay(alignment: .topTrailing) {
@@ -52,6 +47,10 @@ struct RootView: View {
                     }
             }
         }
+        // ON THE WHOLE WINDOW, not on a dashed box inside one column, and on the splash too — a
+        // drop in the first 1.2 seconds is the drop target disappearing exactly when the empty
+        // state's "or drag them onto this window" is about to advertise it.
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in accept(providers) }
     }
 
     private var content: some View {

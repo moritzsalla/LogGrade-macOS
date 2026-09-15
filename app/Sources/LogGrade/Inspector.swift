@@ -139,7 +139,10 @@ struct InspectorView: View {
 
     /// FOLDED INTO FILM LOOK, NOT ITS OWN STAGE. The default is "none" — off — and a whole
     /// section that is usually empty was a row to explain or hide rather than one worth reading
-    /// (backlog). It still needs its own switch: a look can stay on with the print off.
+    /// (backlog). It still needs its own switch: `.print` bypasses independently of `.filmLook`
+    /// at the engine (`Look.bypassing`), so a look can stay on with the print off, or the print
+    /// can stay reachable with the look off — the switch below overrides Film look's own
+    /// `.disabled(!enabled)` for exactly that reason.
     private var printSubsection: some View {
         let enabled = !model.bypassed.contains(.print)
         return VStack(alignment: .leading, spacing: Space.s) {
@@ -153,16 +156,11 @@ struct InspectorView: View {
                         + "it adds the print's own contrast and colour, which at full strength "
                         + "over a tuned tone curve is usually too much.")
                 Spacer(minLength: 0)
-                Toggle(
-                    "",
+                bypassToggle(
                     isOn: Binding(
                         get: { enabled },
-                        set: { model.setEnabled(.print, $0) })
-                )
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-                .tint(Palette.inkSecondary)
+                        set: { model.setEnabled(.print, $0) }),
+                    label: "print")
             }
             VStack(alignment: .leading, spacing: Space.s) {
                 cubePicker($model.look.printLUT, options: model.availablePrints)
@@ -174,6 +172,10 @@ struct InspectorView: View {
             .disabled(!enabled)
         }
         .padding(.top, Space.xs)
+        // OVERRIDES FILM LOOK'S OWN `.disabled`, for the whole subsection. `.print` bypasses
+        // independently of `.filmLook` at the engine, so this switch — and, when it is on, the
+        // picker and strength above it — must stay reachable even with the look switched off.
+        .disabled(false)
     }
 
     private var toneStage: some View {
@@ -354,19 +356,20 @@ struct InspectorView: View {
     /// puts reference text in a popover rather than in the panel, and a paragraph of prose under
     /// every control is the fastest way to make a dense inspector unreadable.
     ///
-    /// A stage without `bypass` is the conversion, which is locked on.
+    /// EVERY STAGE HERE BYPASSES. Convert doesn't — it has no controls — so it is `convertNote`,
+    /// not this.
     ///
     /// SWITCHED OFF, THE CONTROLS DIM BUT KEEP THEIR VALUES, so switching back is the grade you
     /// had. A slider left live while its stage is off moves nothing, which reads as broken.
     private func stage<Content: View>(
-        _ title: String, bypass: Look.Stage? = nil,
+        _ title: String, bypass: Look.Stage,
         help: String? = nil, last: Bool = false,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         let open = Binding(
             get: { model.openStages.contains(title) },
             set: { model.setStage(title, open: $0) })
-        let enabled = bypass.map { !model.bypassed.contains($0) } ?? true
+        let enabled = !model.bypassed.contains(bypass)
         return DisclosureGroup(isExpanded: open) {
             VStack(alignment: .leading, spacing: Space.s) { content() }
                 .padding(.top, Space.s)
@@ -377,35 +380,32 @@ struct InspectorView: View {
                 Text(title)
                     .font(Type.heading)
                     .foregroundColor(enabled ? Palette.ink : Palette.inkTertiary)
-                if bypass == nil {
-                    Image(systemName: "lock.fill")
-                        .font(Type.glyph)
-                        .foregroundColor(Palette.inkTertiary)
-                }
                 if let help { HelpButton(text: help) }
                 Spacer(minLength: 0)
-                if let bypass {
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { enabled },
-                            set: { model.setEnabled(bypass, $0) })
-                    )
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    // Neutral, not the accent (docs/APP_DESIGN.md).
-                    .tint(Palette.inkSecondary)
-                    .help(
-                        enabled
-                            ? "Switch \(title.lowercased()) off" : "Switch \(title.lowercased()) on"
-                    )
-                }
+                bypassToggle(
+                    isOn: Binding(
+                        get: { enabled },
+                        set: { model.setEnabled(bypass, $0) }),
+                    label: title)
             }
             .contentShape(Rectangle())
         }
         .padding(.leading, Self.inset)
         .padding(.bottom, last ? 0 : Space.l)
+    }
+
+    /// The small switch beside a stage's name, and beside Print's inside Film look — same look
+    /// wherever a bypass is offered, built once so the two cannot drift.
+    private func bypassToggle(isOn: Binding<Bool>, label: String) -> some View {
+        Toggle("", isOn: isOn)
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            // Neutral, not the accent (docs/APP_DESIGN.md).
+            .tint(Palette.inkSecondary)
+            .help(
+                isOn.wrappedValue
+                    ? "Switch \(label.lowercased()) off" : "Switch \(label.lowercased()) on")
     }
 
     /// A film cube by stem, or none. The look and the print are the same control over different
