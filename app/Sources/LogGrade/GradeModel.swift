@@ -554,6 +554,10 @@ final class GradeModel: ObservableObject {
         renderPreview()
     }
 
+    /// One press at a time. Set before the async work starts and cleared on every exit, so a
+    /// second click or a slider drag mid-solve cannot land its result out of order with this one.
+    private var autoToneInFlight = false
+
     /// One press, a starting exposure, black point and contrast. `AutoTone.solve` is the maths;
     /// this only measures for it and applies the result.
     ///
@@ -563,12 +567,33 @@ final class GradeModel: ObservableObject {
     /// the raw histogram to solve from; a second read against the solved values catches contrast
     /// having moved the white point, and corrects exposure and contrast once more. Bounded at two
     /// measurements — this is a starting point, not a converged solve.
+    ///
+    /// GUARDED THE SAME WAY `liveUpdate` IS. `sourceImage` can still be a previous clip's frame
+    /// right after a selection changes — its fetch is async — so this reads it only when
+    /// `isLiveHere` says it is current, and checks the selection again before writing the result,
+    /// in case the person switched clips while the two trial grades were running.
     func autoTone() {
-        guard let source = sourceImage, let conversion = conversionCube else { return }
+        guard !autoToneInFlight else { return }
+        guard selectedClip != nil else { return }
+        guard isLiveHere, let source = sourceImage, let conversion = conversionCube else {
+            preview.say("Preparing preview…")
+            return
+        }
+        autoToneInFlight = true
+        let clip = sourceClip
+        let seconds = sourceSeconds
         let base = effectiveLook
         let measuredYAVG = matchedYAVG
         liveQueue.async { [weak self] in
             guard let self else { return }
+
+            func finish(_ apply: ((GradeModel) -> Void)? = nil) {
+                DispatchQueue.main.async {
+                    self.autoToneInFlight = false
+                    guard self.sourceClip == clip, self.sourceSeconds == seconds else { return }
+                    apply?(self)
+                }
+            }
 
             var baseline = base
             baseline.correct.exposure = 0
@@ -578,7 +603,10 @@ final class GradeModel: ObservableObject {
                 case .graded(_, let histogram?, _, _) = self.grade(
                     baseline, source: source, conversion: conversion, measuredYAVG: measuredYAVG),
                 let solved = AutoTone.solve(histogram: histogram)
-            else { return }
+            else {
+                finish()
+                return
+            }
 
             var candidate = base
             candidate.correct.exposure = solved.exposure
@@ -596,13 +624,13 @@ final class GradeModel: ObservableObject {
                     contrast: corrected.contrast)
             }
 
-            DispatchQueue.main.async {
-                self.look.correct.exposure = final.exposure
-                self.look.tone.black = final.black
-                self.look.tone.contrast = final.contrast
-                self.refreshCurve()
-                self.liveUpdate()
-                self.renderPreview()
+            finish { model in
+                model.look.correct.exposure = final.exposure
+                model.look.tone.black = final.black
+                model.look.tone.contrast = final.contrast
+                model.refreshCurve()
+                model.liveUpdate()
+                model.renderPreview()
             }
         }
     }

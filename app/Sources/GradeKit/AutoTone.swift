@@ -13,6 +13,10 @@ import Foundation
 public enum AutoTone {
     public struct Solved: Equatable {
         public let exposure: Double
+        /// NOT carried across a second `solve()` call the way `exposure`/`contrast` are meant to
+        /// be — a corrective pass measures a frame the first pass's `black` has already lifted, so
+        /// re-deriving it there would double the lift. A caller composing two passes keeps the
+        /// first call's `black` and only takes `exposure`/`contrast` from the second.
         public let black: Double
         public let contrast: Double
 
@@ -27,10 +31,12 @@ public enum AutoTone {
     static let highPercentile = 0.995
     /// Leaves headroom for the shoulder and grain stages downstream of the tone curve.
     static let targetWhite = 0.92
-    /// The shipped look's own black lift (`look.json`'s `tone.black`), so a clip that already has
-    /// shadow detail is not pushed past what the shipped grade itself considers a starting point.
+    /// Close to, but not read from, the shipped look's own black lift (`look.json`'s `tone.black`
+    /// is 0.025): a starting-point constant for this heuristic, not a value `look.json` defines.
     static let targetBlack = 0.03
-    static let targetSpread = 0.85
+    /// `targetWhite - targetBlack`, so a frame already sitting at both targets solves near-identity
+    /// contrast instead of being pulled toward some other spread.
+    static let targetSpread = targetWhite - targetBlack
 
     static let exposureRange = -2.0...2.0
     static let blackRange = 0.0...0.08
@@ -41,9 +47,11 @@ public enum AutoTone {
     public static func solve(
         histogram: Scopes, baseExposure: Double = 0, baseContrast: Double = 1
     ) -> Solved? {
+        // `white`'s percentile can never fall below `black`'s: both read the same cumulative
+        // histogram, and `highPercentile` is greater than `lowPercentile`. Only their absence (an
+        // empty histogram) needs a guard.
         guard let black = percentile(histogram.luma, lowPercentile),
-            let white = percentile(histogram.luma, highPercentile),
-            white >= black
+            let white = percentile(histogram.luma, highPercentile)
         else { return nil }
 
         let exposure = baseExposure + log2(targetWhite / max(white, 0.001))
