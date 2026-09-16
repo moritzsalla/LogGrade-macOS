@@ -111,7 +111,7 @@ struct PreviewView: View {
                         .frame(width: 11, height: 11)
                         .tint(Palette.inkTertiary)
                 }
-                Text(preview.status.isEmpty ? LivePreview.exactFrameNote : preview.status)
+                Text(preview.status)
                     .font(Type.caption)
                     .foregroundColor(preview.statusIsFailure ? Palette.lamp : Palette.inkTertiary)
                     .fixedSize(horizontal: false, vertical: true)

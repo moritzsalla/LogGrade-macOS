@@ -40,6 +40,8 @@
 #   FRAME_STAGE=source  the same frame with NO grade chain on it: the decoded Apple Log picture,
 #                     resampled identically. It is what the app's live preview grades itself while
 #                     a control is moving. Default 'graded'.
+#   FRAME_SOURCE_SIZE="<w> <h>", FRAME_METERED="<stops> <temp> <tint>"  what an earlier preview of
+#                     this clip reported in clip_planned; a FRAME with them skips measuring again.
 #   JSON=1            emit one machine-readable event per line on stdout instead of the human
 #                     lines, which then go only to the run report. Named codes go to stderr
 #                     either way. This is what the app drives the engine through.
@@ -123,6 +125,25 @@ case "$FRAME_STAGE" in
 		emit refused code REFUSE_FRAME_STAGE
 		exit 1;;
 esac
+# An ungraded preview frame applies no chain, so it skips every generator that only decides the
+# chain: four python starts were ~0.45 s of a ~2 s source preview on the Intel Mac.
+SOURCE_ONLY=0
+[ -z "$FRAME" ] || [ "$FRAME_STAGE" != source ] || SOURCE_ONLY=1
+
+# What a preview already knows, handed back by the app so the second preview of a clip does not
+# decode the same frame twice more to learn it: FRAME_SOURCE_SIZE="<w> <h>" (the decoded frame,
+# as clip_planned reported it) and FRAME_METERED="<stops> <temp> <tint>" (as metered at the same
+# timecode). FRAME only; a delivery always measures for itself. Each ~0.5-1.3 s on 4K HEVC.
+FRAME_SOURCE_SIZE="${FRAME_SOURCE_SIZE:-}"
+FRAME_METERED="${FRAME_METERED:-}"
+if [ -z "$FRAME" ] && { [ -n "$FRAME_SOURCE_SIZE" ] || [ -n "$FRAME_METERED" ]; }; then
+	echo "REFUSING: FRAME_SOURCE_SIZE and FRAME_METERED are for FRAME previews only." >&2
+	exit 1
+fi
+[ -z "$FRAME_SOURCE_SIZE" ] || FRAME_SOURCE_SIZE="$(require_numbers FRAME_SOURCE_SIZE \
+	"$(printf '%s' "$FRAME_SOURCE_SIZE" | tr ' ' ,)" | tr , ' ')" || exit 1
+[ -z "$FRAME_METERED" ] || FRAME_METERED="$(require_numbers FRAME_METERED \
+	"$(printf '%s' "$FRAME_METERED" | tr ' ' ,)" | tr , ' ')" || exit 1
 FRAME_DIR="$(work_cache "$WORK")/frames"
 # Everything except an ungraded preview frame runs Apple's conversion, including the exposure probe
 # that would otherwise fail into an empty measurement and plan every clip at the reference gamma.
@@ -188,7 +209,8 @@ load_delivery_look || exit 1
 # identity cube pays interpolation error on every pixel. The generator owns that rule, so it is not
 # restated here.
 CORRECT_ARGS="$(correction_args)" || exit 1
-CORRECT_STATE="$(correction_state)" || exit 1
+CORRECT_STATE=neutral
+[ "$SOURCE_ONLY" = 1 ] || CORRECT_STATE="$(correction_state)" || exit 1
 CORRECT_SIZE="$(require_number CORRECT_SIZE "${CORRECT_SIZE:-33}")"
 CORRECT_PREFIX=""
 # Delivery-stage like the sharpener: not in a FRAME, which the live preview is held to, and not
@@ -204,7 +226,8 @@ DENOISE_PREFIX=""
 #
 # The tint is three numbers spliced into a filter graph, so each is validated where it is read.
 HAL_STRENGTH="$(require_number halation.strength "$(look .halation.strength)")"
-HAL_STATE="$(halation_state)" || exit 1
+HAL_STATE=neutral
+[ "$SOURCE_ONLY" = 1 ] || HAL_STATE="$(halation_state)" || exit 1
 HAL_THRESHOLD="$(require_number halation.threshold "$(look .halation.threshold)")"
 HAL_RADIUS="$(require_number halation.radius "$(look .halation.radius)")"
 HAL_TINT="$(require_numbers halation.tint "$(look .halation.tint)")" || exit 1
@@ -310,8 +333,46 @@ fi
 # refusal about files that will exist.
 T_MEASURE_T0=$(now_ms)
 CLIP_SIZES=()
+# ONE DECODE FOR AN UNGRADED PREVIEW. Its size, its picture and its meter used to be three decodes
+# of the same 4K frame (~0.8 s, ~1.7 s, ~1.3 s on HEVC). showinfo reports the decoded (autorotated)
+# frame as source_frame_size does; the meter branch splits off before any resize and takes the
+# same area squash probe_scene_exposure does, and only at 1 s, the timecode the export meters at.
+# Anything this cannot produce falls through to the separate steps below.
+ONE_DECODE_SIZE=""; ONE_DECODE_PNG=""; ONE_DECODE_METER=""
+if [ "$SOURCE_ONLY" = 1 ] && [ "${#CLIPS[@]}" -eq 1 ] && [ -z "$FRAME_SOURCE_SIZE" ] \
+	&& awk -v d="$(probe_number "${CLIPS[0]}" format=duration)" -v f="$FRAME" \
+		'BEGIN { exit !(d != "?" && (d + 0) > f + 0.1) }'; then
+	# Not for a clip shorter than the timecode: the two inputs then seek past the end separately
+	# and land on different frames (IMG_0426, 0.5 s). The separate steps handle it as before.
+	_src="${CLIPS[0]}"
+	_clip="$(require_clip_name "$(basename "${_src%.*}")")" || exit 1
+	_png="$FRAME_DIR/${_clip}_t${FRAME}s_source.png"
+	_raw="$(work_cache "$WORK")/work/${_clip}_meter.raw"
+	mkdir -p "$FRAME_DIR" "$(dirname "$_raw")"
+	rm -f "$_png" "$_raw"
+	_graph="[0:v]showinfo,format=gbrp16le,scale=-2:${FRAME_HEIGHT}:flags=lanczos[o];[0:v]scale=160:160:flags=area,format=gbrpf32le[r]"
+	# -v info because showinfo logs at INFO; see source_frame_size.
+	if _info="$(ffmpeg -v info -y -ss "$FRAME" -i "$_src" -filter_complex "$_graph" \
+		-map "[o]" -frames:v 1 -pix_fmt rgb48be -compression_level 0 "$_png" \
+		-map "[r]" -frames:v 1 -f rawvideo "$_raw" 2>&1)" && [ -s "$_png" ]; then
+		ONE_DECODE_PNG="$_png"
+		ONE_DECODE_SIZE="$(printf '%s\n' "$_info" | grep -oE 's:[0-9]+x[0-9]+' | head -1 \
+			| cut -d: -f2 | tr x ' ')" || ONE_DECODE_SIZE=""
+		if [ "$MATCH" != 0 ] && awk -v f="$FRAME" 'BEGIN { exit !(f + 0 == 1) }'; then
+			ONE_DECODE_METER="$("$SCRIPT_DIR/solve-exposure.py" 160 160 "$REF_STOPS" < "$_raw")" \
+				|| ONE_DECODE_METER=""
+		fi
+	fi
+	rm -f "$_raw"
+fi
 for _src in "${CLIPS[@]}"; do
-	_size="$(source_frame_size "$_src" 2>/dev/null || true)"
+	if [ -n "$ONE_DECODE_SIZE" ]; then
+		_size="$ONE_DECODE_SIZE"
+	elif [ -n "$FRAME_SOURCE_SIZE" ]; then
+		_size="$FRAME_SOURCE_SIZE"
+	else
+		_size="$(source_frame_size "$_src" 2>/dev/null || true)"
+	fi
 	case "$_size" in
 		*' '*) ;;
 		*) _size="-";;
@@ -377,7 +438,7 @@ if [ "$CORRECT_STATE" = "active" ]; then
 	CORRECT_PREFIX="lut3d=file='${CORRECT_LUT}':interp=tetrahedral,"
 fi
 # The hue curves' cube, once per run; grade_chain splices it in after the print.
-ensure_hue_lut "$CACHE" || exit 1
+[ "$SOURCE_ONLY" = 1 ] || ensure_hue_lut "$CACHE" || exit 1
 # The cubes depend only on the threshold, so they are made once per run. The prefix itself is built
 # per clip below, because its radius is a fraction of each clip's own frame.
 if [ "$HAL_STATE" = "active" ]; then
@@ -445,7 +506,11 @@ for SRC in "${CLIPS[@]}"; do
 	# The per-clip correction cube it feeds is built below, after the dry-run exit, like the tone
 	# cube: a plan renders nothing.
 	METERED="0 0 0"
-	if [ "$MATCH" != "0" ]; then
+	if [ "$MATCH" != "0" ] && [ -n "$FRAME_METERED" ]; then
+		METERED="$FRAME_METERED"
+	elif [ "$MATCH" != "0" ] && [ -n "$ONE_DECODE_METER" ]; then
+		METERED="$ONE_DECODE_METER"
+	elif [ "$MATCH" != "0" ]; then
 		_t=$(now_ms)
 		METERED="$(probe_scene_exposure "$SRC" "$REF_STOPS")"
 		_t=$(( $(now_ms) - _t )); T_PROBE=$(( T_PROBE + _t ))
@@ -518,7 +583,8 @@ for SRC in "${CLIPS[@]}"; do
 	# nothing", and this was writing a 4096-entry cube per clip on a run that renders nothing. The
 	# probe and the solve still happen above, because the solved gamma IS the plan.
 	# A neutral curve is no cube and no luma branch; see grade_chain.
-	TONE_STATE="$(tone_state "$TONE_GAMMA")" || exit 1
+	TONE_STATE=neutral
+	[ "$SOURCE_ONLY" = 1 ] || TONE_STATE="$(tone_state "$TONE_GAMMA")" || exit 1
 	if [ "$TONE_STATE" = neutral ]; then
 		TONE=""
 	else
@@ -530,7 +596,7 @@ for SRC in "${CLIPS[@]}"; do
 	fi
 
 	CLIP_CORRECT_PREFIX="$CORRECT_PREFIX"
-	if [ "$METERED" != "0 0 0" ]; then
+	if [ "$METERED" != "0 0 0" ] && [ "$SOURCE_ONLY" = 0 ]; then
 		# shellcheck disable=SC2086  # deliberate split: three validated numbers
 		CLIP_CORRECT_ARGS="$(correction_args $METERED)" || exit 1
 		# shellcheck disable=SC2086
@@ -578,7 +644,8 @@ for SRC in "${CLIPS[@]}"; do
 			-map "[o]" -pix_fmt rgb48be -compression_level 0 "$frame_out")
 		report_command "frame" "${frame_args[@]}"
 		_t=$(now_ms)
-		if ffmpeg -v error -y "${frame_args[@]}"; then
+		if [ -n "$ONE_DECODE_PNG" ] && [ "$ONE_DECODE_PNG" = "$frame_out" ] && [ -s "$frame_out" ] \
+			|| ffmpeg -v error -y "${frame_args[@]}"; then
 			_t=$(( $(now_ms) - _t )); T_FRAME=$(( T_FRAME + _t ))
 			report_line "      frame render took $(fmt_ms "$_t"), clip $(fmt_ms $(( $(now_ms) - CLIP_T0 )))"
 			say "      -> $(basename "$frame_out")  (${FRAME_STAGE}, no delivery stage)"

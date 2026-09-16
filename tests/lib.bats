@@ -1558,6 +1558,35 @@ PY
 	[ -z "$(_exports "$work")" ] || fail "FRAME wrote a deliverable"
 }
 
+@test "an ungraded preview decodes once and still matches the separate size, meter and picture" {
+	# The one-decode path must be indistinguishable from the steps it replaces. Textured, because a
+	# flat grey hid a pixel-format negotiation that moved the meter on real footage (temp -0.013 vs
+	# -0.012 on IMG_0444) when both branches shared one split.
+	local work="$BATS_TEST_TMPDIR/one-decode" clip ev_one ev_sep field
+	mkdir -p "$work/one" "$work/sep"
+	clip="$work/TEX.mov"
+	ffmpeg -v error -y -f lavfi -i "testsrc2=s=128x72:d=2:r=24" -frames:v 48 \
+		-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le "$clip"
+	ev_one="$(FRAME=1 FRAME_HEIGHT=36 FRAME_STAGE=source MATCH=1 JSON=1 STAB=0 \
+		GRADE_WORK_DIR="$work/one" "$SCRIPTS/grade.sh" "$clip" 2>/dev/null | grep clip_planned)" \
+		|| fail "one-decode preview failed"
+	# A size hint turns the one-decode path off, so this run takes the separate steps.
+	ev_sep="$(FRAME=1 FRAME_HEIGHT=36 FRAME_STAGE=source MATCH=1 JSON=1 STAB=0 \
+		FRAME_SOURCE_SIZE="128 72" GRADE_WORK_DIR="$work/sep" "$SCRIPTS/grade.sh" "$clip" 2>/dev/null \
+		| grep clip_planned)" || fail "separate-steps preview failed"
+	for field in width height metered_exposure metered_temp metered_tint; do
+		[ "$(printf '%s' "$ev_one" | sed -n "s/.*\"$field\":\([-0-9.]*\).*/\1/p")" = \
+			"$(printf '%s' "$ev_sep" | sed -n "s/.*\"$field\":\([-0-9.]*\).*/\1/p")" ] \
+			|| fail "$field differs: one=$ev_one sep=$ev_sep"
+	done
+	cmp -s "$work/one/.loggrade/frames/TEX_t1s_source.png" "$work/sep/.loggrade/frames/TEX_t1s_source.png" \
+		|| fail "the one-decode picture is not the separate one"
+	# A hint outside a preview is refused, so a delivery can never skip measuring its own clip.
+	FRAME_METERED="0 0 0" DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work/sep" run "$SCRIPTS/grade.sh" "$clip"
+	[ "$status" -ne 0 ] || fail "a delivery accepted a metering hint"
+	[[ "$output" == *"FRAME previews only"* ]] || fail "refused without saying why: $output"
+}
+
 @test "FRAME on a landscape clip needs no crop offset, because a still is not cropped" {
 	# The live preview asks for a frame with the project's deliverables and no CROP_OFFSET. The
 	# up-front crop refusal ran for it anyway, so every landscape clip showed "a crop offset is a
