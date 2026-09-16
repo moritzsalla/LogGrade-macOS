@@ -173,23 +173,6 @@ public struct Project: Equatable {
 
     public var active: Preset? { presets.first { $0.name == activePreset } }
 
-    /// Keeps a grade under a name and makes it the active preset. A new name adds one; an existing
-    /// name replaces it, which is how you save over a preset you have been adjusting. A blank name
-    /// is ignored.
-    ///
-    /// Here rather than in the app's model because the model's target cannot be imported by the
-    /// tests: the test for this rule used to re-implement it inline and so tested nothing.
-    public mutating func savePreset(named name: String, look: Look) {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        if let index = presets.firstIndex(where: { $0.name == trimmed }) {
-            presets[index] = .init(name: trimmed, look: look)
-        } else {
-            presets.append(.init(name: trimmed, look: look))
-        }
-        activePreset = trimmed
-    }
-
     /// The folder a Convert writes: named once for the whole queue, so every clip of a run lands
     /// together and no run overwrites another. The engine's `export_dir` names a command-line run the
     /// same way.
@@ -200,14 +183,17 @@ public struct Project: Equatable {
         return destination.appendingPathComponent("LogGrade export \(format.string(from: date))")
     }
 
-    /// Renames a preset, and the active choice with it. Nothing happens if the old name is absent or
-    /// the new one is taken: a project that already has both keeps both rather than losing one.
-    public mutating func renamePreset(from old: String, to new: String) {
-        guard let index = presets.firstIndex(where: { $0.name == old }),
-            !presets.contains(where: { $0.name == new })
-        else { return }
-        presets[index] = .init(name: new, look: presets[index].look)
-        if activePreset == old { activePreset = new }
+    /// Replaces the saved presets with the app's own, keeping the active choice where it still
+    /// exists and falling back where it does not.
+    ///
+    /// PRESETS ARE THE APP'S, NOT THE PROJECT'S. A project file still carries full copies, and
+    /// reading those back kept looks whose cube had since been deleted (Pro 400H, RZ67 Portra 400):
+    /// the preview could not read the conversion and Convert failed in the engine. "shipped" is
+    /// what Neutral was called before, so it keeps a project on the same picture.
+    public mutating func adopt(presets current: [Preset], fallback: String) {
+        let wanted = activePreset == "shipped" ? fallback : activePreset
+        presets = current
+        activePreset = current.contains { $0.name == wanted } ? wanted : fallback
     }
 
     /// A clip's decisions, or the undecided defaults for a clip with none recorded.

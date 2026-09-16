@@ -250,22 +250,31 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(look, try aLook(), "the rest of the look changed on the way")
     }
 
-    /// A project saved when the neutral preset was called "shipped" opens on it by its new name.
-    func testTheOldShippedPresetIsRenamedAndStaysActive() throws {
-        var project = Project(
-            presets: [.init(name: "shipped", look: try aLook())], activePreset: "shipped")
-        project.renamePreset(from: "shipped", to: "Neutral")
-        XCTAssertEqual(project.presets.map(\.name), ["Neutral"])
-        XCTAssertEqual(project.activePreset, "Neutral")
-        // One the person already named Neutral is theirs, and is not overwritten.
-        var both = Project(
-            presets: [
-                .init(name: "shipped", look: try aLook()),
-                .init(name: "Neutral", look: try aLook()),
-            ],
-            activePreset: "shipped")
-        both.renamePreset(from: "shipped", to: "Neutral")
-        XCTAssertEqual(both.presets.map(\.name), ["shipped", "Neutral"])
+    /// An opened project takes the app's presets: a saved look whose cube is gone must not come
+    /// back, and the active choice survives only where it still exists.
+    func testAnOpenedProjectTakesTheAppsPresets() throws {
+        let current: [Project.Preset] = [
+            .init(name: "Neutral", look: try aLook()), .init(name: "IMAX 65mm", look: try aLook()),
+        ]
+        var deleted = try aLook()
+        deleted.convertCube = "rz67_portra400"
+        func opened(active: String) -> Project {
+            var project = Project(
+                presets: [
+                    .init(name: "Mamiya RZ67 Portra 400", look: deleted),
+                    .init(name: "IMAX 65mm", look: try! lookFixture(gamma: 1.5)),
+                ], activePreset: active)
+            project.adopt(presets: current, fallback: "Neutral")
+            return project
+        }
+        let gone = opened(active: "Mamiya RZ67 Portra 400")
+        XCTAssertEqual(gone.presets, current, "a saved preset list came back")
+        XCTAssertEqual(gone.activePreset, "Neutral")
+        XCTAssertEqual(opened(active: "IMAX 65mm").activePreset, "IMAX 65mm")
+        XCTAssertEqual(
+            opened(active: "IMAX 65mm").active?.look, try aLook(),
+            "the saved copy of a preset replaced the app's")
+        XCTAssertEqual(opened(active: "shipped").activePreset, "Neutral")
     }
 
     /// One folder per Convert, dated, beside nothing else a person has to recognise.
@@ -434,25 +443,6 @@ final class PresetTests: XCTestCase {
         XCTAssertEqual(reopened.active?.look.tone.gamma, 2.02)
     }
 
-    func testSavingUnderAnExistingNameReplacesIt() throws {
-        var project = Project(
-            presets: [.init(name: "shipped", look: try aLook())],
-            activePreset: "shipped")
-        project.savePreset(named: " shipped ", look: try aLook(gamma: 1.77))
-        XCTAssertEqual(project.presets.count, 1, "saving over a name should not add a second")
-        XCTAssertEqual(project.active?.look.tone.gamma, 1.77)
-
-        // A new name is a second preset, and becomes the one in use.
-        project.savePreset(named: "warmer", look: try aLook(gamma: 1.9))
-        XCTAssertEqual(project.presets.map(\.name), ["shipped", "warmer"])
-        XCTAssertEqual(project.activePreset, "warmer")
-        XCTAssertEqual(project.presets[0].look.tone.gamma, 1.77, "the other preset is untouched")
-
-        // A blank name saves nothing rather than a preset nobody can pick.
-        project.savePreset(named: "  ", look: try aLook(gamma: 1.5))
-        XCTAssertEqual(project.presets.count, 2)
-        XCTAssertEqual(project.activePreset, "warmer")
-    }
 }
 
 final class OutputDestinationTests: XCTestCase {
