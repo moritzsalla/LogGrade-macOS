@@ -46,7 +46,10 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
 - **Verify the universal app on the Apple silicon Mac.** Kind: Apple for LogGrade and ffmpeg; one
   render with stabilisation; how far it differs from this Mac's (arm64 ffmpeg is OSXExperts 9.0,
   x86 evermeet 9.0.1); jq 1.8.2 (minos 14) if that Mac runs macOS 13. `docs/UNIVERSAL_APP_PLAN.md`.
-- **Export is slow on the Intel Mac.** Measure where the time goes first.
+  Also time one Instagram Story export there. On the Intel Mac it is ~4.2 s per footage second
+  (IMG_0444 ProRes 19 s in 78 s, IMG_0308 HEVC 17.5 s in 75 s; stabilisation and denoise off),
+  accepted for short clips. Only if that Mac is slow too, measure VideoToolbox H.264: it saves at
+  most the encode share, and loses quality that Instagram's re-encode compounds.
 - **Judge sharpen and grain at other heights by eye**, now that Custom exports any size. Grain stays
   ~1 output px, 1.7× coarser relative to the picture at 960 than at 1920 (`docs/PIPELINE.md`).
 
