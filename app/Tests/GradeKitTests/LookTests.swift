@@ -251,6 +251,27 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(look, try aLook(), "the rest of the look changed on the way")
     }
 
+    /// A correction saved before it carried contrast and saturation opens with both neutral,
+    /// which is what it rendered; a current file missing them is damaged and refused.
+    func testAProjectFromBeforeTheSceneTrimsOpensNeutral() throws {
+        var preset =
+            try JSONSerialization.jsonObject(with: try aLook().serialised())
+            as? [String: Any] ?? [:]
+        var correct = preset["correct"] as? [String: Any] ?? [:]
+        correct.removeValue(forKey: "contrast")
+        correct.removeValue(forKey: "saturation")
+        preset["correct"] = correct
+        func project(version: Int) throws -> Data {
+            try JSONSerialization.data(withJSONObject: [
+                "version": version, "active_preset": "old",
+                "presets": [["name": "old", "look": preset]],
+            ])
+        }
+        let look = try XCTUnwrap(try Project(data: try project(version: 5)).presets.first?.look)
+        XCTAssertEqual(look, try aLook())
+        XCTAssertThrowsError(try Project(data: try project(version: 6)))
+    }
+
     /// An opened project takes the app's presets: a saved look whose cube is gone must not come
     /// back, and the active choice survives only where it still exists.
     func testAnOpenedProjectTakesTheAppsPresets() throws {
@@ -345,8 +366,10 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(moved.correct.exposure, look.correct.exposure + 0.5, accuracy: 1e-12)
         XCTAssertEqual(moved.correct.temp, look.correct.temp + 0.1, accuracy: 1e-12)
         XCTAssertEqual(moved.correct.tint, look.correct.tint - 0.1, accuracy: 1e-12)
-        XCTAssertEqual(moved.tone.contrast, look.tone.contrast * 1.2, accuracy: 1e-12)
-        XCTAssertEqual(moved.colour.saturation, look.colour.saturation * 0.8, accuracy: 1e-12)
+        XCTAssertEqual(moved.correct.contrast, look.correct.contrast * 1.2, accuracy: 1e-12)
+        XCTAssertEqual(moved.correct.saturation, look.correct.saturation * 0.8, accuracy: 1e-12)
+        XCTAssertEqual(moved.tone, look.tone, "contrast is the correction's now, before the cube")
+        XCTAssertEqual(moved.colour, look.colour)
         XCTAssertEqual(moved.convertCube, look.convertCube)
         XCTAssertEqual(moved.halation, look.halation)
     }
@@ -589,6 +612,8 @@ final class WheelTests: XCTestCase {
             ("slope", .init(slope: "1,1,1.1")),
             ("offset", .init(offset: "0,0.01,0")),
             ("power", .init(power: "0.9,1,1")),
+            ("contrast", .init(contrast: 1.1)),
+            ("saturation", .init(saturation: 0.9)),
             (
                 "spelled by hand",
                 .init(

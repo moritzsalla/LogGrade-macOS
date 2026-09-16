@@ -58,6 +58,7 @@ public struct CorrectionCube {
         )
         let exposureGain = correct.exposure == 0 ? 1 : pow(2, correct.exposure)
         let hasCDL = slope != (1, 1, 1) || offset != (0, 0, 0) || power != (1, 1, 1)
+        let midGrey = encode(0.18)
 
         var samples = [SIMD3<Float>](repeating: .zero, count: size * size * size)
         let last = Double(size - 1)
@@ -94,6 +95,20 @@ public struct CorrectionCube {
                             let k = (1 - correct.lumMix) * (yIn / yOut) + correct.lumMix
                             out = (out.0 * k, out.1 * k, out.2 * k)
                         }
+                    }
+
+                    if correct.contrast != 1 {
+                        let c = correct.contrast
+                        out = (
+                            midGrey + (out.0 - midGrey) * c,
+                            midGrey + (out.1 - midGrey) * c,
+                            midGrey + (out.2 - midGrey) * c
+                        )
+                    }
+                    if correct.saturation != 1 {
+                        let s = correct.saturation
+                        let y = Rec709.luma(out.0, out.1, out.2)
+                        out = (y + (out.0 - y) * s, y + (out.1 - y) * s, y + (out.2 - y) * s)
                     }
 
                     samples[index] = SIMD3(

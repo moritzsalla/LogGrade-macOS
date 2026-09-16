@@ -379,8 +379,10 @@ extension Project {
     static let hueVersion = 4
     /// The first version whose looks carry no film look or print cube.
     static let noFilmLookVersion = 5
+    /// The first version whose corrections carry contrast and saturation.
+    static let sceneTrimsVersion = 6
     /// The format this build writes.
-    static let fileVersion = noFilmLookVersion
+    static let fileVersion = sceneTrimsVersion
 
     public func serialised() throws -> Data {
         var presetList: [[String: Any]] = []
@@ -501,6 +503,15 @@ extension Project {
         if version < noFilmLookVersion, var look = upgraded as? [String: Any] {
             look.removeValue(forKey: "look")
             look.removeValue(forKey: "print")
+            upgraded = look
+        }
+        // Before version 6 the correction had no contrast or saturation: 1 is what it did.
+        if version < sceneTrimsVersion, var look = upgraded as? [String: Any],
+            var correct = look["correct"] as? [String: Any]
+        {
+            if correct["contrast"] == nil { correct["contrast"] = 1.0 }
+            if correct["saturation"] == nil { correct["saturation"] = 1.0 }
+            look["correct"] = correct
             upgraded = look
         }
         return try Look(data: try JSONSerialization.data(withJSONObject: upgraded))

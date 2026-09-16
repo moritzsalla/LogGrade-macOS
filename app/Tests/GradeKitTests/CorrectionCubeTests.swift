@@ -24,12 +24,13 @@ final class CorrectionCubeTests: XCTestCase {
                     power: "0.9,1.0,1.15")
             ),
             ("luminance mix at zero", .init(exposure: 0.5, temp: 0.4, lumMix: 0)),
+            ("contrast and saturation", .init(contrast: 1.6, saturation: 0.7)),
             (
                 "everything at once",
                 .init(
                     exposure: -0.6, temp: 0.5, tint: -0.2,
                     slope: "0.9,1.05,1.1", offset: "-0.01,0.02,0",
-                    power: "1.2,0.95,1", lumMix: 0.4)
+                    power: "1.2,0.95,1", lumMix: 0.4, contrast: 0.85, saturation: 1.4)
             ),
         ]
     }

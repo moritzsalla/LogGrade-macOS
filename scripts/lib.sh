@@ -569,7 +569,7 @@ tone_shape_args() {  # tone_shape_args  -> "--pivot P --contrast C --toe T --sho
 # The optional three are a clip's metered exposure, temp and tint (probe_scene_exposure), ADDED to
 # look.json's, so a hand correction still moves a metered clip the way it moves any other.
 correction_args() {  # correction_args [stops temp tint]  -> "--exposure E ... --lum-mix L"
-	local exposure temp tint slope offset power lum_mix
+	local exposure temp tint slope offset power lum_mix contrast saturation
 	exposure="$(require_number correct.exposure "$(look .correct.exposure)")" || return 1
 	temp="$(require_number correct.temp "$(look .correct.temp)")" || return 1
 	tint="$(require_number correct.tint "$(look .correct.tint)")" || return 1
@@ -582,8 +582,10 @@ correction_args() {  # correction_args [stops temp tint]  -> "--exposure E ... -
 	offset="$(require_numbers correct.offset "$(look .correct.offset)")" || return 1
 	power="$(require_numbers correct.power "$(look .correct.power)")" || return 1
 	lum_mix="$(require_number correct.lum_mix "$(look .correct.lum_mix)")" || return 1
-	printf -- '--exposure %s --temp %s --tint %s --slope %s --offset %s --power %s --lum-mix %s\n' \
-		"$exposure" "$temp" "$tint" "$slope" "$offset" "$power" "$lum_mix"
+	contrast="$(require_number correct.contrast "$(look .correct.contrast)")" || return 1
+	saturation="$(require_number correct.saturation "$(look .correct.saturation)")" || return 1
+	printf -- '--exposure %s --temp %s --tint %s --slope %s --offset %s --power %s --lum-mix %s --contrast %s --saturation %s\n' \
+		"$exposure" "$temp" "$tint" "$slope" "$offset" "$power" "$lum_mix" "$contrast" "$saturation"
 }
 
 # Whether each pre-conversion stage does anything, as the word its generator prints. The rule lives
