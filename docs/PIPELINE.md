@@ -100,8 +100,6 @@ not the chain's).
   10.5× its own average there, and a 65-point cube cannot carry that shape — tetrahedral
   interpolation read up to 23 code values from the exact rendering, against 8.5 once the fit eased
   smoothly toward the boundary instead.
-- **Kodak 2383/2393 print on Vision3 for the large-format look.** Authentic, but the sky went cream
-  and reds muted. The preset scans the negative instead (`luts/film/CHANGELOG.txt`).
 - **A two-point scanner balance** (mid grey and +2 stops) left a stock's fogged toe magenta. The
   scan balances every channel onto the green layer's grey curve, then adds back crossover measured
   from −5 stops and mid grey.

@@ -255,7 +255,7 @@ final class ProjectTests: XCTestCase {
     /// back, and the active choice survives only where it still exists.
     func testAnOpenedProjectTakesTheAppsPresets() throws {
         let current: [Project.Preset] = [
-            .init(name: "Neutral", look: try aLook()), .init(name: "IMAX 65mm", look: try aLook()),
+            .init(name: "Neutral", look: try aLook()), .init(name: "Portra 800", look: try aLook()),
         ]
         var deleted = try aLook()
         deleted.convertCube = "rz67_portra400"
@@ -263,7 +263,7 @@ final class ProjectTests: XCTestCase {
             var project = Project(
                 presets: [
                     .init(name: "Mamiya RZ67 Portra 400", look: deleted),
-                    .init(name: "IMAX 65mm", look: try! lookFixture(gamma: 1.5)),
+                    .init(name: "Portra 800", look: try! lookFixture(gamma: 1.5)),
                 ], activePreset: active)
             project.adopt(presets: current, fallback: "Neutral")
             return project
@@ -271,9 +271,9 @@ final class ProjectTests: XCTestCase {
         let gone = opened(active: "Mamiya RZ67 Portra 400")
         XCTAssertEqual(gone.presets, current, "a saved preset list came back")
         XCTAssertEqual(gone.activePreset, "Neutral")
-        XCTAssertEqual(opened(active: "IMAX 65mm").activePreset, "IMAX 65mm")
+        XCTAssertEqual(opened(active: "Portra 800").activePreset, "Portra 800")
         XCTAssertEqual(
-            opened(active: "IMAX 65mm").active?.look, try aLook(),
+            opened(active: "Portra 800").active?.look, try aLook(),
             "the saved copy of a preset replaced the app's")
         XCTAssertEqual(opened(active: "shipped").activePreset, "Neutral")
     }

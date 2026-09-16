@@ -870,20 +870,20 @@ JSON
 		LOOK_FILE="$preset" resolve_conversion "$(jq -r .convert.cube "$preset")" >/dev/null \
 			|| missing="$missing $(basename "$preset"):cube"
 	done
-	[ "$n" -ge 4 ] || fail "found $n presets"
+	[ "$n" -ge 3 ] || fail "found $n presets"
 	[ -z "$missing" ] || fail "incomplete:$missing"
 }
 
 @test "resolve_conversion names a rendering or a film cube, and refuses anything else" {
-	run resolve_conversion imax65
-	[ "$status" -eq 0 ] && [ "$output" = "$LIB_ROOT/luts/film/imax65.cube" ] || fail "film: $output"
+	run resolve_conversion portra160
+	[ "$status" -eq 0 ] && [ "$output" = "$LIB_ROOT/luts/film/portra160.cube" ] || fail "film: $output"
 	run resolve_conversion neutral
 	[ "$status" -eq 0 ] && [ "$output" = "$LIB_ROOT/luts/rendering/neutral.cube" ] || fail "rendering: $output"
 	run resolve_conversion portra_nonexistent
 	[ "$status" -ne 0 ] || fail "accepted a cube that is not there"
 	[[ "$output" == *"nonexistent.cube in luts/rendering/ or luts/film/"* ]] || fail "$output"
 	# The name reaches a path and a filter graph.
-	run resolve_conversion ../film/imax65
+	run resolve_conversion ../film/portra160
 	[ "$status" -ne 0 ] || fail "accepted a path"
 	[[ "$output" == *"must be a cube name"* ]] || fail "$output"
 	# Apple's cube was a name here until it was dropped; it must not linger as a special case.

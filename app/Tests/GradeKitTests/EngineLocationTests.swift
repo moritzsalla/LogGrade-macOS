@@ -26,13 +26,13 @@ final class EngineLocationTests: XCTestCase {
         ).filter { $0.pathExtension == "json" }
         let presets = engine.shippedPresets()
         XCTAssertEqual(presets.count, files.count, "a preset file did not load")
-        XCTAssertGreaterThanOrEqual(presets.count, 4)
+        XCTAssertGreaterThanOrEqual(presets.count, 3)
         for preset in presets {
             XCTAssertNotNil(
                 engine.conversionCube(named: preset.look.convertCube),
                 "\(preset.name) names a cube that is not there")
         }
-        XCTAssertNil(engine.conversionCube(named: "../film/imax65"))
+        XCTAssertNil(engine.conversionCube(named: "../film/portra160"))
         // Every file named in the picker's order exists, or the order silently stops applying.
         let stems = files.map { $0.deletingPathExtension().lastPathComponent }
         for stem in EngineLocation.presetOrder {
