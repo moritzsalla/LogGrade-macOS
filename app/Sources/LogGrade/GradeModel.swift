@@ -309,7 +309,10 @@ final class GradeModel: ObservableObject {
         pendingLook = nil
         let key = FrameKey(clip: clip, seconds: seconds, look: wanted, metered: metered)
         // A release after a drag, or every slider's onChange after a preset: already on screen.
-        if key == displayed?.key {
+        if let current = displayed, key == current.key {
+            // SHOWN AGAIN, not merely kept: a waiting or refused status raised since (a clip
+            // switch that came straight back, a refused look reverted) must clear with it.
+            show(current)
             keepIfSettled()
             return
         }
