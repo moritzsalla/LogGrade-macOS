@@ -33,6 +33,12 @@ final class EngineLocationTests: XCTestCase {
                 "\(preset.name) names a cube that is not there")
         }
         XCTAssertNil(engine.conversionCube(named: "../film/imax65"))
+        // Every file named in the picker's order exists, or the order silently stops applying.
+        let stems = files.map { $0.deletingPathExtension().lastPathComponent }
+        for stem in EngineLocation.presetOrder {
+            XCTAssertTrue(
+                stems.contains(stem), "presetOrder names \(stem), which is not in presets/")
+        }
     }
 
     func testPreflightNamesEveryMissingPiece() throws {

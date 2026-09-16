@@ -41,10 +41,19 @@ public struct EngineLocation {
         return nil
     }
 
-    /// The presets the engine ships, `presets/*.json`, each a complete look with a `name`, in file
-    /// order. A file that is not a complete look is left out rather than offered half-read.
+    /// The picker's order, by preset file stem: the look that matters most first
+    /// (docs/BACKLOG.md). A stem not named here follows, alphabetically, so a new preset file
+    /// still appears without an edit.
+    public static let presetOrder = ["portra160", "portra800", "imax65", "super8"]
+
+    /// The presets the engine ships, `presets/*.json`, each a complete look with a `name`, in
+    /// `presetOrder`. A file that is not a complete look is left out rather than offered half-read.
     public func shippedPresets(fileManager: FileManager = .default) -> [Project.Preset] {
-        stems(in: presetFolder, fileManager: fileManager, extension: "json").compactMap { stem in
+        let found = stems(in: presetFolder, fileManager: fileManager, extension: "json")
+        let ordered =
+            Self.presetOrder.filter(found.contains)
+            + found.filter { !Self.presetOrder.contains($0) }
+        return ordered.compactMap { stem in
             let url = presetFolder.appendingPathComponent("\(stem).json")
             guard let data = try? Data(contentsOf: url), let look = try? Look(data: data),
                 let name = look.preserved["name"] as? String

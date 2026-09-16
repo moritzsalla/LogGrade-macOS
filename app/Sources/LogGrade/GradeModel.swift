@@ -97,9 +97,6 @@ final class GradeModel: ObservableObject {
         UserDefaults.standard.set(Array(openStages), forKey: DefaultsKey.openStages)
     }
 
-    /// The engine's `presets/`, offered in every project, including one saved before they existed.
-    let shippedPresets: [Project.Preset]
-
     // MARK: - the live tier
 
     /// The clip as the camera recorded it, decoded and resampled and nothing else. Every stage of
@@ -444,10 +441,10 @@ final class GradeModel: ObservableObject {
     init(engine: EngineLocation, look: Look) {
         self.engine = engine
         self.look = look
-        let shipped = engine.shippedPresets()
-        self.shippedPresets = shipped
+        // Neutral and the engine's `presets/`. Every opened project is given this same list
+        // (`Project.adopt`), so `project.presets` is always the app's own.
         self.project = Project(
-            presets: [.init(name: Self.neutralPresetName, look: look)] + shipped,
+            presets: [.init(name: Self.neutralPresetName, look: look)] + engine.shippedPresets(),
             activePreset: Self.neutralPresetName)
         let work = FileManager.default.temporaryDirectory
             .appendingPathComponent("loggrade-preview", isDirectory: true)
@@ -568,11 +565,7 @@ final class GradeModel: ObservableObject {
 
     func openProject(at url: URL) throws {
         var opened = try Project(data: try Data(contentsOf: url))
-        opened.renamePreset(from: "shipped", to: Self.neutralPresetName)
-        for preset in shippedPresets
-        where !opened.presets.contains(where: { $0.name == preset.name }) {
-            opened.presets.append(preset)
-        }
+        opened.adopt(presets: project.presets, fallback: Self.neutralPresetName)
         project = opened
         projectURL = url
         UserDefaults.standard.set(url, forKey: DefaultsKey.lastProject)
