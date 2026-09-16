@@ -469,6 +469,45 @@ public struct Look: Equatable {
     /// Only what a person switches. Halation, hue curves and the tone internals belong to a
     /// preset, not to the panel, so they have no bypass. The stabiliser is not here either: it is
     /// switched per clip (`Project.ClipSettings.stabilise`).
+    /// What a person moves on one clip, on top of the batch's look: the Adjust section.
+    ///
+    /// ONLY THE MOVES, NOT A WHOLE LOOK. A per-clip copy of the look pinned that clip to whatever
+    /// preset was active when it was adjusted, so switching the batch's look silently skipped it.
+    /// Exposure, warmth and tint add to the correction; contrast and saturation scale, so either
+    /// leaves a preset's own value (neutral in every shipped preset) where it was.
+    public struct Adjust: Equatable {
+        public var exposure: Double
+        public var warmth: Double
+        public var tint: Double
+        public var contrast: Double
+        public var saturation: Double
+        /// Per-clip exposure metering, which makes a shoot land together. Per clip because a
+        /// deliberately dark scene needs a way out of it while the rest of the shoot keeps it.
+        public var match: Bool
+
+        public init(
+            exposure: Double = 0, warmth: Double = 0, tint: Double = 0,
+            contrast: Double = 1, saturation: Double = 1, match: Bool = true
+        ) {
+            self.exposure = exposure
+            self.warmth = warmth
+            self.tint = tint
+            self.contrast = contrast
+            self.saturation = saturation
+            self.match = match
+        }
+
+        public func applied(to look: Look) -> Look {
+            var out = look
+            out.correct.exposure += exposure
+            out.correct.temp += warmth
+            out.correct.tint += tint
+            out.tone.contrast *= contrast
+            out.colour.saturation *= saturation
+            return out
+        }
+    }
+
     public enum Stage: String, CaseIterable {
         case adjust = "Adjust"
         case denoise = "Denoise"
