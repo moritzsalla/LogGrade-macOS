@@ -39,13 +39,13 @@ super8_kodachrome64.cube
   kodak_kodachrome_64 reversal, +0.2 stop, scanned directly (io.scan_film:
   the kodak_2383 print named in the TITLE is not applied), scanner white and
   black correction re-enabled after spektrafilm's LUT mode resets them. Then
-  an Oklab trim: lightness S-curve (contrast 1.15 about 0.55), chroma x1.8
+  an Oklab trim: lightness S-curve (contrast 1.15 about 0.55), chroma x1.2
   faded out below lightness 0.2-0.45 so the warm toe keeps its blue channel,
   a cast toward blue (Oklab b -0.018, rising from neutral black) that takes
-  out the stock's warm cast, reds turned 14 degrees toward scarlet (they read
-  magenta in sun), sky blue chroma x1.3, cyan-to-sky turned 20 degrees toward deep
-  blue (a Kodachrome sky sits near Oklab 263; ours sat at 222), and the same
-  gamut fit.
+  out the stock's warm cast, reds turned 8 degrees toward scarlet, sky blue
+  chroma x1.8, cyan-to-sky turned 35 degrees toward deep blue, foliage chroma
+  x0.7, and the same gamut fit. Chroma, sky, skin and red were matched to
+  RawTherapee's Kodachrome 64 Hald CLUT (measured, not baked from).
 
 Not reproducible from this repo alone: the bake scripts import spektrafilm
 (GPLv3) and are kept out of it. The TITLE lines record every parameter.
