@@ -37,8 +37,9 @@ non-technical photographer could use the result.
   values and `extreme` 0.25 above its ceiling (inside the margin).
   `tests/grade-parity.py --remeasure "<why>"`.
 - **Defaults kept only for the precursor's sake** (ADR 0014): the stabiliser's `unsharp=5:5:0.2`.
-- **Judge the shipped rendering against a reference.** `luts/rendering/neutral.cube` was tuned by
-  eye on three clips of one overcast shoot (contrast 1.6, saturation 1.1, grey 0.39). Its tone scale
+- **Judge the shipped rendering against a reference.** `luts/rendering/neutral.cube` (contrast 1.6,
+  saturation 1.1) was tuned by eye on one overcast shoot, and confirmed by the user on IMG_0609 once
+  it displayed on Apple playback's curve. Not yet judged on a sunny, contrasty scene. Its tone scale
   and gamut compression are published maths, but where it sits between them is a judgement.
 
 ## Considered and declined
