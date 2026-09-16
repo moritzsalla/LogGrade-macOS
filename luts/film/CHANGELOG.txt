@@ -32,8 +32,12 @@ imax65.cube, portra160.cube, portra800.cube
   subtractive density, a gamut fit that reduces chroma at constant lightness
   and hue instead of clipping, and a display black lift. DIR coupler amount
   raised above the profile default (the "dir" value in each TITLE).
-    imax65          kodak_vision3_250d negative, +0.5 stop, scanned (a DI-
-                    finished large-format look: neutral, deep, holds the sky)
+    imax65          kodak_vision3_250d negative, +0.5 stop, graded as a DI
+                    finish: highlights rolled off later ("peak" 48), red
+                    chroma pulled back ("red_sat", a third window on the
+                    hue-vs-chroma curve), and a yellow-green cast in Oklab
+                    ("cast_a"/"cast_b") rising from neutral black to full at
+                    lightness 0.6
     portra160       kodak_portra_160, +1 stop, scanned
     portra800       kodak_portra_800, +1 stop, scanned
 
