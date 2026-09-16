@@ -56,15 +56,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/engine"
 cp "$BIN" "$APP/Contents/MacOS/LogGrade"
 
-# The icon is DRAWN from the shipped tone curve, not stored, so a re-grade changes it. A second
-# here rather than a PNG in the tree that nobody remembers to redraw. See app/make-icon.swift.
-# From $ROOT: make-icon.swift reads look.json and scripts/ relative to the working directory, so
-# a build started from anywhere else would silently fall back to the generic icon.
-if (cd "$ROOT" && swift app/make-icon.swift >/dev/null); then
-	cp "$ROOT/dist/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
-else
-	echo "WARNING: could not draw the icon; the app will use the generic one" >&2
-fi
+# A fixed file. It used to be drawn from the default grade at build time, so every re-grade quietly
+# changed the app's icon.
+cp "$ROOT/app/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 # The engine, vendored, and the tools beside it: EngineRun puts the engine's directory first on the
 # child's PATH, because a launched app's own PATH knows nothing of ~/.local/bin or Homebrew.

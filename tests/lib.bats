@@ -2990,9 +2990,9 @@ _low_band_db() {  # _low_band_db <file> <hz>
 	# because a checkout moved.
 	[ -x "$app/Contents/Resources/engine/scripts/grade.sh" ] || fail "the engine was not vendored"
 	[ -f "$app/Contents/Resources/engine/look.json" ] || fail "look.json was not vendored"
-	# Drawn from the shipped curve by make-icon.swift. Without it macOS gives the app the generic
-	# document icon, which is how you tell at a glance that a build went wrong.
-	[ -f "$app/Contents/Resources/AppIcon.icns" ] || fail "the icon was not drawn into the bundle"
+	# Without it macOS gives the app the generic document icon.
+	cmp -s "$app/Contents/Resources/AppIcon.icns" "$BATS_TEST_DIRNAME/../app/AppIcon.icns" \
+		|| fail "the bundle does not carry app/AppIcon.icns"
 	# UNIVERSAL, every executable in it. Nothing on this Intel Mac notices a missing arm64 slice:
 	# on the Apple Mac it is Rosetta, or a prompt to install Rosetta before the first render.
 	local exe

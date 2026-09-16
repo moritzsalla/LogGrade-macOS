@@ -35,7 +35,6 @@ send the wrong one. The app is a few MB, and doubling it costs nothing.
 `swift build --package-path app -c release --arch arm64 --arch x86_64`. With more than one
 `--arch`, SwiftPM builds through Xcode's build system and writes the product to
 `app/.build/apple/Products/Release/LogGrade`, not to `.build/release/`. Update `BIN` to match.
-`make-icon.swift` is run with the interpreter, so it is unaffected.
 
 Check: `lipo -archs dist/LogGrade.app/Contents/MacOS/LogGrade` prints `x86_64 arm64`.
 
