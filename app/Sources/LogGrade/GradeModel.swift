@@ -536,8 +536,6 @@ final class GradeModel: ObservableObject {
         renderPreview()
     }
 
-    /// Everything in the inspector back to the active preset, bypass switches included: a stage
-    /// left off after a reset is an adjustment the reset did not remove.
     /// The selected clip's Adjust and the switches back to where a preset starts. Other clips keep
     /// their Adjust: a reset while looking at one clip must not undo work on eighteen others.
     func resetAdjustments() {
@@ -616,13 +614,18 @@ final class GradeModel: ObservableObject {
         lastExportFolder = export
         let project = self.project
         let adjustOff = bypassed.contains(.adjust)
+        let missingLook = workDirectory
         // One look file per clip, because each carries its own Adjust. Scratch, in the scratch
         // directory; the RENDER goes where the person said, or beside their footage.
-        // Uniquing, not unique: settings are keyed by stem, so two clips sharing one share a file.
+        //
+        // THE QUEUE'S WAITING JOBS TOO, not only the list. A retried job from an earlier export
+        // runs with this one, and its clip may have left the list since.
+        let stems = Set(
+            clips.map(\.stem) + queue.jobs.filter { $0.state == .waiting }.map(\.stem))
         let lookFiles = Dictionary(
-            clips.map {
-                ($0.stem, workDirectory.appendingPathComponent("render-look-\($0.stem).json"))
-            }, uniquingKeysWith: { first, _ in first })
+            uniqueKeysWithValues: stems.map {
+                ($0, workDirectory.appendingPathComponent("render-look-\($0).json"))
+            })
         // BEFORE ANYTHING IS QUEUED, and refused outright on failure. A look file that could not
         // be written is the PREVIOUS run's look still on disk, so carrying on renders a whole
         // shoot with a grade nobody is looking at.
@@ -648,8 +651,13 @@ final class GradeModel: ObservableObject {
         // Off the main thread: `start` returns only when the whole queue has run.
         DispatchQueue.global(qos: .userInitiated).async {
             queue.start(environment: { stem in
-                // Every queued stem has a file: the dictionary was built from the same list.
-                var env = project.environment(for: stem, lookFile: lookFiles[stem]!)
+                // A stem with no file here can only be one queued after this export started.
+                // It gets a path that does not exist, which the engine refuses by name, rather
+                // than another clip's grade or a crash.
+                let file =
+                    lookFiles[stem]
+                    ?? missingLook.appendingPathComponent("no-look-for-\(stem).json")
+                var env = project.environment(for: stem, lookFile: file)
                 env["GRADE_WORK_DIR"] = destination.path
                 env["EXPORT_DIR"] = export.path
                 if adjustOff { env["MATCH"] = "0" }

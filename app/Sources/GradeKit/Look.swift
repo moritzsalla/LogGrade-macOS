@@ -463,12 +463,6 @@ public struct Look: Equatable {
             options: [.prettyPrinted, .sortedKeys])
     }
 
-    /// A stage of the chain that can be switched off. The raw value is the inspector's title,
-    /// which is also the key its open state is remembered under.
-    ///
-    /// Only what a person switches. Halation, hue curves and the tone internals belong to a
-    /// preset, not to the panel, so they have no bypass. The stabiliser is not here either: it is
-    /// switched per clip (`Project.ClipSettings.stabilise`).
     /// What a person moves on one clip, on top of the batch's look: the Adjust section.
     ///
     /// ONLY THE MOVES, NOT A WHOLE LOOK. A per-clip copy of the look pinned that clip to whatever
@@ -508,6 +502,12 @@ public struct Look: Equatable {
         }
     }
 
+    /// A stage of the chain that can be switched off. The raw value is the inspector's title,
+    /// which is also the key its open state is remembered under.
+    ///
+    /// Only what a person switches. Halation, hue curves and the tone internals belong to a
+    /// preset, not to the panel, so they have no bypass. The stabiliser is not here either: it is
+    /// switched per clip (`Project.ClipSettings.stabilise`).
     public enum Stage: String, CaseIterable {
         case adjust = "Adjust"
         case denoise = "Denoise"
