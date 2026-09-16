@@ -2,7 +2,7 @@
 # Stage 2: baseline -> master (look + print + tone + trims: the grade less the correction and
 # halation, which need the log picture — a grade that uses either is refused, see below).
 # Usage: ./02-grade.sh IMG_XXXX
-# Reads dist/01-baseline/<clip>_baseline.mov, writes dist/02-graded/<clip>_graded.mov.
+# Reads .loggrade/baseline/<clip>_baseline.mov, writes .loggrade/masters/<clip>_graded.mov.
 #
 # THE TONE LUT IS THE POINT. The Portra LUT alone leaves the image far too bright and flat
 # ("milky"): nothing reaches black and the whole frame sits ~25% too high. shipped.cube fixes that.
@@ -73,12 +73,12 @@ if [ "$CORRECT_STATE" = "active" ] || [ "$HAL_STATE" = "active" ]; then
 	exit 1
 fi
 # Same margin as 01-baseline.sh, over the same measurement.
-check_disk_space "$WORK/dist" 10
+check_disk_space "$WORK" 10
 # Create the output directory. This used to rely on a checked-in dist/*/.gitkeep marker, which
 # is wrong the moment a work dir is set: the marker was in the repo and the output was not.
 mkdir -p "$(dirname "$OUT")"
 ensure_tone_lut "$ROOT"
-ensure_hue_lut "$WORK/dist/.grade-work" || exit 1
+ensure_hue_lut "$(work_cache "$WORK")/work" || exit 1
 TONE_GAMMA="$(look .tone.gamma)" || exit 1
 TONE_STATE="$(tone_state "$TONE_GAMMA")" || exit 1
 [ "$TONE_STATE" != neutral ] || TONE=""

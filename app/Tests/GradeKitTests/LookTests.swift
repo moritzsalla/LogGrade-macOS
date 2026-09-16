@@ -250,6 +250,37 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(look, try aLook(), "the rest of the look changed on the way")
     }
 
+    /// A project saved when the neutral preset was called "shipped" opens on it by its new name.
+    func testTheOldShippedPresetIsRenamedAndStaysActive() throws {
+        var project = Project(
+            presets: [.init(name: "shipped", look: try aLook())], activePreset: "shipped")
+        project.renamePreset(from: "shipped", to: "Neutral")
+        XCTAssertEqual(project.presets.map(\.name), ["Neutral"])
+        XCTAssertEqual(project.activePreset, "Neutral")
+        // One the person already named Neutral is theirs, and is not overwritten.
+        var both = Project(
+            presets: [
+                .init(name: "shipped", look: try aLook()),
+                .init(name: "Neutral", look: try aLook()),
+            ],
+            activePreset: "shipped")
+        both.renamePreset(from: "shipped", to: "Neutral")
+        XCTAssertEqual(both.presets.map(\.name), ["shipped", "Neutral"])
+    }
+
+    /// One folder per Convert, dated, beside nothing else a person has to recognise.
+    func testAnExportFolderIsNamedForWhenItStarted() throws {
+        var parts = DateComponents()
+        parts.year = 2026
+        parts.month = 9
+        parts.day = 16
+        parts.hour = 14
+        parts.minute = 5
+        let date = try XCTUnwrap(Calendar.current.date(from: parts))
+        let folder = Project.exportFolder(in: URL(fileURLWithPath: "/shoot"), at: date)
+        XCTAssertEqual(folder.path, "/shoot/LogGrade export 2026-09-16 14.05")
+    }
+
     func testACroppedRenderIsBlockedUntilEveryClipHasAnOffset() throws {
         var project = Project(
             presets: [.init(name: "Portra", look: try aLook())],

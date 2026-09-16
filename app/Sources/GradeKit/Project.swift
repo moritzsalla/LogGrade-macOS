@@ -191,6 +191,26 @@ public struct Project: Equatable {
         activePreset = trimmed
     }
 
+    /// The folder a Convert writes: named once for the whole queue, so every clip of a run lands
+    /// together and no run overwrites another. The engine's `export_dir` names a command-line run the
+    /// same way.
+    public static func exportFolder(in destination: URL, at date: Date = Date()) -> URL {
+        let format = DateFormatter()
+        format.locale = Locale(identifier: "en_US_POSIX")
+        format.dateFormat = "yyyy-MM-dd HH.mm"
+        return destination.appendingPathComponent("LogGrade export \(format.string(from: date))")
+    }
+
+    /// Renames a preset, and the active choice with it. Nothing happens if the old name is absent or
+    /// the new one is taken: a project that already has both keeps both rather than losing one.
+    public mutating func renamePreset(from old: String, to new: String) {
+        guard let index = presets.firstIndex(where: { $0.name == old }),
+            !presets.contains(where: { $0.name == new })
+        else { return }
+        presets[index] = .init(name: new, look: presets[index].look)
+        if activePreset == old { activePreset = new }
+    }
+
     /// A clip's decisions, or the undecided defaults for a clip with none recorded.
     public func settings(for clip: String) -> ClipSettings {
         clips[clip] ?? ClipSettings()

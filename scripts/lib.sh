@@ -77,9 +77,27 @@ probe_scene_exposure() {  # probe_scene_exposure <src> <reference-stops>
 # path that differs by one component is a cache nobody hits: grade.sh once built the transform path
 # from the wrong root and paid ~65s a clip to redo analysis stage 00 had already done.
 source_path()        { printf '%s/src/%s.mov\n' "$1" "$2"; }                      # <work> <clip>
-baseline_path()      { printf '%s/dist/01-baseline/%s_baseline.mov\n' "$1" "$2"; }  # <work> <clip>
-graded_master_path() { printf '%s/dist/02-graded/%s_graded.mov\n' "$1" "$2"; }    # <work> <clip>
-transform_path()     { printf '%s/dist/stab/%s.trf\n' "$1" "$2"; }                 # <work> <clip>
+baseline_path()      { printf '%s/baseline/%s_baseline.mov\n' "$(work_cache "$1")" "$2"; }  # <work> <clip>
+graded_master_path() { printf '%s/masters/%s_graded.mov\n' "$(work_cache "$1")" "$2"; }    # <work> <clip>
+transform_path()     { printf '%s/stabilisation/%s.trf\n' "$(work_cache "$1")" "$2"; }     # <work> <clip>
+
+# EVERYTHING THAT IS NOT A DELIVERABLE lives in one hidden folder in the work dir: the stabilisation
+# analysis, generated cubes, run reports, preview frames, proofs and the staged path's masters.
+# Hidden, because the work dir is the folder a person exports into and uploads from, and Finder
+# does not show it. Beside the export rather than in ~/Library/Caches, because a transform is
+# fresh by timestamp against a clip NAME: two shoots' IMG_0609 must not share one.
+work_cache() { printf '%s/.loggrade\n' "$1"; }  # <work>
+
+# Where a run's deliverables go: one folder per export, named for when it started, so an export
+# never overwrites an earlier one and the folder says what it is. EXPORT_DIR names it outright,
+# which is how the app gives every clip of one Convert the same folder.
+export_dir() {  # export_dir <work>
+	if [ -n "${EXPORT_DIR:-}" ]; then
+		printf '%s\n' "$EXPORT_DIR"
+	else
+		printf '%s/LogGrade export %s\n' "$1" "$(date '+%Y-%m-%d %H.%M')"
+	fi
+}
 
 # A proof is named so it can never be mistaken for a deliverable in a folder listing.
 deliverable_path() {  # deliverable_path <dir> <clip> <suffix> [proof-seconds]
@@ -275,7 +293,7 @@ require_numbers() {  # require_numbers <label> <value>  -> echoes the value, or 
 # (`lut1d=file='<cache>/<clip>_tone.cube'`) and the transform (`vidstabtransform=input='...'`).
 #
 # Two refusals, for two different failures:
-#   - `/` makes the name a path. Stage outputs are built as "$WORK/dist/<stage>/${CLIP}_x.mov", and
+#   - `/` makes the name a path. Stage outputs are built as "<folder>/${CLIP}_x.mov", and
 #     since the stages started calling `mkdir -p "$(dirname "$OUT")"` — needed once the work dir
 #     stopped being the repo — a traversing name is no longer stopped by the directory not
 #     existing. It gets created.

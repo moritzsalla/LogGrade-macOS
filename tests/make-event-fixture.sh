@@ -41,6 +41,7 @@ printf 'not a video\n' > "$WORK/src/BROKEN.mov"
 STREAM="$(JSON=1 DRY=1 MATCH=0 GRADE_WORK_DIR="$WORK" "$ROOT/scripts/grade.sh" "$WORK/src" 2>/dev/null \
 	| sed -e "s|$WORK|<WORK>|g" \
 		-e 's|"report":"[^"]*"|"report":"<REPORT>"|' \
+		-e 's|LogGrade export [0-9-]* [0-9.]*|LogGrade export <DATE>|g' \
 		-e 's|"available_gb":[0-9]*|"available_gb":"<GB>"|')"
 
 if [ "$MODE" = "--check" ]; then

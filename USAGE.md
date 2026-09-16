@@ -7,7 +7,7 @@ itself ([ADR 0008](docs/adr/0008_THE_APP_DRIVES_THE_CHAIN_AND_NEVER_REBUILDS_IT.
 
 ```sh
 ./app/make-app.sh [--debug]                # dist/LogGrade.app, release by default
-./scripts/grade.sh src/ | clip.mov ...     # source -> deliverables in dist/03-final/, report in dist/reports/
+./scripts/grade.sh src/ | clip.mov ...     # source -> 'LogGrade export <date time>/', report in .loggrade/reports/
 ./scripts/01-baseline.sh IMG_0609          # staged: source -> baseline
 ./scripts/02-grade.sh    IMG_0609          # staged: baseline -> master (refuses correction or halation)
 ./scripts/00-stabilise-detect.sh IMG_0609  # staged, optional: camera motion
@@ -40,7 +40,8 @@ Nothing has to be downloaded: `luts/rendering/neutral.cube` is the shipped conve
 | `STAB=0` | skip stabilisation |
 | `FINISH=0` | skip the delivery finish: sharpener, denoise and gauge. With a neutral look, `MATCH=0` and `STAB=0`, a final is the conversion alone |
 | `SMOOTHING=<n>` | stabiliser lowpass, in frames |
-| `PROOF=<seconds>` | render seconds through the real chain into `dist/proofs/` |
+| `PROOF=<seconds>` | render seconds through the real chain into `.loggrade/proofs/` |
+| `EXPORT_DIR=<dir>` | where deliverables land; default `<work>/LogGrade export <date time>` |
 | `FRAME=<seconds>` | one graded still (the app's preview) |
 | `FRAME_HEIGHT=<px>` | still height, default 1440 |
 | `FRAME_STAGE=graded\|source` | still with or without the grade |

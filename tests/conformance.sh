@@ -81,7 +81,7 @@ render fork      "$ROOT"      "$TMP/fork"
 
 pick() {  # pick <work-dir> -> the proof it wrote
 	local found=""
-	for f in "$1/dist/proofs"/*.mp4; do
+	for f in "$1/.loggrade/proofs"/*.mp4; do
 		if [ -f "$f" ]; then found="$f"; fi
 	done
 	printf '%s\n' "$found"

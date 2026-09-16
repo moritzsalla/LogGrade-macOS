@@ -21,7 +21,7 @@
 #   SMOOTHING=<n>     frames of camera-path lowpass; higher is closer to locked-off
 #   MATCH=0           skip exposure metering and render every clip as shot
 #   GRAIN_STRENGTH=<n>  override look.json's grain strength
-#   PROOF=<seconds>   render this many seconds through the real chain into dist/proofs/
+#   PROOF=<seconds>   render this many seconds through the real chain into .loggrade/proofs/
 #   DRY=1             plan only, render nothing
 #   HEIGHT=<px>       height of the 9:16 reference frame (default 1920). It sets the shared
 #                     delivery width; each deliverable's own height follows its aspect.
@@ -38,7 +38,8 @@
 #   JSON=1            emit one machine-readable event per line on stdout instead of the human
 #                     lines, which then go only to the run report. Named codes go to stderr
 #                     either way. This is what the app drives the engine through.
-#   GRADE_WORK_DIR=<dir>  where src/ is read from and dist/ is written, instead of the repo. A
+#   EXPORT_DIR=<dir>  where deliverables land. Default: '<work>/LogGrade export <date time>'.
+#   GRADE_WORK_DIR=<dir>  where src/ is read from and exports and .loggrade/ are written, instead of the repo. A
 #                     `.workdir` file beside the repo does the same thing; resolve_work_dir in
 #                     lib.sh picks between them. The whole bats suite runs through this.
 #   CONVERT=<name>    the conversion out of Apple Log for this run, overriding look.json's
@@ -75,8 +76,8 @@ WORK="$(resolve_work_dir "$ROOT")"
 # probe's decode rather than starting where the report file happens to be created.
 RUN_T0="$(now_ms)"
 
-# PROOF=<seconds> renders that many seconds through the REAL chain, into dist/proofs/ rather than
-# dist/03-final/. Two reasons it exists. A proof is the sign-off before committing to the slow
+# PROOF=<seconds> renders that many seconds through the REAL chain, into .loggrade/proofs/ rather
+# than the export folder. Two reasons it exists. A proof is the sign-off before committing to the slow
 # render. And
 # nothing in the suite executed this filter graph at all: shellcheck cannot see inside the string
 # (it reported clean on both previously shipped load-bearing bugs), the parity check touches only
@@ -117,7 +118,7 @@ case "$FRAME_STAGE" in
 		emit refused code REFUSE_FRAME_STAGE
 		exit 1;;
 esac
-FRAME_DIR="$WORK/dist/frames"
+FRAME_DIR="$(work_cache "$WORK")/frames"
 # Everything except an ungraded preview frame runs Apple's conversion, including the exposure probe
 # that would otherwise fail into an empty measurement and plan every clip at the reference gamma.
 # A film cube is a conversion too: resolve_conversion refuses a missing one either way.
@@ -144,17 +145,17 @@ if [ -n "$FRAME" ] && [ -n "$PROOF" ]; then
 fi
 # Proofs are not deliverables and must never land where someone uploads from.
 if [ -n "$PROOF" ]; then
-	OUT_DIR="$WORK/dist/proofs"
+	OUT_DIR="$(work_cache "$WORK")/proofs"
 else
-	OUT_DIR="$WORK/dist/03-final"
+	OUT_DIR="$(export_dir "$WORK")"
 fi
 # Reports are not deliverables — keep them out of the folder someone uploads from.
-REPORT_DIR="$WORK/dist/reports"
+REPORT_DIR="$(work_cache "$WORK")/reports"
 # A persistent cache for the per-clip tone LUTs the exposure match generates. It used to be
 # assigned over WORK itself, which left one name meaning two things — and the stabilisation
-# path below was then built from the wrong one, landing at <work>/dist/.grade-work/dist/stab/
-# instead of where 00-stabilise-detect.sh writes. WORK stays the work-dir root.
-CACHE="$WORK/dist/.grade-work"
+# path below was then built from the wrong one, landing inside the cache instead of
+# where 00-stabilise-detect.sh writes. WORK stays the work-dir root.
+CACHE="$(work_cache "$WORK")/work"
 
 # --- the look. Every value comes from look.json; nothing here holds a copy. ---
 # This path used to carry its own tone block while reading colour, grain and stabilisation from
@@ -344,8 +345,10 @@ done
 #
 # 10GB is the staged stages' margin, kept although this path writes no ProRes masters; nothing
 # records a measurement for a one-pass run, so it has not been lowered on a guess.
-check_disk_space "$WORK/dist" 10
-mkdir -p "$OUT_DIR" "$REPORT_DIR" "$CACHE"
+check_disk_space "$WORK" 10
+# The export folder is made only when a deliverable is about to land in it: a preview, a dry run or
+# a refused clip must not leave an empty dated folder behind.
+mkdir -p "$REPORT_DIR" "$CACHE"
 [ -z "$FRAME" ] || mkdir -p "$FRAME_DIR"
 REPORT="$REPORT_DIR/run-$(date +%Y%m%d-%H%M%S).txt"
 : > "$REPORT"
@@ -669,7 +672,7 @@ for SRC in "${CLIPS[@]}"; do
 		R_H+=("$_h"); R_CROP+=("$_crop"); R_SUFFIX+=("${D_SUFFIX[$_i]}")
 		_i=$(( _i + 1 ))
 	done
-	[ "$CLIP_OK" = 0 ] || render || CLIP_OK=0
+	[ "$CLIP_OK" = 0 ] || { mkdir -p "$OUT_DIR" && render; } || CLIP_OK=0
 	report_line "      clip took $(fmt_ms $(( $(now_ms) - CLIP_T0 )))"
 	if [ "$CLIP_OK" = "1" ]; then
 		OK=$((OK+1))

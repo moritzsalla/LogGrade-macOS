@@ -27,7 +27,7 @@ DENOISE_PREFIX=""
 [ "$FINISH" = 0 ] || DENOISE_PREFIX="$(denoise_prefix "$DENOISE_STRENGTH")"
 # A clip's baseline and graded masters measured 4.6GB together (docs/PIPELINE.md, "Disk space
 # policy"); 10GB is a margin over that, not a measurement.
-check_disk_space "$WORK/dist" 10
+check_disk_space "$WORK" 10
 # Create the output directory. This used to rely on a checked-in dist/*/.gitkeep marker, which
 # is wrong the moment a work dir is set: the marker was in the repo and the output was not.
 mkdir -p "$(dirname "$OUT")"

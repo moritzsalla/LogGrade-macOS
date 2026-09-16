@@ -19,6 +19,10 @@ src/*
 # output like everything else here.
 dist/
 
+# A run's exports and its hidden working folder, when the repo itself is the work dir.
+LogGrade export */
+.loggrade/
+
 # Generated LUTs from the search that found the shipped one. The parameters that produce them live
 # in look.json, and scripts/make-tone-lut.py stamps them into each cube's TITLE, so the files
 # themselves are reproducible output.
