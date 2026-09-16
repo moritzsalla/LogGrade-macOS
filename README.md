@@ -133,19 +133,14 @@ render but are not yet judged.
 
 ## Match a shoot to itself
 
-Clips shot across an evening land differently under one curve, so each clip's exposure is measured
-and its gamma solved to land them together. What they land *on* used to be a constant in
-`look.json`: 609, the luma mean of one frame of one clip of one shoot. Right for that footage,
-meaningless for anyone else's, and applied silently either way.
+Clips shot across an evening land differently, so each one is metered from a decoded frame — its
+log-average brightness and how far its near-neutrals sit from grey — and corrected in linear light
+before the conversion, where a stop is a stop. The move is damped: a dusk clip stays darker than a
+noon one, rather than every clip landing on one grey.
 
 ```sh
-MATCH=batch ./scripts/grade.sh src/     # anchor on the median of these clips instead
+MATCH=0 ./scripts/grade.sh src/     # render every clip as shot instead
 ```
-
-The default is unchanged. It was kept to stay byte-identical to the precursor, a reason ADR 0014
-withdrew, so whether it should change is an open question.
-
-→ [`adr/0011`](docs/adr/0011_THE_EXPOSURE_REFERENCE_CAN_COME_FROM_THE_SHOOT.md)
 
 ---
 
@@ -165,8 +160,7 @@ tests/      Every test here exists because the thing it covers already broke.
 
 ## Before it runs
 
-Apple's conversion LUT is not in the repo — its licence forbids redistribution.
-[`luts/apple/SOURCE.txt`](luts/apple/SOURCE.txt) says how to fetch it.
+Nothing to download: the app renders Apple Log with its own conversion.
 
 ## Scope and licence
 

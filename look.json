@@ -1,37 +1,38 @@
 {
   "_comment": [
-    "The look, in one place. Every stage reads this; nothing hardcodes a look value any more.",
-    "This is the SHIPPED look. The app opens on it and renders through its own copies, passed as",
-    "LOOK_FILE, so it never edits this file; change the shipped look by hand — it is just numbers.",
+    "THE SHIPPED LOOK: what the app opens on, and what a render uses when nobody picks a",
+    "preset. Every stage reads this file; nothing hardcodes a look value. The app renders",
+    "through its own copies, passed as LOOK_FILE, so it never edits this one — change the",
+    "shipped look by hand, it is just numbers.",
     "",
-    "tone.* are the arguments to scripts/make-tone-lut.py. luts/tone/shipped.cube is GENERATED",
-    "from them. Freshness is by CONTENT, not mtime: the cube stamps its parameters into its TITLE",
-    "and ensure_tone_lut (scripts/lib.sh) regenerates it whenever those disagree with this file,",
-    "so the .cube can never silently disagree with the numbers recorded here.",
+    "convert.cube is THE RENDERING, and it is this app's own (luts/rendering/neutral.cube,",
+    "baked by scripts/make-rendering-lut.py). It takes the log picture to a finished one in a",
+    "single scene-referred step, so no stage downstream works on highlights that Apple's cube",
+    "has already squeezed into the top tenth of the range. Its contrast, saturation and black",
+    "are baked into the cube's TITLE rather than kept here: it is a shipped asset like the film",
+    "cubes, re-baked when it is re-tuned. 'apple' puts Apple's own cube back.",
     "",
-    "correct.* is the input-correction stage, which runs BEFORE Apple's conversion and therefore",
-    "in log: exposure and white balance in linear (decoded and re-encoded with Apple's published",
-    "transfer function), then an ASC CDL — slope, offset, power, which is what lift, gamma and gain",
-    "wheels are. At the values below it does NOTHING, and a neutral correction leaves the filter",
-    "out of the graph rather than rendering every pixel through a lookup that returns it.",
+    "EVERY STAGE BELOW IS NEUTRAL, deliberately. The rendering is the picture, so the tone",
+    "curve, the trims and the hue curves start at the values the engine leaves out of the graph",
+    "entirely, and each slider has its full range in both directions from there. That is the",
+    "opposite of the old shipped look, which spent its tone curve undoing Apple's conversion.",
     "",
-    "look.lut names the film-emulation cube by its stem in luts/looks/, or \"none\" for no look at",
-    "all. It lives here rather than in a script because it is a look value, and because the tone",
-    "block below was tuned WITH this cube in the chain: the two belong to each other.",
+    "correct.* is the input-correction stage, which runs BEFORE the conversion and therefore in",
+    "log: exposure and white balance in linear (decoded and re-encoded with Apple's published",
+    "transfer function), then an ASC CDL — slope, offset, power, which is what lift, gamma and",
+    "gain wheels are. At the values below it does NOTHING, and a neutral correction leaves the",
+    "filter out of the graph rather than rendering every pixel through a lookup that returns it.",
     "",
-    "Provenance of the current values: graded by eye in the Bench (since retired)",
-    "against the RAL references in frame, then adjusted once for shadow detail (black 0.015 ->",
-    "0.025, gamma 2.09 -> 2.02).",
-    "saturation 1.27 is DELIBERATELY off-spec — it puts the traffic blue at B/G 2.39 against a",
-    "1.98 spec. That is the grade, not an error.",
+    "match.reference_stops is where a clip's metered log-average lands, in stops from mid grey;",
+    "scripts/solve-exposure.py meters each clip against it, in linear, before the conversion. It",
+    "is what makes a shoot land together. match.reference_yavg is the older post-Apple-cube mean,",
+    "read only when convert.cube is 'apple'.",
     "",
-    "match.reference_yavg is the post-CST luma mean (10-bit) the look was tuned against, measured",
-    "on IMG_0609. grade.sh solves each clip's gamma to land on it, so that every clip in a shoot",
-    "window gets the same look rather than the same curve. It lives here because it is a",
-    "measurement of the grade, not a knob: change it only if the look is re-tuned on another frame."
+    "halation is 0 here: a glow is a film effect, and the presets that want one carry it.\nfinish.* is the delivery stage: the log denoise, the edge-limited sharpener and the film",
+    "gauge. Like grain, none of it is in a still."
   ],
   "convert": {
-    "cube": "apple"
+    "cube": "neutral"
   },
   "correct": {
     "exposure": 0.0,
@@ -49,7 +50,7 @@
     "tint": "1,0.3,0.05"
   },
   "look": {
-    "lut": "kodak_portra_400_nc",
+    "lut": "none",
     "strength": 1.0
   },
   "print": {
@@ -62,21 +63,21 @@
     "lum": "0,0,0,0,0,0,0,0,0,0,0,0"
   },
   "tone": {
-    "gamma": 2.02,
-    "pivot": 0.39,
-    "contrast": 1.09,
+    "gamma": 1.0,
+    "pivot": 0.5,
+    "contrast": 1.0,
     "toe": 0.0,
-    "shoulder": 0.1,
-    "black": 0.025
+    "shoulder": 0.0,
+    "black": 0.0
   },
   "colour": {
-    "saturation": 1.27,
-    "warmth": 0.005
+    "saturation": 1.0,
+    "warmth": 0.0
   },
   "grain": {
-    "strength": 8,
+    "strength": 3,
     "shadows": 1.0,
-    "highlights": 1.0
+    "highlights": 0.6
   },
   "stabilisation": {
     "smoothing": 30
@@ -86,7 +87,7 @@
     "reference_stops": -0.4
   },
   "finish": {
-    "denoise": 0,
+    "denoise": 1,
     "sharpen": 0.6,
     "gauge": "none"
   }

@@ -17,7 +17,7 @@ import Foundation
 /// where it belongs and where it is not duplicated.
 public struct CorrectionCube {
     // Apple's published Log Profile transfer function. Constants copied from the generator, which
-    // took them from the white paper; luts/apple/SOURCE.txt carries the provenance.
+    // took them from Apple's Log Profile white paper.
     static let r0 = -0.05641088
     private static let rt = 0.01
     private static let c = 47.28711236

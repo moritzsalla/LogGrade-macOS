@@ -69,7 +69,6 @@ Query one field at a time with `-of default=nw=1:nk=1`, and validate the answer 
 These were "settled", and the user has reopened them.
 
 - The look: the Portra LUT is not the reference, the partner's analog scans are. The off-spec saturation and "tone, not colour" were judged on one shoot's road signs.
-- ADR 0011's `MATCH=1` default.
 - The tests feel too heavy: keep the silent-failure guards, thin out the rest.
 
 ## Doc rules

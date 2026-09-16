@@ -26,17 +26,16 @@ func stubEngine(script: String) throws -> EngineLocation {
         at: root.appendingPathComponent("luts/looks"),
         withIntermediateDirectories: true)
     try FileManager.default.createDirectory(
-        at: root.appendingPathComponent("luts/apple"),
+        at: root.appendingPathComponent("luts/rendering"),
         withIntermediateDirectories: true)
     try "{}".write(
         to: root.appendingPathComponent("look.json"), atomically: true,
         encoding: .utf8)
     try "".write(
-        to: root.appendingPathComponent("luts/apple/AppleLogToRec709-v1.0.cube"),
+        to: root.appendingPathComponent("luts/rendering/neutral.cube"),
         atomically: true, encoding: .utf8)
     for name in [
         "grade.sh", "make-tone-lut.py", "make-correct-lut.py", "make-halation-luts.py",
-        "solve-gamma.py",
     ] {
         let url = scripts.appendingPathComponent(name)
         try (name == "grade.sh" ? script : "#!/bin/bash\n")
@@ -100,8 +99,8 @@ func lookFixture(gamma: Double = 2.02, lut: String = "kodak_portra_400_nc") thro
          "tone":{"gamma":\(gamma),"pivot":0.39,"contrast":1.09,"toe":0,"shoulder":0.1,"black":0.025},
          "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8,"shadows":1,"highlights":1},
          "hue":{"rot":"0,0,0,0,0,0,0,0,0,0,0,0","sat":"0,0,0,0,0,0,0,0,0,0,0,0","lum":"0,0,0,0,0,0,0,0,0,0,0,0"},
-         "stabilisation":{"smoothing":30},"match":{"reference_yavg":609,"reference_stops":-0.4},
-         "convert":{"cube":"apple"},"finish":{"denoise":0,"sharpen":0.6,"gauge":"none"}}
+         "stabilisation":{"smoothing":30},"match":{"reference_stops":-0.4},
+         "convert":{"cube":"neutral"},"finish":{"denoise":0,"sharpen":0.6,"gauge":"none"}}
         """
     return try Look(data: Data(json.utf8))
 }

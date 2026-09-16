@@ -308,15 +308,16 @@ public struct Look: Equatable {
         }
     }
 
-    /// Apple's own conversion, as `convert.cube` names it.
-    public static let appleConversion = "apple"
-    /// What an older project's looks are given for `match.reference_stops`: look.json's value, which
-    /// only a film conversion reads, so it changes nothing those looks render.
+    /// The app's own rendering of Apple Log, and the shipped default (`luts/rendering/neutral.cube`,
+    /// `scripts/make-rendering-lut.py`). Apple's own cube was an option until it was dropped: it
+    /// spent the highlight latitude before any grade saw it, and could not be redistributed.
+    public static let neutralConversion = "neutral"
+    /// What an older project's looks are given for `match.reference_stops`.
     static let defaultReferenceStops = -0.4
 
-    /// The conversion out of Apple Log: "apple", or a film cube's stem in `luts/film/`. A film cube
-    /// is the stock's whole rendering, and under one the engine meters each clip's exposure and
-    /// white balance in linear rather than solving a gamma (`scripts/solve-exposure.py`).
+    /// The conversion out of Apple Log: a cube's stem in `luts/rendering/` or `luts/film/`. It
+    /// renders the log picture in one scene-referred step, and the engine meters each clip's
+    /// exposure and white balance in linear before it (`scripts/solve-exposure.py`).
     public var convertCube: String
     public var correct: Correct
     public var halation: Halation
@@ -336,8 +337,7 @@ public struct Look: Equatable {
     public var grainShadows: Double
     public var grainHighlights: Double
     public var stabilisationSmoothing: Double
-    public var matchReferenceYAVG: Double
-    /// The centre-weighted log-average, in stops from 0.18, a film conversion meters clips to.
+    /// The centre-weighted log-average, in stops from 0.18, each clip is metered to.
     public var matchReferenceStops: Double
     public var finish: Finish
     /// Everything this type does not model, kept verbatim so a written file is complete.
@@ -351,11 +351,8 @@ public struct Look: Equatable {
             && a.colour == b.colour && a.grainStrength == b.grainStrength
             && a.grainShadows == b.grainShadows && a.grainHighlights == b.grainHighlights
             && a.stabilisationSmoothing == b.stabilisationSmoothing
-            && a.matchReferenceYAVG == b.matchReferenceYAVG
             && a.matchReferenceStops == b.matchReferenceStops && a.finish == b.finish
     }
-
-    public var isFilmConversion: Bool { convertCube != Self.appleConversion }
 
     public enum Invalid: Error, CustomStringConvertible {
         case notAnObject
@@ -431,9 +428,8 @@ public struct Look: Equatable {
         stabilisationSmoothing = try number(
             try block("stabilisation"), "smoothing",
             "stabilisation.smoothing")
-        let matchBlock = try block("match")
-        matchReferenceYAVG = try number(matchBlock, "reference_yavg", "match.reference_yavg")
-        matchReferenceStops = try number(matchBlock, "reference_stops", "match.reference_stops")
+        matchReferenceStops = try number(
+            try block("match"), "reference_stops", "match.reference_stops")
         let finishBlock = try block("finish")
         finish = Finish(
             denoise: try number(finishBlock, "denoise", "finish.denoise"),
@@ -475,9 +471,7 @@ public struct Look: Equatable {
             "highlights": grainHighlights,
         ]
         root["stabilisation"] = ["smoothing": stabilisationSmoothing]
-        root["match"] = [
-            "reference_yavg": matchReferenceYAVG, "reference_stops": matchReferenceStops,
-        ]
+        root["match"] = ["reference_stops": matchReferenceStops]
         root["finish"] = [
             "denoise": finish.denoise, "sharpen": finish.sharpen, "gauge": finish.gauge,
         ]
@@ -502,10 +496,6 @@ public struct Look: Equatable {
     /// This look with the given stages written as the values the engine leaves out, so a bypass
     /// is a look like any other and the live tier, the exact frame and the export all agree.
     ///
-    /// TONE IS NOT OFF THROUGH THE LOOK ALONE. Exposure matching solves the gamma per clip and
-    /// clamps it to at least 1.2, so an identity curve here still renders a curve unless the
-    /// render also runs with `MATCH=0` — see `matchesExposure(bypassing:)`.
-    ///
     /// DELIVERY IS NOT OFF THROUGH THE LOOK ALONE either: grain is a look value, but the chroma
     /// denoise and the sharpener are not, so the render also runs with `FINISH=0` — see
     /// `finishes(bypassing:)`. The stabiliser has its own per-clip switch, and a second one
@@ -516,10 +506,11 @@ public struct Look: Equatable {
             switch stage {
             case .correct: out.correct = Correct()
             case .halation: out.halation.strength = 0
-            // A film conversion is the film look too, so off is Apple's plain conversion.
+            // A film stock is the conversion too, so switching the look off falls back to the
+            // app's own neutral rendering rather than leaving the stock in the picture.
             case .filmLook:
                 out.lookLUT = "none"
-                out.convertCube = Self.appleConversion
+                out.convertCube = Self.neutralConversion
             case .print: out.printLUT = "none"
             case .hue: out.hue = Hue()
             case .tone:
@@ -531,10 +522,6 @@ public struct Look: Equatable {
             }
         }
         return out
-    }
-
-    public static func matchesExposure(bypassing stages: Set<Stage>) -> Bool {
-        !stages.contains(.tone)
     }
 
     public static func finishes(bypassing stages: Set<Stage>) -> Bool {

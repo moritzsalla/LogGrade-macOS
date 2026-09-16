@@ -21,7 +21,7 @@ send the wrong one. The app is a few MB, and doubling it costs nothing.
 - Toolchain: Swift 5.9.2, Xcode 15.2, macOS 13 SDK. `Package.swift` is pinned to 5.9, and that pin
   stays.
 - `python3` is required at render time, not only in tests. `grade.sh` calls
-  `make-tone-lut.py`, `make-correct-lut.py`, `make-halation-luts.py` and `solve-gamma.py`. Those
+  `make-tone-lut.py`, `make-correct-lut.py`, `make-halation-luts.py` and `solve-exposure.py`. Those
   scripts use only the standard library. `/usr/bin/python3` exists on every Mac as a developer-tools
   placeholder, so the preflight now runs it and names `xcode-select --install` when it refuses.
 - The preflight used to ignore the tools inside the bundle, so a Mac without its own ffmpeg was

@@ -382,17 +382,25 @@ extension Project {
             upgraded = look
         }
         // Before version 3 every look rendered through Apple's cube, with the delivery finish the
-        // engine then hardcoded: no log denoise, no gauge, and the
-        // shipped sharpener (now edge-limited, at the amount that measured the old detail).
+        // engine then hardcoded: no log denoise, no gauge, and the shipped sharpener (now
+        // edge-limited, at the amount that measured the old detail).
+        //
+        // THE CONVERSION IS THE ONE UPGRADE THAT MOVES THE PICTURE. Apple's cube is gone, so such
+        // a look opens on this app's own rendering: brighter highlights and more contrast than it
+        // was saved with. There is nothing closer to offer, and refusing the file instead would
+        // lose the grade entirely.
         if version < conversionVersion, var look = upgraded as? [String: Any] {
-            if look["convert"] == nil { look["convert"] = ["cube": Look.appleConversion] }
+            if look["convert"] == nil { look["convert"] = ["cube": Look.neutralConversion] }
             if look["finish"] == nil {
                 let finish = Look.Finish()
                 look["finish"] = [
                     "denoise": finish.denoise, "sharpen": finish.sharpen, "gauge": finish.gauge,
                 ]
             }
-            if var match = look["match"] as? [String: Any], match["reference_stops"] == nil {
+            // The block itself may be absent: `reference_yavg` was its only key, and it is gone
+            // with Apple's cube. Rebuilding it is what keeps such a file readable at all.
+            var match = look["match"] as? [String: Any] ?? [:]
+            if match["reference_stops"] == nil {
                 match["reference_stops"] = Look.defaultReferenceStops
                 look["match"] = match
             }

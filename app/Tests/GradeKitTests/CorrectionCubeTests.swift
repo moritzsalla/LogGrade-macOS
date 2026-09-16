@@ -150,25 +150,4 @@ final class ToneCurvePortTests: XCTestCase {
             XCTAssertLessThan(worst, 5e-9, "\(name): entry \(worstAt) differs by \(worst)")
         }
     }
-
-    func testItSolvesTheSameGammaTheEngineSolves() throws {
-        let engine = try engineCheckout()
-        // Both clamps, both domain guards, and ordinary values in between.
-        let probes: [(Double, Double, Double)] = [
-            (479, 609, 2.02), (609, 609, 2.02), (100, 609, 2.02), (1000, 609, 2.02),
-            (0, 609, 2.02), (1023, 609, 2.02), (479, 0, 2.02), (300, 900, 1.5),
-        ]
-        for (clip, reference, gamma) in probes {
-            let theirs = ToneCurve.solvedGamma(
-                using: engine.gammaSolver, clipYAVG: clip,
-                referenceYAVG: reference, referenceGamma: gamma)
-            let mine = ToneCurve.solvedGamma(
-                clipYAVG: clip, referenceYAVG: reference,
-                referenceGamma: gamma)
-            // The solver prints three decimals, which is the comparison's floor.
-            XCTAssertEqual(
-                mine, theirs, accuracy: 5e-4,
-                "clip \(clip) against \(reference) at gamma \(gamma)")
-        }
-    }
 }

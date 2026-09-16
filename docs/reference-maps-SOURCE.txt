@@ -9,7 +9,7 @@ Why not
 -------
 Google Maps and Apple Maps both restrict redistribution of their imagery, and the
 Street View capture carried a "© 2026 Google" watermark. This is the same constraint
-luts/apple/SOURCE.txt reasons about for Apple's LUTs: free to look at, not free to
+this repo reasoned about for Apple's LUTs: free to look at, not free to
 republish. A public repo redistributing them is the part that is not allowed.
 
 The measurement in PIPELINE.md stands on its own; the screenshots were corroboration,

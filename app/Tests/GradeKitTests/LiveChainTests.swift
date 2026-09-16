@@ -34,7 +34,8 @@ final class LiveChainTests: XCTestCase {
             .appendingPathComponent("chain-\(UUID().uuidString)", isDirectory: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: work) }
         let look = try Look(data: Data(contentsOf: engine.lookFile))
-        let conversion = try Cube3D(contentsOf: engine.appleCube)
+        let conversion = try Cube3D(
+            contentsOf: try XCTUnwrap(engine.conversionCube(named: look.convertCube)))
         let lookCube = engine.lookCube(named: look.lookLUT).flatMap { try? Cube3D(contentsOf: $0) }
         return Rig(
             engine: engine,
@@ -112,21 +113,17 @@ final class LiveChainTests: XCTestCase {
     ) {
         let exact = try rig.renderer.render(clip: rig.clip, seconds: 4, look: look, height: 480)
         let exactImage = try image(exact)
-        var tone = look.tone
-        // The engine reports the gamma it solved; the app's own path solves the same one, which
-        // `ToneCurvePortTests` checks separately. Taking it from the event keeps this a test of
-        // the picture rather than of the solve.
-        if let gamma = exact.gamma { tone.gamma = gamma }
-        // Under a film conversion the engine adds what it metered to the correction, as the app does.
-        let correct = look.isFilmConversion ? exact.metered.applied(to: look.correct) : look.correct
+        let tone = look.tone
+        // The engine adds what it metered to the correction, as the app does.
+        let correct = exact.metered.applied(to: look.correct)
         let correction =
             correct.isNeutral
             ? nil
             : CorrectionCube.cube(for: correct, size: 33)
         let conversion =
-            look.isFilmConversion
-            ? try Cube3D(contentsOf: XCTUnwrap(rig.engine.conversionCube(named: look.convertCube)))
-            : rig.conversion
+            look.convertCube == rig.look.convertCube
+            ? rig.conversion
+            : try Cube3D(contentsOf: XCTUnwrap(rig.engine.conversionCube(named: look.convertCube)))
         let sourceImage = try source(rig)
         let chain = LiveChain(
             stages: LiveChain.colourStages(

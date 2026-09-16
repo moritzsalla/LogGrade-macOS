@@ -570,50 +570,6 @@ PY
 		|| fail "grade.sh ignored look.json's tone block: $output"
 }
 
-# --- solve-gamma.py ------------------------------------------------------------
-# The exposure solve was a python3 -c program assembled by string interpolation inside grade.sh,
-# so nothing could reach it. A degenerate probe raised inside it — math.log(0) on a near-black
-# frame, a zero denominator at y == 1.0 — and under `set -euo pipefail` that killed the whole
-# batch at clip n rather than rendering that clip with the frozen curve.
-
-@test "solve-gamma returns the reference gamma when the clip matches the reference" {
-	run "$SCRIPTS/solve-gamma.py" 609 609 2.02
-	[ "$status" -eq 0 ]
-	[ "$output" = "2.020" ]
-}
-
-@test "solve-gamma moves the curve for a clip darker than the reference" {
-	run "$SCRIPTS/solve-gamma.py" 400 609 2.02
-	[ "$status" -eq 0 ]
-	[ "$output" != "2.020" ]
-}
-
-@test "solve-gamma falls back rather than dividing by zero on a blown frame" {
-	# y == 1.0 makes log(y) zero. This used to abort the batch.
-	run "$SCRIPTS/solve-gamma.py" 1023 609 2.02
-	[ "$status" -eq 0 ]
-	[ "$output" = "2.020" ]
-}
-
-@test "solve-gamma falls back rather than taking log(0) on a black frame" {
-	run "$SCRIPTS/solve-gamma.py" 0 609 2.02
-	[ "$status" -eq 0 ]
-	[ "$output" = "2.020" ]
-}
-
-@test "solve-gamma clamps instead of extrapolating a curve nobody has looked at" {
-	# Four stops under the tuning exposure has no meaningful solve, only a nearest sane curve.
-	run "$SCRIPTS/solve-gamma.py" 12 609 2.02
-	[ "$status" -eq 0 ]
-	[ "$output" = "1.200" ]
-}
-
-@test "solve-gamma rejects a non-numeric probe instead of interpolating it into a program" {
-	run "$SCRIPTS/solve-gamma.py" "1); import os; os.exit(0" 609 2.02
-	[ "$status" -ne 0 ]
-	[[ "$output" == *"non-numeric"* ]] || fail "[[ \"$output\" == *\"non-numeric\"* ]]"
-}
-
 @test "safe_retag leaves a correctly tagged file untouched" {
 	# Encoders don't reliably STAMP the tags, which is why safe_retag exists — but they don't
 	# reliably get them wrong either, and the function remuxed unconditionally. On the staged path
@@ -795,13 +751,12 @@ JSON
 	work="$BATS_TEST_TMPDIR/render"
 	mkdir -p "$work"
 
-	# 0.1 seconds through the whole chain: CST, look LUT, luma-only tone via mergeplanes,
-	# saturation, warmth, chroma denoise, the dithered 10->8 reduction, sharpener, grain blend.
-	# MATCH stays on so the exposure probe runs too — it once returned empty on every clip
-	# because `metadata=print` logs at INFO level, which `-v error` suppresses.
+	# 0.1 seconds through the whole chain: the conversion, look LUT, luma-only tone via
+	# mergeplanes, saturation, warmth, the dithered 10->8 reduction, sharpener, grain blend.
+	# MATCH stays on so the exposure meter runs too.
 	PROOF=0.1 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$src"
 	[ "$status" -eq 0 ] || fail "$output"
-	[[ "$output" =~ YAVG=[0-9] ]] || fail "the exposure probe returned nothing: $output"
+	[[ "$output" == *"metered exposure="* ]] || fail "the exposure meter did not run: $output"
 
 	out=$(ls "$work"/dist/proofs/*.mp4 2>/dev/null | head -1) || true
 	[ -n "$out" ] || fail "no proof was written: $output"
@@ -895,16 +850,21 @@ JSON
 	[ -z "$missing" ] || fail "incomplete:$missing"
 }
 
-@test "resolve_conversion names Apple's cube or a film cube, and refuses anything else" {
+@test "resolve_conversion names a rendering or a film cube, and refuses anything else" {
 	run resolve_conversion imax65
 	[ "$status" -eq 0 ] && [ "$output" = "$LIB_ROOT/luts/film/imax65.cube" ] || fail "film: $output"
+	run resolve_conversion neutral
+	[ "$status" -eq 0 ] && [ "$output" = "$LIB_ROOT/luts/rendering/neutral.cube" ] || fail "rendering: $output"
 	run resolve_conversion portra_nonexistent
 	[ "$status" -ne 0 ] || fail "accepted a cube that is not there"
-	[[ "$output" == *"no luts/film/"*"nonexistent"* ]] || fail "$output"
+	[[ "$output" == *"nonexistent.cube in luts/rendering/ or luts/film/"* ]] || fail "$output"
 	# The name reaches a path and a filter graph.
-	run resolve_conversion ../apple/AppleLogToRec709-v1.0
+	run resolve_conversion ../film/imax65
 	[ "$status" -ne 0 ] || fail "accepted a path"
-	[[ "$output" == *"must be 'apple' or a cube name"* ]] || fail "$output"
+	[[ "$output" == *"must be a cube name"* ]] || fail "$output"
+	# Apple's cube was a name here until it was dropped; it must not linger as a special case.
+	run resolve_conversion apple
+	[ "$status" -ne 0 ] || fail "'apple' still resolves to something"
 }
 
 @test "the log denoise is absent at 0 and pinned to 10-bit YUV otherwise" {
@@ -1163,9 +1123,9 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 			'(docs|scripts|tests|luts|bench)/[A-Za-z0-9_/.-]+\.(md|sh|py|jsonl|json|cube|html|txt)' \
 			"$root"/*.md "$root"/docs "$root"/scripts "$root"/tests 2>/dev/null | sort -u); do
 		f="${ref%%[.,)]}"
-		# luts/apple/ is deliberately absent on a fresh clone (Apple's licence), and the filmic
+		# luts/filmic/ holds no cube: the filmic
 		# cubes are generated and gitignored. Both document their own absence in a SOURCE.txt.
-		case "$f" in luts/apple/*|luts/filmic/*) continue ;; esac
+		case "$f" in luts/filmic/*) continue ;; esac
 		[ -e "$root/$f" ] || missing="$missing $f"
 	done
 	[ -z "$missing" ] || fail "referenced but not present:$missing"
@@ -1361,7 +1321,7 @@ PY
 	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
 	[ -n "$report" ] || fail "no run report was written: $output"
 	grep -q "clip(s)" "$report" || fail "the report lost its header line"
-	grep -q "gamma=" "$report" || fail "the report lost the per-clip plan"
+	grep -q "metered exposure=" "$report" || fail "the report lost the per-clip plan"
 }
 
 # The report is what a slow or broken render is debugged from afterwards, so what it records has to
@@ -1369,11 +1329,15 @@ PY
 # is what lets a 72x128 fixture finish the delivery chain; at 1080x1920 it fails reinitialising.
 # bats test_tags=slow
 @test "the run report records the machine, the knobs, the graph and the timing of a real render" {
-	local work="$BATS_TEST_TMPDIR/report-proof"
+	local work="$BATS_TEST_TMPDIR/report-proof" look="$BATS_TEST_TMPDIR/report-look.json"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/probe_mid.mov" "$work/src/CLIP.mov"
+	# A CURVE THE SHIPPED LOOK DOES NOT HAVE. Its tone stage is neutral — the rendering is the
+	# picture — and a neutral curve is no cube and so no line to time. The report's job is to time
+	# the stages a render actually ran, so the render is given one.
+	jq '.tone.gamma = 1.5' "$BATS_TEST_DIRNAME/../look.json" > "$look"
 	# JSON=1 so the same run also proves none of it leaks onto the event stream.
-	JSON=1 HEIGHT=128 PROOF=0.5 STAB=0 GRADE_WORK_DIR="$work" \
+	JSON=1 HEIGHT=128 PROOF=0.5 STAB=0 LOOK_FILE="$look" GRADE_WORK_DIR="$work" \
 		run --separate-stderr "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "render failed: $output $stderr"
 	[[ "$output" != *"took"* ]] || fail "a report line reached the event stream: $output"
@@ -1385,14 +1349,16 @@ PY
 	grep -qE '^look: +.*look\.json sha256:[0-9a-f]{16}$' "$report" || fail "no look hash: $(cat "$report")"
 	grep -qE '^knobs: .*deliverables=reels .*height=128 .*proof=0\.5 ' "$report" || fail "no knobs: $(cat "$report")"
 	grep -qE 'source: 72x128 at 24/1 fps, 2\.0+s, 48 frames' "$report" || fail "no source facts: $(cat "$report")"
-	grep -qE 'exposure probe took [0-9]+\.[0-9]{3}s$' "$report" || fail "probe untimed: $(cat "$report")"
+	grep -qE 'exposure meter took [0-9]+\.[0-9]{3}s$' "$report" || fail "meter untimed: $(cat "$report")"
 	grep -qE 'tone cube took [0-9]+\.[0-9]{3}s$' "$report" || fail "tone cube untimed: $(cat "$report")"
 	# 0.5s at 24fps is 12 frames: counted from the file that landed, not assumed from the source.
 	grep -qE 'reels-stories_9x16 encode took [0-9]+\.[0-9]{3}s, 12 frames at [0-9.]+ fps, [0-9.]+x realtime, [0-9.]+ Mbit/s' \
 		"$report" || fail "no encode speed: $(cat "$report")"
 	grep -qE -- '--- graph [0-9]+ \(reels-stories_9x16 encode, -filter_complex\) ---' "$report" \
 		|| fail "no delimited filter graph: $(cat "$report")"
-	grep -qE '^\[0:v\]lut3d=.*blend=all_mode=grainmerge:shortest=1\[o\]$' "$report" \
+	# The head is the log denoise now, not the conversion, so the graph is matched end to end
+	# rather than by its first filter.
+	grep -qE '^\[0:v\].*lut3d=.*blend=all_mode=grainmerge:shortest=1\[o\]$' "$report" \
 		|| fail "the graph was not recorded whole: $(cat "$report")"
 	grep -qE '^finished .*, wall time [0-9]+\.[0-9]{3}s$' "$report" || fail "no wall time: $(cat "$report")"
 	grep -qE '^  encode +[0-9]+\.[0-9]{3}s$' "$report" || fail "no phase summary: $(cat "$report")"
@@ -1417,7 +1383,7 @@ PY
 	local report expected
 	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
 	[ -n "$report" ] || fail "no run report was written: $output"
-	expected="[0:v]lut3d=file='${APPLE_CST}':interp=tetrahedral,${DELIVERY_SETPARAMS},zscale=w=72:h=128:f=lanczos:d=error_diffusion,format=yuv420p[o]"
+	expected="[0:v]lut3d=file='$(resolve_conversion neutral)':interp=tetrahedral,${DELIVERY_SETPARAMS},zscale=w=72:h=128:f=lanczos:d=error_diffusion,format=yuv420p[o]"
 	grep -qxF -- "$expected" "$report" \
 		|| fail "the all-off graph is not the CST alone: $(grep -F '[0:v]' "$report")"
 }
@@ -1443,15 +1409,14 @@ PY
 	[ "$(fmt_ms 192004)" = "3m12.004s" ] || fail "got $(fmt_ms 192004)"
 }
 
-@test "the YAVG placeholder does not produce invalid JSON" {
-	# MATCH=0 leaves YAVG as a literal "-", which a laxer numeric test emits bare as `"yavg":-`.
-	# One path, invalid on that path only, and nothing else in the suite would have run it.
-	local work="$BATS_TEST_TMPDIR/json-dash"
+@test "MATCH=0 renders a clip as shot, and says so in the event stream" {
+	local work="$BATS_TEST_TMPDIR/json-meter"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
 	JSON=1 DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" \
 		run --separate-stderr "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[[ "$output" == *'"yavg":"-"'* ]] || fail "expected a quoted placeholder: $output"
+	[[ "$output" == *'"metered_exposure":0'* ]] || fail "metering ran with MATCH=0: $output"
+	printf '%s\n' "$output" | _json_lines
 }
 
 @test "every refusal names a code on stderr, beside the human sentence" {
@@ -1806,13 +1771,14 @@ PY
 }
 
 # bats test_tags=slow
-@test "LOOK=none renders a visibly different still than the shipped look" {
+@test "a film look renders a visibly different still than none" {
 	# End to end, through the real chain, because a string test cannot tell whether the filter that
-	# left the graph was the one doing the work.
+	# left the graph was the one doing the work. The SHIPPED look carries no film cube — the
+	# rendering is the picture — so the comparison is against one named for this run.
 	local work="$BATS_TEST_TMPDIR/lookdiff"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+	LOOK=kodak_portra_400_nc FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "$output"
 	mv "$work/dist/frames/CLIP_t0s_graded.png" "$work/with-look.png"
@@ -1820,7 +1786,7 @@ PY
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "$output"
 	! cmp -s "$work/with-look.png" "$work/dist/frames/CLIP_t0s_graded.png" \
-		|| fail "LOOK=none produced the same pixels as the shipped look"
+		|| fail "the film cube changed no pixels"
 }
 
 # --- delivery shape -----------------------------------------------------------
@@ -2093,29 +2059,32 @@ PY
 	[ "$status" -ne 0 ] || fail "accepted a word that is not an offset"
 }
 
-# --- the exposure reference ----------------------------------------------------
-# MATCH=1 lands every clip on look.json's match.reference_yavg, which is a measurement of one frame
-# of one clip of one shoot. MATCH=batch anchors on the run's own median instead. See docs/adr/0011.
+# --- exposure metering ---------------------------------------------------------
+# Each clip's own log-average and grey balance, measured from one decoded frame and applied in
+# LINEAR light before the conversion. It replaced a gamma solved against one frame of one shoot.
 
 # bats test_tags=slow
-@test "MATCH=batch anchors on the run's own clips, not on look.json's reference" {
-	local work="$BATS_TEST_TMPDIR/batch"
+@test "metering brightens a dark clip and darkens a bright one, damped" {
+	local work="$BATS_TEST_TMPDIR/meter"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/probe_dark.mov"   "$work/src/A.mov"
 	cp "$FIXTURES/probe_mid.mov"    "$work/src/B.mov"
 	cp "$FIXTURES/probe_bright.mov" "$work/src/C.mov"
-	MATCH=batch STAB=0 DRY=1 JSON=1 GRADE_WORK_DIR="$work" \
+	STAB=0 DRY=1 JSON=1 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/A.mov" "$work/src/B.mov" "$work/src/C.mov"
-	[ "$status" -eq 0 ] || fail "batch mode failed: $output"
-	local reference; reference="$(printf '%s' "$output" | sed -n 's/.*"exposure_reference":\([0-9.]*\).*/\1/p' | head -1)"
-	[ -n "$reference" ] || fail "the run did not report what it anchored on: $output"
-	# THE MIDDLE CLIP, not the first and not an average of the outer two. B is the median, so it
-	# defines the reference and is the one clip left on look.json's own gamma; A and C move.
-	local b_yavg; b_yavg="$(printf '%s' "$output" | sed -n 's/.*"clip":"B","source":"[^"]*","yavg":\([0-9.]*\).*/\1/p')"
-	[ "$reference" = "$b_yavg" ] || fail "anchored on $reference, but the median clip reads $b_yavg"
-	[[ "$output" == *'"clip":"B"'*'"matched":0'* ]] || fail "the median clip was matched off itself: $output"
-	[[ "$output" == *'"clip":"A"'*'"matched":1'* ]] || fail "the dark clip was not matched: $output"
-	[[ "$output" == *'"clip":"C"'*'"matched":1'* ]] || fail "the bright clip was not matched: $output"
+	[ "$status" -eq 0 ] || fail "metering failed: $output"
+	_metered() {  # _metered <clip>
+		printf '%s' "$output" | sed -n "s/.*\"clip\":\"$1\".*\"metered_exposure\":\([-0-9.]*\).*/\\1/p" | head -1
+	}
+	local a b c
+	a="$(_metered A)"; b="$(_metered B)"; c="$(_metered C)"
+	[ -n "$a" ] && [ -n "$b" ] && [ -n "$c" ] || fail "a clip was not metered: $output"
+	# The dark clip is lifted and the bright one pulled down, neither past the two-stop bound the
+	# meter clamps to (these fixtures are flat greys four stops apart, which real footage is not).
+	awk -v a="$a" -v c="$c" 'BEGIN { exit !(a > 0 && c < 0 && a <= 2 && c >= -2) }' \
+		|| fail "metered A=$a B=$b C=$c"
+	awk -v a="$a" -v b="$b" -v c="$c" 'BEGIN { exit !(a > b && b > c) }' \
+		|| fail "metering did not order the three clips: A=$a B=$b C=$c"
 }
 
 @test "MATCH refuses a mode it does not have, rather than picking one" {
@@ -2125,32 +2094,32 @@ PY
 	MATCH=yes STAB=0 DRY=1 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -ne 0 ] || fail "accepted an unknown MATCH mode"
 	[[ "$output" == *"GRADE_CODE=REFUSE_MATCH_MODE"* ]] || fail "unnamed refusal: $output"
+	# batch was a mode until metering replaced it: it must refuse, not fall through to "on".
+	MATCH=batch STAB=0 DRY=1 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -ne 0 ] || fail "accepted MATCH=batch, which no longer exists"
 }
 
-@test "the batch measurements stay aligned with their clips when one is skipped" {
-	# The measurements are found BY POSITION, so an early skip that did not advance the index would
-	# hand every clip after it the previous clip's exposure — a wrong grade on a file that looks
+@test "the per-clip measurements stay aligned with their clips when one is skipped" {
+	# The frame sizes are found BY POSITION, so an early skip that did not advance the index would
+	# hand every clip after it the previous clip's size — a wrong crop on a file that looks
 	# finished, which is the whole failure class this pipeline is built against.
 	local work="$BATS_TEST_TMPDIR/align"
 	mkdir -p "$work/src"
-	# A is skipped for a frame rate FPS_OUT=12 cannot divide, and is DARK. B renders, and is BRIGHT. The lower median of
-	# the two measurements is A's, so if B reads A's slot it reports the reference exposure back
-	# and looks perfectly matched — the wrong grade on a file that looks finished.
+	# A is skipped for a frame rate FPS_OUT=12 cannot divide, and is 72x128; B renders and is
+	# 128x72, so reading A's slot would crop B in the wrong orientation entirely.
 	cp "$FIXTURES/probe_dark_25fps.mov" "$work/src/A_skipped.mov"
-	cp "$FIXTURES/probe_bright.mov" "$work/src/B_kept.mov"
-	FPS_OUT=12 MATCH=batch STAB=0 DRY=1 JSON=1 GRADE_WORK_DIR="$work" \
+	cp "$FIXTURES/probe_mid_landscape.mov" "$work/src/B_kept.mov"
+	FPS_OUT=12 STAB=0 DRY=1 JSON=1 CROP_OFFSET=centre GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/A_skipped.mov" "$work/src/B_kept.mov"
 	[ "$status" -eq 0 ] || fail "the run failed: $output"
 	[[ "$output" == *'"clip":"A_skipped"'*'"code":"REFUSE_FPS_RETIME"'* ]] \
 		|| fail "the 25fps clip was not skipped: $output"
-	local reference b_yavg
-	reference="$(printf '%s' "$output" | sed -n 's/.*"exposure_reference":\([0-9.]*\).*/\1/p' | head -1)"
-	b_yavg="$(printf '%s' "$output" | sed -n 's/.*"clip":"B_kept","source":"[^"]*","yavg":\([0-9.]*\).*/\1/p')"
-	[ -n "$reference" ] || fail "no reference in the event stream: $output"
-	[ -n "$b_yavg" ] || fail "no measurement for the kept clip: $output"
-	[ "$b_yavg" != "$reference" ] || fail "the kept clip reported the skipped clip's exposure ($b_yavg)"
-	[[ "$output" == *'"clip":"B_kept"'*'"matched":1'* ]] \
-		|| fail "the kept clip was not matched, so it read the wrong slot: $output"
+	local a_size b_size
+	a_size="$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=nw=1:nk=1 \
+		"$work/src/A_skipped.mov" | head -1)"
+	b_size="$(printf '%s' "$output" | sed -n 's/.*"clip":"B_kept".*"width":\([0-9]*\).*/\1/p' | head -1)"
+	[ -n "$b_size" ] || fail "no size for the kept clip: $output"
+	[ "$b_size" != "$a_size" ] || fail "the kept clip reported the skipped clip's frame ($b_size)"
 }
 
 # --- the grade golden ---------------------------------------------------------
@@ -2950,6 +2919,25 @@ sys.exit("; ".join(problems) or None)
 	grep -q 'threshold=2' "$dir/halation-threshold.cube" || fail "a refused threshold still rewrote the cube"
 }
 
+@test "the shipped rendering is the one its generator produces, at the revision it records" {
+	# FRESHNESS BY CONTENT, and the content is the maths as well as the parameters. Stamping only
+	# the parameters left a committed cube "already current" after the rendering itself changed —
+	# every render silently using the cube it replaced, which is exactly what this guard exists to
+	# stop. Found by changing the gamut fit and watching nothing rebake.
+	local root="$BATS_TEST_DIRNAME/.." cube="$BATS_TEST_TMPDIR/rev.cube" title args
+	title="$(head -1 "$root/luts/rendering/neutral.cube")"
+	[[ "$title" == *" rev"* ]] || fail "the shipped cube records no revision: $title"
+	# Rebuilt from the TITLE's own parameters: a cube that cannot be reproduced from what it
+	# records is one nobody can re-tune.
+	args="$(printf '%s' "$title" | sed -n 's/.*(\(.*\))"/\1/p' | tr ' ' '\n' \
+		| sed 's/^/--/; s/=/ /' | tr '\n' ' ')"
+	# shellcheck disable=SC2086  # a flag list built from the cube's own TITLE
+	run "$SCRIPTS/make-rendering-lut.py" "$cube" $args
+	[ "$status" -eq 0 ] || fail "the TITLE does not round-trip into the generator: $output"
+	cmp -s "$cube" "$root/luts/rendering/neutral.cube" \
+		|| fail "the shipped cube is not what its own TITLE regenerates"
+}
+
 @test "the recorded event stream still matches what the engine emits" {
 	# The app parses these events, and a parser is only as good as the shape it was written
 	# against. This pins the contract by CONTENT: field names, order and types, with the work dir
@@ -3163,40 +3151,24 @@ _low_band_db() {  # _low_band_db <file> <hz>
 		|| fail "compiled before refusing: $output"
 }
 
-@test "a measured exposure can be handed back instead of measured again" {
-	# The probe reads a number that does not change when a look does, so an interface adjusting a
-	# curve re-measures the same value on every render — about a second of a four-second preview.
-	# What matters is that the shortcut is not a different grade.
-	#
-	# A SYNTHETIC CLIP, and a handed value the clip does not measure. This used real footage and
-	# handed back exactly the value it had just measured, so "the handed value was used" was true
-	# whether the handback worked or the probe simply ran again. It also cost 8 seconds and skipped
-	# without footage. Nothing here depends on the camera's file structure.
-	local src="$FIXTURES/probe_mid.mov" a="$BATS_TEST_TMPDIR/measured" b="$BATS_TEST_TMPDIR/handed"
-	mkdir -p "$a" "$b"
-	GRADE_WORK_DIR="$a" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
-	[ "$status" -eq 0 ] || fail "$output"
-	local measured measured_line
-	measured_line=$(printf '%s\n' "$output" | grep 'YAVG=' | head -1) || true
-	measured=$(printf '%s\n' "$measured_line" | sed -n 's/.*YAVG=\([0-9.]*\).*/\1/p')
-	[ -n "$measured" ] || fail "the probe reported nothing: $output"
-
-	# The same number handed back is the same solve.
-	YAVG_IN="$measured" GRADE_WORK_DIR="$b" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
-	[ "$status" -eq 0 ] || fail "$output"
-	[[ "$output" == *"$measured_line"* ]] || fail "handing back $measured changed the grade: $output"
-
-	# A number the clip does not measure is the one that shows the probe was skipped.
-	local other=$(( ${measured%.*} + 150 ))
-	YAVG_IN="$other" GRADE_WORK_DIR="$b" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
-	[ "$status" -eq 0 ] || fail "$output"
-	[[ "$output" == *"YAVG=${other} "* ]] || fail "measured again instead of using $other: $output"
-	[[ "$output" == *"(matched)"* ]] || fail "the solve did not run: $output"
-
-	# And a value that is not a number is refused rather than spliced into the solve.
-	YAVG_IN="600,metadata=print" GRADE_WORK_DIR="$b" DRY=1 STAB=0 run "$SCRIPTS/grade.sh" "$src"
-	[ "$status" -ne 0 ] || fail "accepted a non-numeric exposure"
-	[[ "$output" == *"YAVG_IN must be numeric"* ]] || fail "refused without saying why: $output"
+@test "the exposure meter answers a degenerate frame with no correction, not a failure" {
+	# A black frame has no log-average to speak of and a flat frame has no grey balance. Either
+	# used to be the kind of input that raised inside the solve and took the batch down at clip n.
+	local out
+	out="$(ffmpeg -v error -f lavfi -i "color=c=black:s=64x64:d=1:r=24" -frames:v 1 \
+		-vf "format=gbrpf32le,scale=160:160" -f rawvideo - \
+		| "$SCRIPTS/solve-exposure.py" 160 160 -0.4)"
+	[ "$out" = "0.000 0.000 0.000" ] || fail "a black frame metered $out"
+	# And a mid grey frame is balanced already, so only its exposure moves.
+	out="$(ffmpeg -v error -f lavfi -i "color=c=0x808080:s=64x64:d=1:r=24" -frames:v 1 \
+		-vf "format=gbrpf32le,scale=160:160" -f rawvideo - \
+		| "$SCRIPTS/solve-exposure.py" 160 160 -0.4)"
+	local temp tint
+	read -r _ temp tint <<< "$out"
+	# Not exactly zero: the frame arrives through a YUV to RGB conversion, which lands a nominal
+	# grey a thousandth off neutral. A cast worth correcting is two orders of magnitude larger.
+	awk -v t="$temp" -v n="$tint" 'BEGIN { exit !(t < 0.01 && t > -0.01 && n < 0.01 && n > -0.01) }' \
+		|| fail "a neutral frame asked for a cast: $out"
 }
 
 # tests/render-golden.sh holds the default image to this repo's own recorded render (ADR 0014). Its

@@ -42,8 +42,8 @@ PROOF_SECS="${PROOF_SECS:-0.1}"
 skip() { echo "SKIP: $*"; exit 3; }
 
 [ -x "$PRECURSOR/scripts/grade.sh" ] || skip "no precursor engine at $PRECURSOR/scripts/grade.sh"
-CUBE="luts/apple/AppleLogToRec709-v1.0.cube"
-[ -f "$ROOT/$CUBE" ]       || skip "this repo has no $CUBE (see luts/apple/SOURCE.txt)"
+CUBE="luts/rendering/neutral.cube"
+[ -f "$ROOT/$CUBE" ]       || skip "this repo has no $CUBE"
 [ -f "$PRECURSOR/$CUBE" ]  || skip "the precursor has no $CUBE to render with"
 
 # Footage is never committed, so it comes from whichever src/ actually has some. Reading the

@@ -24,13 +24,12 @@ final class EngineEventTests: XCTestCase {
 
         let start = try XCTUnwrap(events.first { $0.name == "run_start" })
         XCTAssertEqual(start.int("clips"), 2)
-        XCTAssertEqual(start.double("saturation"), 1.27)
+        XCTAssertEqual(start.double("saturation"), 1.0)
 
         let planned = try XCTUnwrap(events.first { $0.name == "clip_planned" })
         XCTAssertEqual(planned.clip, "TALL")
-        // The placeholder that broke the emitter once: MATCH=0 leaves YAVG a literal "-", which a
-        // laxer emitter wrote as a bare number and produced invalid JSON on that one path.
-        XCTAssertEqual(planned.string("yavg"), "-")
+        // MATCH=0 meters nothing, so the correction the clip carries is zero rather than absent.
+        XCTAssertEqual(planned.double("metered_exposure"), 0)
         // The decoded frame, which is where the app learns orientation.
         XCTAssertEqual(planned.int("width"), 72)
         XCTAssertEqual(planned.int("height"), 128)

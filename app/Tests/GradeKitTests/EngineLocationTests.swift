@@ -13,14 +13,8 @@ final class EngineLocationTests: XCTestCase {
 
     func testPreflightPassesOnThisCheckout() throws {
         let engine = try engineCheckout()
-        let problems = engine.preflight()
-        // Apple's cube is gitignored, so a fresh clone legitimately fails this one. Anything else
-        // is a real problem and the message has to name it.
-        let unexpected = problems.filter {
-            if case .appleCubeAbsent = $0 { return false }
-            return true
-        }
-        XCTAssertTrue(unexpected.isEmpty, "unexpected preflight problems: \(unexpected)")
+        // Nothing a checkout needs is absent any more: every cube a render reaches is committed.
+        XCTAssertTrue(engine.preflight().isEmpty, "preflight problems: \(engine.preflight())")
     }
 
     /// The app offers presets/ as it finds them, so a file that fails to read as a complete look
@@ -34,12 +28,11 @@ final class EngineLocationTests: XCTestCase {
         XCTAssertEqual(presets.count, files.count, "a preset file did not load")
         XCTAssertGreaterThanOrEqual(presets.count, 4)
         for preset in presets {
-            XCTAssertTrue(preset.look.isFilmConversion, preset.name)
             XCTAssertNotNil(
                 engine.conversionCube(named: preset.look.convertCube),
                 "\(preset.name) names a cube that is not there")
         }
-        XCTAssertNil(engine.conversionCube(named: "../apple/AppleLogToRec709-v1.0"))
+        XCTAssertNil(engine.conversionCube(named: "../film/imax65"))
     }
 
     func testPreflightNamesEveryMissingPiece() throws {
@@ -53,14 +46,8 @@ final class EngineLocationTests: XCTestCase {
             problems.contains(.missingFile(EngineLocation(root: empty).gradeScript)),
             "should name the missing script, got: \(problems)")
         XCTAssertTrue(
-            problems.contains(where: {
-                if case .appleCubeAbsent = $0 { return true }
-                return false
-            }),
-            "should name the absent Apple cube, got: \(problems)")
-        // And the message is a sentence someone can act on, not a code.
-        let text = problems.map(\.description).joined(separator: "\n")
-        XCTAssertTrue(text.contains("SOURCE.txt"), "the cube's message should say where to get it")
+            problems.contains(.missingFile(EngineLocation(root: empty).lookFile)),
+            "should name the missing look, got: \(problems)")
     }
 
     func testResolvesToolsWithoutTrustingPATH() throws {
