@@ -213,41 +213,52 @@ public struct Project: Equatable {
     /// them from the engine's refusal, which is the same rule the engine follows itself.
     public enum Blocker: Equatable, CustomStringConvertible {
         case noActivePreset(String)
-        /// Which shapes crop, and which clips have not been framed for them yet. The deliverables
-        /// are carried as well as the clips because the set is open now: "the 4:5 crop" was a
-        /// complete description when there were two shapes and is not one when there are any.
-        case cropWithoutOffset(deliverables: [Deliverable], clips: [String])
 
         public var description: String {
             switch self {
             case .noActivePreset(let name):
                 return "no preset named \(name)"
-            case .cropWithoutOffset(let deliverables, let clips):
-                // "a per-clip framing call" is load-bearing wording, not decoration: it is the
-                // whole reason this refusal exists rather than a default nobody saw.
-                let shapes = deliverables.map { "\($0.aspectWidth):\($0.aspectHeight)" }
-                    .joined(separator: " and ")
-                return "the \(shapes) crop offset is a per-clip framing call, and \(clips.count) "
-                    + "clip(s) have none yet: \(clips.sorted().joined(separator: ", "))"
             }
+        }
+    }
+
+    public var blockers: [Blocker] {
+        active == nil ? [.noActivePreset(activePreset)] : []
+    }
+
+    /// Clips whose crop nobody has placed, and the shapes that crop them.
+    ///
+    /// A WARNING, NOT A REFUSAL. Refusing Convert until every clip was dragged kept a batch from
+    /// rendering framed wrong, and also kept a non-technical user from rendering at all. An
+    /// unplaced clip renders centred (`environment`); this names which ones, so a batch of files
+    /// that all look finished still says which were never looked at. The deliverables are carried
+    /// because the set is open: "the 4:5 crop" stopped being a full description at three shapes.
+    public struct Unframed: Equatable, CustomStringConvertible {
+        public let deliverables: [Deliverable]
+        public let clips: [String]
+
+        public var description: String {
+            let shapes = deliverables.map { "\($0.aspectWidth):\($0.aspectHeight)" }
+                .joined(separator: " and ")
+            let names = clips.sorted().joined(separator: ", ")
+            return clips.count == 1
+                ? "\(names) is cropped to \(shapes) at the centre. Drag the crop to place it."
+                : "\(clips.count) clips are cropped to \(shapes) at the centre, never placed: "
+                    + "\(names)"
         }
     }
 
     /// `sizes` holds each clip's measured frame, by name. A clip missing from it is answered as
     /// `Deliverable.crops` answers an unmeasured one.
-    public func blockers(for clipNames: [String], sizes: [String: FrameSize] = [:]) -> [Blocker] {
-        var found: [Blocker] = []
-        if active == nil { found.append(.noActivePreset(activePreset)) }
+    public func unframed(for clipNames: [String], sizes: [String: FrameSize] = [:]) -> Unframed? {
         let undecided = clipNames.filter {
             clips[$0]?.cropOffset == nil && delivery.anyTargetNeedsClipOffset(sizes[$0])
         }
-        if !undecided.isEmpty {
-            let shapes = delivery.targets.filter { target in
-                undecided.contains { target.needsClipOffset(sizes[$0]) }
-            }
-            found.append(.cropWithoutOffset(deliverables: shapes, clips: undecided))
+        guard !undecided.isEmpty else { return nil }
+        let shapes = delivery.targets.filter { target in
+            undecided.contains { target.needsClipOffset(sizes[$0]) }
         }
-        return found
+        return Unframed(deliverables: shapes, clips: undecided)
     }
 
     /// The engine's environment for one clip, built from the project. Variables only — the app
@@ -260,7 +271,9 @@ public struct Project: Equatable {
         // The whole set, comma separated, in order. This was `FEED=1`, which could only ever say
         // one thing about one shape.
         env["DELIVERABLES"] = delivery.targets.map(\.spec).joined(separator: ",")
-        if let offset = clips[clip]?.cropOffset { env["CROP_OFFSET"] = String(offset) }
+        // "centre", said explicitly, for a clip nobody placed: the engine refuses a crop with no
+        // offset, which is right for the command line and why the app says it out loud.
+        env["CROP_OFFSET"] = clips[clip]?.cropOffset.map(String.init) ?? "centre"
         env["STAB"] = settings(for: clip).stabilise ? "1" : "0"
         if !settings(for: clip).adjust.match { env["MATCH"] = "0" }
         return env

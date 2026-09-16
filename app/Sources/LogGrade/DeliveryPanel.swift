@@ -4,11 +4,9 @@ import SwiftUI
 
 /// What comes out, and the two things about it that cannot be guessed.
 ///
-/// The crop offset is a composition call per clip: the precursor's own default is one clip's
-/// framing, and applied to a batch it silently reframes every other one into files that look
-/// finished. So it is picked on the picture, per clip, and a Feed render is blocked until every
-/// clip has one — the same refusal the engine makes, said before a render starts rather than
-/// discovered from its exit code.
+/// The crop offset is a composition call per clip, picked on the picture. A clip nobody placed
+/// renders centred, and the panel names it (`Project.unframed`), so a batch of files that all look
+/// finished still says which were never looked at.
 struct DeliveryPanel: View {
     // Not observed: see `GradeModel.changes`.
     let model: GradeModel
@@ -236,11 +234,20 @@ struct DeliveryPanel: View {
     }
 
     private var blockerList: some View {
-        ForEach(model.blockers.indices, id: \.self) { i in
-            Text(model.blockers[i].description)
-                .font(Type.caption)
-                .foregroundColor(Palette.lamp)
-                .fixedSize(horizontal: false, vertical: true)
+        Group {
+            ForEach(model.blockers.indices, id: \.self) { i in
+                Text(model.blockers[i].description)
+                    .font(Type.caption)
+                    .foregroundColor(Palette.lamp)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // Not the lamp colour: it is reserved for refusals, and this renders.
+            if let unframed = model.unframed {
+                Label(unframed.description, systemImage: "crop")
+                    .font(Type.caption)
+                    .foregroundColor(Palette.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
