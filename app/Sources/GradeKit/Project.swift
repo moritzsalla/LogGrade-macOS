@@ -506,6 +506,17 @@ extension Project {
         return try Look(data: try JSONSerialization.data(withJSONObject: upgraded))
     }
 
+    /// A saved shape as Custom's one shape: its aspect if the panel lists it, the default if not.
+    /// Name and crop offset are dropped, since the panel can set neither.
+    static func customShape(from saved: Deliverable?) -> Deliverable {
+        guard let saved,
+            Deliverable.customAspects.contains(where: {
+                $0.0 == saved.aspectWidth && $0.1 == saved.aspectHeight
+            })
+        else { return Deliverable.defaultCustom }
+        return .custom(aspectWidth: saved.aspectWidth, aspectHeight: saved.aspectHeight)
+    }
+
     public init(data: Data) throws {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw Look.Invalid.notAnObject
@@ -544,7 +555,9 @@ extension Project {
             delivery: Delivery(
                 // Custom renders one shape. A file from when shapes were ticked in any number keeps
                 // its first; one with none gets Custom's default rather than nothing to deliver.
-                targets: [targets.first ?? Deliverable.defaultCustom],
+                // It becomes one of the aspects the panel lists, so the picker never shows blank
+                // for a shape it cannot offer again; anything else opens as the default.
+                targets: [Self.customShape(from: targets.first)],
                 // A file from before the short edge stored the 9:16 reference height.
                 shortSide: (d["short_side"] as? NSNumber)?.intValue
                     ?? (d["height"] as? NSNumber).map { $0.intValue * 9 / 16 }

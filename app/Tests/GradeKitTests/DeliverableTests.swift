@@ -124,7 +124,7 @@ final class DeliverableTests: XCTestCase {
             """
         let project = try Project(data: Data(legacy.utf8))
         // Custom renders one shape now, so the first survives; 2560 was the 9:16 height of 1440p.
-        XCTAssertEqual(project.delivery.targets, [.reels])
+        XCTAssertEqual(project.delivery.targets, [.custom(aspectWidth: 9, aspectHeight: 16)])
         XCTAssertEqual(project.delivery.shortSide, 1440)
     }
 
@@ -134,16 +134,23 @@ final class DeliverableTests: XCTestCase {
              "delivery": {"reels": true, "feed": false, "height": 1920}, "clips": {}}
             """
         let project = try Project(data: Data(legacy.utf8))
-        XCTAssertEqual(project.delivery.targets, [.reels])
+        XCTAssertEqual(project.delivery.targets, [.custom(aspectWidth: 9, aspectHeight: 16)])
     }
 
-    func testAnArbitraryShapeSurvivesTheProjectFile() throws {
+    /// A saved shape opens as Custom's aspect when the panel lists it, and as the default when it
+    /// does not, so the aspect picker never shows blank.
+    func testASavedShapeOpensAsOneTheAspectPickerLists() throws {
         let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
         let project = Project(
             presets: [], activePreset: "",
             delivery: .init(targets: [square]))
         let reread = try Project(data: try project.serialised())
-        XCTAssertEqual(reread.delivery.targets, [square])
+        XCTAssertEqual(reread.delivery.targets, [.custom(aspectWidth: 1, aspectHeight: 1)])
+        let tall = Deliverable(name: "tall", aspectWidth: 2, aspectHeight: 3, cropOffset: .centre)
+        let unlisted = try Project(
+            data: try Project(presets: [], activePreset: "", delivery: .init(targets: [tall]))
+                .serialised())
+        XCTAssertEqual(unlisted.delivery.targets, [Deliverable.defaultCustom])
     }
 
     // What blocks a render is `ProjectTests.testACroppedRenderIsBlockedUntilEveryClipHasAnOffset`,
@@ -178,30 +185,5 @@ final class DeliverableTests: XCTestCase {
             project.unframed(for: ["IMG_0609"]),
             .init(deliverables: [.feed], clips: ["IMG_0609"]),
             "the warning must name only the shape that takes the clip's offset")
-    }
-
-    /// Both directions, because a serialiser that dropped the key would read every shape back as
-    /// nil and still pass a test that only saves shapes without one.
-    func testACentreOffsetSurvivesTheProjectFileAndItsAbsenceReadsAsNone() throws {
-        let centred = Deliverable(
-            name: "square", aspectWidth: 1, aspectHeight: 1,
-            cropOffset: .centre)
-        let plain = Deliverable(name: "tall", aspectWidth: 2, aspectHeight: 3)
-        let project = Project(
-            presets: [], activePreset: "",
-            delivery: .init(targets: [.reels, centred, plain]))
-        let reread = try Project(data: try project.serialised())
-        XCTAssertEqual(reread.delivery.targets, [.reels], "Custom keeps its one shape")
-
-        // Written before a shape could carry an offset: every shape then followed the clip's offset.
-        let older = """
-            {"version": 2, "presets": [], "active_preset": "",
-             "delivery": {"targets": [{"name": "square", "aspect_width": 1, "aspect_height": 1}]},
-             "clips": {}}
-            """
-        let opened = try Project(data: Data(older.utf8))
-        XCTAssertEqual(
-            opened.delivery.targets,
-            [Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)])
     }
 }

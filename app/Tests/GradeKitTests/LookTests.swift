@@ -158,7 +158,8 @@ final class ProjectTests: XCTestCase {
         var project = Project(
             presets: [.init(name: "Portra", look: try aLook())],
             activePreset: "Portra",
-            delivery: .init(targets: [.feed], shortSide: 1440, fps: 24))
+            delivery: .init(
+                targets: [.custom(aspectWidth: 4, aspectHeight: 5)], shortSide: 1440, fps: 24))
         project.clips["IMG_0609"] = .init(cropOffset: 750, previewSeconds: 4, stabilise: true)
         project.clips["IMG_0610"] = .init(cropOffset: nil, previewSeconds: 1, stabilise: false)
 
