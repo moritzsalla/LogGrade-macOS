@@ -20,6 +20,8 @@ struct PreviewView: View {
         VStack(spacing: 12) {
             ZStack {
                 Rectangle().fill(Palette.well)
+                // WITHOUT A BASELINE YET, THE PICTURE STAYS AS IT IS and the readout says so, rather
+                // than showing the adjusted grade under the "as shipped" label.
                 if let image = comparing
                     ? (preview.baseline ?? preview.image)
                     : preview.image
@@ -90,7 +92,7 @@ struct PreviewView: View {
                     .foregroundColor(Palette.inkSecondary)
                 Spacer()
                 if comparing {
-                    Readout(text: "as shipped")
+                    Readout(text: preview.baseline == nil ? "preparing…" : "as shipped")
                 } else if preview.isLive {
                     Readout(text: "live")
                 } else if model.isStale {

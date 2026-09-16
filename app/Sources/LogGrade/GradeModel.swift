@@ -805,6 +805,9 @@ final class GradeModel: ObservableObject {
 
     /// C went down. The live grade of the baseline goes up at once from the source frame; the
     /// exact render replaces it when it lands, and is cached like any other.
+    /// The baseline render queued and not yet landed, so a second press does not queue another.
+    private var baselineRenderPending: (clip: URL, seconds: Double, look: Look)?
+
     func beginCompare() {
         guard let clip = selectedClip, preview.image != nil else { return }
         let look = baselineLook
@@ -835,25 +838,52 @@ final class GradeModel: ObservableObject {
                 }
             }
         }
+        if let pending = baselineRenderPending, pending.clip == clip.url,
+            pending.seconds == seconds, pending.look == look
+        {
+            return
+        }
+        baselineRenderPending = (clip.url, seconds, look)
         let size = frameSizes[clip.stem]
+        // YIELDS TO THE PREVIEW. It is not cancellable like a preview render, so it does not start
+        // at all if a preview was asked for after it; the next press queues it again.
+        let generation = previewGeneration
         queue.async { [weak self] in
             guard let self else { return }
+            guard generation == self.previewGeneration else {
+                DispatchQueue.main.async { self.baselineRenderPending = nil }
+                return
+            }
             let hint =
                 self.lastSource.map {
                     $0.clip == clip.url && $0.seconds == seconds
                         && $0.referenceStops == look.matchReferenceStops
                 } == true ? self.lastSource?.frame.metered : nil
-            guard
-                let frame = try? self.renderer.render(
+            let pixels: CGImage
+            do {
+                let frame = try self.renderer.render(
                     clip: clip.url, seconds: seconds, look: look, match: true,
-                    knownSize: size, knownMetering: hint),
-                let pixels = NSImage(contentsOf: frame.url)?
-                    .cgImage(forProposedRect: nil, context: nil, hints: nil)
-            else { return }
+                    knownSize: size, knownMetering: hint)
+                guard
+                    let decoded = NSImage(contentsOf: frame.url)?
+                        .cgImage(forProposedRect: nil, context: nil, hints: nil)
+                else { throw PreviewRenderer.Failure.noFrameEvent([]) }
+                pixels = decoded
+            } catch {
+                DispatchQueue.main.async {
+                    self.baselineRenderPending = nil
+                    if self.isComparing {
+                        self.preview.say(
+                            "The look as it ships couldn’t be rendered: \(error)", failure: true)
+                    }
+                }
+                return
+            }
             let image = NSImage(
                 cgImage: LiveChain.forDisplay(pixels),
                 size: NSSize(width: pixels.width, height: pixels.height))
             DispatchQueue.main.async {
+                self.baselineRenderPending = nil
                 self.exactRenders.append(
                     ExactRender(
                         clip: clip.url, seconds: seconds, look: look, match: true,
