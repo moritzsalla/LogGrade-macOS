@@ -42,12 +42,14 @@ imax65.cube, portra160.cube, portra800.cube
     portra800       kodak_portra_800, +1 stop, scanned
 
 super8_kodachrome64.cube
-  kodak_kodachrome_64 reversal, +0.7 stop, scanned directly (io.scan_film:
+  kodak_kodachrome_64 reversal, +0.2 stop, scanned directly (io.scan_film:
   the kodak_2383 print named in the TITLE is not applied), scanner white and
   black correction re-enabled after spektrafilm's LUT mode resets them. Then
-  an Oklab trim: lightness S-curve (contrast 1.25 about 0.62), chroma x1.5
+  an Oklab trim: lightness S-curve (contrast 1.15 about 0.55), chroma x1.8
   faded out below lightness 0.2-0.45 so the warm toe keeps its blue channel,
-  and the same gamut fit.
+  a cast toward blue (Oklab b -0.018, rising from neutral black) that takes
+  out the stock's warm cast, reds turned 14 degrees toward scarlet (they read
+  magenta in sun), sky blue chroma x1.3, and the same gamut fit.
 
 Not reproducible from this repo alone: the bake scripts import spektrafilm
 (GPLv3) and are kept out of it. The TITLE lines record every parameter.
