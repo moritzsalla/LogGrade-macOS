@@ -254,8 +254,11 @@ final class GradeModel: ObservableObject {
         pendingLook = nil
         gradeInFlight = true
         let metered = matchedMetering
-        let sourceLongEdge = selectedClip.flatMap { frameSizes[$0.stem] }
-            .map { max($0.width, $0.height) }
+        // THE CLIP THE FRAME CAME FROM, not the selection: the selection can move on while a grade
+        // of the previous clip's frame is still queued.
+        let sourceLongEdge = sourceClip.flatMap {
+            frameSizes[$0.deletingPathExtension().lastPathComponent]
+        }.map { max($0.width, $0.height) }
 
         // OFF THE MAIN THREAD, all of it. The main thread's job during a drag is to redraw the
         // slider; any work here is a frame the thumb doesn't get, which reads as the control being
