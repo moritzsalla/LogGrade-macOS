@@ -1,7 +1,7 @@
 {
   "_comment": [
     "A film preset. convert.cube renders Apple Log straight through a stock baked from spektrafilm",
-    "(luts/film/CHANGELOG.txt), so look, print and tone are neutral: a curve on top would bend the",
+    "(luts/film/CHANGELOG.txt), so tone is neutral: a curve on top would bend the",
     "stock's own. Each clip's exposure and white balance are metered in linear before the cube",
     "(scripts/solve-exposure.py) against match.reference_stops; correct.* still adds on top.",
     "",
@@ -27,14 +27,6 @@
     "threshold": 1.0,
     "radius": 0.012,
     "tint": "1,0.3,0.05"
-  },
-  "look": {
-    "lut": "none",
-    "strength": 1.0
-  },
-  "print": {
-    "lut": "none",
-    "strength": 1.0
   },
   "hue": {
     "rot": "0,0,0,0,0,0,0,0,0,0,0,0",
@@ -62,7 +54,6 @@
     "smoothing": 30
   },
   "match": {
-    "reference_yavg": 609,
     "reference_stops": -0.4
   },
   "finish": {

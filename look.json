@@ -10,7 +10,7 @@
     "single scene-referred step, so no stage downstream works on highlights that Apple's cube",
     "has already squeezed into the top tenth of the range. Its contrast, saturation and black",
     "are baked into the cube's TITLE rather than kept here: it is a shipped asset like the film",
-    "cubes, re-baked when it is re-tuned. 'apple' puts Apple's own cube back.",
+    "cubes, re-baked when it is re-tuned.",
     "",
     "EVERY STAGE BELOW IS NEUTRAL, deliberately. The rendering is the picture, so the tone",
     "curve, the trims and the hue curves start at the values the engine leaves out of the graph",
@@ -25,10 +25,11 @@
     "",
     "match.reference_stops is where a clip's metered log-average lands, in stops from mid grey;",
     "scripts/solve-exposure.py meters each clip against it, in linear, before the conversion. It",
-    "is what makes a shoot land together. match.reference_yavg is the older post-Apple-cube mean,",
-    "read only when convert.cube is 'apple'.",
+    "is what makes a shoot land together.",
     "",
-    "halation is 0 here: a glow is a film effect, and the presets that want one carry it.\nfinish.* is the delivery stage: the log denoise, the edge-limited sharpener and the film",
+    "halation is 0 here: a glow is a film effect, and the presets that want one carry it.",
+    "",
+    "finish.* is the delivery stage: the log denoise, the edge-limited sharpener and the film",
     "gauge. Like grain, none of it is in a still."
   ],
   "convert": {
@@ -48,14 +49,6 @@
     "threshold": 1.0,
     "radius": 0.006,
     "tint": "1,0.3,0.05"
-  },
-  "look": {
-    "lut": "none",
-    "strength": 1.0
-  },
-  "print": {
-    "lut": "none",
-    "strength": 1.0
   },
   "hue": {
     "rot": "0,0,0,0,0,0,0,0,0,0,0,0",
@@ -83,7 +76,6 @@
     "smoothing": 30
   },
   "match": {
-    "reference_yavg": 609,
     "reference_stops": -0.4
   },
   "finish": {

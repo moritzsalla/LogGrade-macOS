@@ -45,10 +45,9 @@ TONE="$ROOT/luts/tone/shipped.cube"
 # percentiles at 0.07 and 0.00 — so it is zeroed rather than left as a decorative knob. The black
 # point is the live shadow control here.
 #
-# LOOK=<name|none|path> and PRINT= override the film cubes for one run, as they do for grade.sh.
 # The names are cleared first: the loader keeps a value already set, and a stray SAT in someone's
 # environment must not become the grade.
-unset LOOK_LUT PRINT_LUT LOOK_STRENGTH PRINT_STRENGTH SAT WARM HUE_LUT
+unset SAT WARM HUE_LUT
 load_grade_look || exit 1
 OUT="$(graded_master_path "$WORK" "$CLIP")"
 

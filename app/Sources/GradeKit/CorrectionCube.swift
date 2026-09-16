@@ -7,7 +7,7 @@ import Foundation
 /// than the 36,000 samples — and a control that redraws twice a second is not a control you can
 /// find a value with. It is one of several such transcriptions in the live preview, alongside
 /// `ToneCurve.generated`, `LiveHalation` and `LiveGrade`, each held to the engine by its own test;
-/// the conversion, look and print cubes are read from the files the render also reads.
+/// the conversion cube is read from the files the render also reads.
 ///
 /// WHAT MAKES IT SAFE. `CorrectionCubeTests` builds a cube here and the same cube with the
 /// generator and compares every one of the 107,811 numbers. It is not a tolerance test: the two

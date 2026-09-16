@@ -1373,7 +1373,7 @@ PY
 	mkdir -p "$work/src"
 	cp "$FIXTURES/probe_mid.mov" "$work/src/CLIP.mov"
 	jq '.correct = {exposure: 0, temp: 0, tint: 0, slope: "1,1,1", offset: "0,0,0", power: "1,1,1", lum_mix: 1}
-		| .halation.strength = 0 | .look.lut = "none" | .print.lut = "none"
+		| .halation.strength = 0
 		| .tone += {gamma: 1, contrast: 1, toe: 0, shoulder: 0, black: 0}
 		| .colour = {saturation: 1, warmth: 0} | .grain.strength = 0' \
 		"$BATS_TEST_DIRNAME/../look.json" > "$look"
@@ -1695,98 +1695,6 @@ PY
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"will recompute"* ]] || fail "did not say what a real run would do: $output"
 	[[ "$output" != *"rendering unstabilised"* ]] || fail "still claims it renders unstabilised"
-}
-
-# --- choosing a look ----------------------------------------------------------
-# The look LUT was a constant in lib.sh. The app offers it as a choice, so it is a look value in
-# look.json like saturation is, and "none" means the filter leaves the graph rather than being
-# pointed at an identity cube.
-
-@test "resolve_look_lut finds a cube by its stem" {
-	local root; root="$BATS_TEST_DIRNAME/.."
-	run resolve_look_lut kodak_portra_400_nc "$root"
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"/luts/looks/kodak_portra_400_nc.cube" ]] || fail "wrong path: $output"
-	[ -f "$output" ] || fail "resolved to a file that does not exist: $output"
-}
-
-@test "resolve_look_lut treats none as no look at all" {
-	run resolve_look_lut none "$BATS_TEST_DIRNAME/.."
-	[ "$status" -eq 0 ]
-	[ -z "$output" ] || fail "none should resolve to nothing, got: $output"
-}
-
-@test "resolve_look_lut refuses a cube that is not there, and says what is" {
-	run resolve_look_lut fuji_something "$BATS_TEST_DIRNAME/.."
-	[ "$status" -ne 0 ] || fail "accepted a look that does not exist"
-	[[ "$output" == *"not found"* ]] || fail "no reason given: $output"
-	[[ "$output" == *"kodak_portra_400_nc"* ]] || fail "did not list what is available: $output"
-}
-
-@test "resolve_look_lut refuses a path carrying filter syntax" {
-	run resolve_look_lut "luts/looks/x',metadata=print:file=/tmp/x.cube" "$BATS_TEST_DIRNAME/.."
-	[ "$status" -ne 0 ] || fail "accepted a path that would close ffmpeg's quoting"
-	# The path does not exist either, so the not-found branch refuses it too: status alone passed
-	# with the syntax guard switched off.
-	[[ "$output" == *"contains filter syntax"* ]] || fail "refused, but only as not found: $output"
-}
-
-@test "the grade chain leaves the look filter out when there is no look" {
-	# Not an identity cube: an identity lookup pays interpolation error on every pixel for no
-	# change, and the coarse grid these film cubes use pays a visible amount of it.
-	LOOK_LUT="" run grade_chain /tmp/tone.cube 1.27 0.005
-	[ "$status" -eq 0 ]
-	# No 3D lookup at all, not merely one pointing somewhere else. Asserting on the path was the
-	# weaker version and it stayed green against a chain that emitted `lut3d=file=''` — a filter
-	# with an empty filename, which is worse than either intended behaviour. Found by mutation.
-	[[ "$output" != *"lut3d="* ]] || fail "a look filter survived: $output"
-	# One lookup left, and it is the tone curve on the luma plane.
-	[[ "$output" == *"lut1d=file='/tmp/tone.cube'"* ]] || fail "lost the tone curve: $output"
-	[[ "$output" == *"mergeplanes=0x001112"* ]] || fail "lost the luma-only merge: $output"
-}
-
-@test "the grade chain names the chosen look when there is one" {
-	LOOK_LUT="/tmp/portra.cube" run grade_chain /tmp/tone.cube 1.27 0.005
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"lut3d=file='/tmp/portra.cube':interp=tetrahedral,"* ]] \
-		|| fail "the look is not in the chain: $output"
-}
-
-@test "look.json is where the look LUT is chosen" {
-	# The whole point: a look.json written by the app changes the look LUT too, without editing a
-	# script. A cube nothing else in the repo would pick.
-	local work="$BATS_TEST_TMPDIR/lookchoice" look="$BATS_TEST_TMPDIR/other.json"
-	mkdir -p "$work/src"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	python3 - "$BATS_TEST_DIRNAME/../look.json" "$look" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-d["look"]["lut"] = "kodak_portra_400_nc_NOPE"
-json.dump(d, open(sys.argv[2], "w"))
-PY
-	LOOK_FILE="$look" GRADE_WORK_DIR="$work" DRY=1 MATCH=0 STAB=0 \
-		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -ne 0 ] || fail "a look.json naming a missing cube rendered anyway"
-	[[ "$output" == *"not found"* ]] || fail "no reason given: $output"
-}
-
-# bats test_tags=slow
-@test "a film look renders a visibly different still than none" {
-	# End to end, through the real chain, because a string test cannot tell whether the filter that
-	# left the graph was the one doing the work. The SHIPPED look carries no film cube — the
-	# rendering is the picture — so the comparison is against one named for this run.
-	local work="$BATS_TEST_TMPDIR/lookdiff"
-	mkdir -p "$work/src"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	LOOK=kodak_portra_400_nc FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
-		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -eq 0 ] || fail "$output"
-	mv "$work/dist/frames/CLIP_t0s_graded.png" "$work/with-look.png"
-	LOOK=none FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
-		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -eq 0 ] || fail "$output"
-	! cmp -s "$work/with-look.png" "$work/dist/frames/CLIP_t0s_graded.png" \
-		|| fail "the film cube changed no pixels"
 }
 
 # --- delivery shape -----------------------------------------------------------
@@ -2451,26 +2359,6 @@ _look_with() {  # _look_with <name> <jq-assignment>
 	[ ! -e "$work/dist/02-graded" ] || fail "02-grade.sh created output before refusing"
 }
 
-@test "a look.json that has lost its film look stops the run rather than rendering without one" {
-	# resolve_look_lut reads an empty name as "none", which is right for a deliberate empty. The
-	# name used to be read inside its argument list, where a missing key BECAME that empty name, so
-	# both render paths planned a grade with no film cube and said nothing.
-	local work="$BATS_TEST_TMPDIR/nolook" look
-	mkdir -p "$work/src" "$work/dist/01-baseline"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/01-baseline/CLIP_baseline.mov"
-	look="$(_look_with nolook 'del(.look.lut)')"
-
-	LOOK_FILE="$look" DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -ne 0 ] || fail "grade.sh planned a run with no film look: $output"
-	[[ "$output" == *"look.json: missing .look.lut"* ]] || fail "grade.sh did not name the key: $output"
-
-	LOOK_FILE="$look" GRADE_WORK_DIR="$work" run "$SCRIPTS/02-grade.sh" CLIP
-	[ "$status" -ne 0 ] || fail "02-grade.sh rendered a master with no film look"
-	[[ "$output" == *"look.json: missing .look.lut"* ]] || fail "02-grade.sh did not name the key: $output"
-	[ ! -e "$work/dist/02-graded" ] || fail "02-grade.sh created output before refusing"
-}
-
 @test "encode settings, analysis settings and stage paths are spelled in lib.sh and nowhere else" {
 	# Each of these was written into two stage scripts and the byte comparisons render only one of them,
 	# so an edit to the other reached files nobody compared: the delivery encode, the ProRes master
@@ -2636,53 +2524,23 @@ sys.exit("; ".join(problems) or None)
 	done
 }
 
-# --- the print, and how strongly each film cube applies -----------------------
-
-@test "a look at full strength and no print leaves the grade chain as it was" {
-	# Absent rather than idle: full strength and no print add no filter, so the chain is the one a
-	# look without strengths built.
-	local look="$BATS_TEST_DIRNAME/../luts/looks/kodak_portra_400_nc.cube" chain
-	chain="$(LOOK_LUT="$look" PRINT_LUT="" LOOK_STRENGTH=1 PRINT_STRENGTH=1 grade_chain t.cube 1 0)"
-	[ "$(printf '%s' "$chain" | grep -o 'lut3d' | wc -l | tr -d ' ')" = "1" ] \
-		|| fail "expected exactly the look's lut3d: $chain"
-	[[ "$chain" != *"mix="* ]] || fail "a full-strength look still blends: $chain"
-	chain="$(LOOK_LUT="$look" PRINT_LUT="" LOOK_STRENGTH=0 PRINT_STRENGTH=1 grade_chain t.cube 1 0)"
-	[[ "$chain" != *"lut3d"* ]] || fail "a look at strength 0 is still in the graph: $chain"
-}
-
-@test "the print follows the look and precedes the tone curve" {
-	# A negative, then its print, then the luma-only tone stage — which is what keeps the print's
-	# per-channel contrast from turning saturated signage neon.
-	local root="$BATS_TEST_DIRNAME/.." chain
-	chain="$(LOOK_LUT="$root/luts/looks/kodak_portra_400_nc.cube" \
-		PRINT_LUT="$root/luts/print/kodak_2383_constlmap.cube" LOOK_STRENGTH=1 PRINT_STRENGTH=0.5 \
-		grade_chain t.cube 1 0)"
-	python3 -c '
-import sys
-c = sys.argv[1]
-look, print_, tone = c.find("kodak_portra_400_nc"), c.find("kodak_2383_constlmap"), c.find("lut1d")
-sys.exit(None if 0 <= look < print_ < tone else "order is look@%d print@%d tone@%d" % (look, print_, tone))
-' "$chain" || fail "the film cubes are out of order: $chain"
-}
-
-@test "hue curves: flat is absent, active follows the print, and an ungenerated cube is refused" {
+@test "hue curves: flat is absent, active precedes the tone curve, and an ungenerated cube is refused" {
 	local root="$BATS_TEST_DIRNAME/.." chain look="$BATS_TEST_TMPDIR/hue-look.json"
 	# The shipped look's curves are flat: no cube, nothing to generate.
-	chain="$(LOOK_LUT="" PRINT_LUT="" LOOK_STRENGTH=1 PRINT_STRENGTH=1 grade_chain "" 1 0)"
+	chain="$(grade_chain "" 1 0)"
 	[[ "$chain" != *hue* ]] || fail "flat curves left a stage in: $chain"
 	jq '.hue.sat="0,0,0,0,-0.5,0,0,0,0,0,0,0"' "$root/look.json" > "$look"
 	# Active, but nobody called ensure_hue_lut: refused, not silently rendered without.
 	LOOK_FILE="$look" run grade_chain "" 1 0
 	[ "$status" -ne 0 ] || fail "active curves rendered without their cube: $output"
 	[[ "$output" == *"call ensure_hue_lut first"* ]] || fail "$output"
-	chain="$(LOOK_FILE="$look" PRINT_LUT="$root/luts/print/kodak_2383_constlmap.cube" \
-		LOOK_LUT="" LOOK_STRENGTH=1 PRINT_STRENGTH=1 \
+	chain="$(LOOK_FILE="$look" \
 		bash -c 'source "$1"; ensure_hue_lut "$2" && grade_chain t.cube 1 0' _ "$root/scripts/lib.sh" "$BATS_TEST_TMPDIR")"
 	python3 -c '
 import sys
 c = sys.argv[1]
-print_, hue, tone = c.find("kodak_2383_constlmap"), c.find("hue.cube"), c.find("lut1d")
-sys.exit(None if 0 <= print_ < hue < tone else "order is print@%d hue@%d tone@%d" % (print_, hue, tone))
+hue, tone = c.find("hue.cube"), c.find("lut1d")
+sys.exit(None if 0 <= hue < tone else "order is hue@%d tone@%d" % (hue, tone))
 ' "$chain" || fail "the hue stage is out of order: $chain"
 	head -1 "$BATS_TEST_TMPDIR/hue.cube" | grep -q 'sat=0.0,0.0,0.0,0.0,-0.5,' || fail "the cube is not the look's curves"
 }
@@ -2692,52 +2550,6 @@ sys.exit(None if 0 <= print_ < hue < tone else "order is print@%d hue@%d tone@%d
 	[ "$status" -ne 0 ] && [[ "$output" == *"wants 12 values"* ]] || fail "a short curve: $output"
 	run "$LIB_ROOT/scripts/make-hue-lut.py" --stdout --rot "90,0,0,0,0,0,0,0,0,0,0,0"
 	[ "$status" -ne 0 ] && [[ "$output" == *"outside -60..60"* ]] || fail "a knot past its bound: $output"
-}
-
-@test "a film cube's strength blends toward its input by exactly that amount" {
-	# A cube that sends everything to 0.8, at strength 0.25, on an input of 0.2: 0.35. Swapping the
-	# two weights gives 0.65, which is the mistake this exists to catch.
-	local cube="$BATS_TEST_TMPDIR/constant.cube" raw="$BATS_TEST_TMPDIR/grey.raw"
-	python3 -c '
-import struct, sys
-open(sys.argv[1], "w").write("LUT_3D_SIZE 2\n" + "0.8 0.8 0.8\n" * 8)
-open(sys.argv[2], "wb").write(struct.pack("48f", *([0.2] * 48)))
-' "$cube" "$raw"
-	run _float_through "$raw" 4 4 "$(film_lut_stage "$cube" 0.25 t)"
-	[ "$status" -eq 0 ] || fail "$output"
-	local worst
-	worst=$(printf '%s\n' "$output" | python3 -c 'import sys; print("%.6f" % max(abs(float(l) - 0.35) for l in sys.stdin))')
-	python3 -c "import sys; sys.exit(0 if $worst < 0.0005 else 1)" \
-		|| fail "strength 0.25 did not land a quarter of the way to the cube: off by $worst"
-}
-
-@test "a print named in look.json reaches the render and changes the picture" {
-	local work="$BATS_TEST_TMPDIR/print" look="$BATS_TEST_TMPDIR/print.json"
-	mkdir -p "$work/src"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	jq '.print.lut = "kodak_2383_constlmap" | .print.strength = 1' "$BATS_TEST_DIRNAME/../look.json" > "$look"
-	LOOK_FILE="$look" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
-		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -eq 0 ] || fail "$output"
-	[[ "$output" == *"print="*"kodak_2383_constlmap.cube@1"* ]] || fail "said nothing about it: $output"
-	mv "$work/dist/frames/CLIP_t0s_graded.png" "$work/printed.png"
-	jq '.print.lut = "none"' "$look" > "$look.none"
-	LOOK_FILE="$look.none" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
-		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -eq 0 ] || fail "$output"
-	! cmp -s "$work/printed.png" "$work/dist/frames/CLIP_t0s_graded.png" \
-		|| fail "a print at full strength changed nothing"
-}
-
-@test "a print that is not on disk is refused, naming where prints live" {
-	local work="$BATS_TEST_TMPDIR/no-print"
-	mkdir -p "$work/src"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	PRINT=no_such_stock FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
-		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -ne 0 ] || fail "rendered with a print that does not exist"
-	[[ "$output" == *"luts/print/"* ]] || fail "refused without saying where prints live: $output"
-	[[ "$output" == *"kodak_2383_constlmap"* ]] || fail "did not list the prints that do exist: $output"
 }
 
 # --- grain weighted by brightness ---------------------------------------------

@@ -29,10 +29,6 @@
 #                     accepted — anything needing retiming is refused rather than interpolated.
 #   CORRECT_SIZE=<n>  points per axis in the correction cube (default 33; see its header for
 #                     the measured cost and error at 17, 33 and 65)
-#   LOOK=<name|none>  which film-emulation cube to use, by stem from luts/looks/, or none for a
-#                     neutral grade. Overrides look.json's .look.lut for this run.
-#   PRINT=<name|none> which print-film cube follows the look, by stem from luts/print/, or none.
-#                     Overrides look.json's .print.lut for this run.
 #   FRAME=<seconds>   render ONE frame at that timecode through the grade chain to a PNG and
 #                     stop — the app's exact preview. No delivery stage, no stabilisation.
 #   FRAME_HEIGHT=<px> height of that frame (default 1440, the app's preview height in PreviewRenderer)
@@ -96,8 +92,8 @@ PROOF="${PROOF:-}"
 # FRAME=<seconds> renders a single frame through the REAL grade chain and stops. It is the app's
 # exact preview: a still cannot show grain, the sharpener, the chroma denoise, the stabiliser or
 # the dither, all of which are delivery-stage, so this deliberately covers the grade only and the
-# interface says so. What it does cover is everything a slider moves — the CST, the look LUT, the
-# solved tone curve, saturation and warmth — at full resolution, resampled to display size after
+# interface says so. What it does cover is everything a slider moves — the conversion, the hue curves, the
+# tone curve, saturation and warmth — at full resolution, resampled to display size after
 # the grade exactly as the delivery chain resamples after it.
 FRAME="${FRAME:-}"
 [ -z "$FRAME" ] || FRAME="$(require_number FRAME "$FRAME")"
@@ -168,10 +164,9 @@ CACHE="$WORK/dist/.grade-work"
 # run, not quietly substitute a different look.
 # Every one of these is spliced into an ffmpeg filter graph, and the look file is usually the
 # app's LOOK_FILE rather than typed — see require_number in lib.sh for why that matters.
-# LOOK=<name|none|path> and PRINT= override the film cubes for one run; the app sets them per
-# render. The loaders keep a value that is already set, which is for callers that source lib.sh —
-# so the names are cleared first, or a stray SAT in someone's environment would become the grade.
-unset LOOK_LUT PRINT_LUT LOOK_STRENGTH PRINT_STRENGTH SAT WARM HUE_LUT
+# The loaders keep a value that is already set, which is for callers that source lib.sh — so the
+# names are cleared first, or a stray SAT in someone's environment would become the grade.
+unset SAT WARM HUE_LUT
 load_grade_look || exit 1
 load_delivery_look || exit 1
 
@@ -386,7 +381,7 @@ fi
 T_PREFLIGHT=$(( $(now_ms) - RUN_T0 - T_MEASURE )); T_PROBE=0; T_STAB=0; T_TONE=0; T_ENCODE=0; T_FRAME=0
 say "grade run $(date '+%Y-%m-%d %H:%M:%S')  —  ${#CLIPS[@]} clip(s)"
 say "look: gamma=$TONE_GAMMA sat=$SAT warm=$WARM grain=$GRAIN_STRENGTH stab=$STAB exposure-match=$MATCH"
-say "film: convert=$CONVERT_NAME look=${LOOK_LUT:-none}@$LOOK_STRENGTH print=${PRINT_LUT:-none}@$PRINT_STRENGTH"
+say "convert: $CONVERT_NAME"
 # The flags themselves, which are exactly what the generator ran on, rather than a second spelling.
 [ -z "$CORRECT_PREFIX" ] || say "correction: $CORRECT_ARGS (${CORRECT_SIZE}-point cube)"
 [ -z "$HAL_DIR" ] || say "halation: strength=$HAL_STRENGTH threshold=$HAL_THRESHOLD radius=$HAL_RADIUS tint=$HAL_TINT"
@@ -395,7 +390,7 @@ say "film: convert=$CONVERT_NAME look=${LOOK_LUT:-none}@$LOOK_STRENGTH print=${P
 [ -n "$FRAME" ] || report_environment "$ROOT"
 # The EFFECTIVE values, after defaults and look.json, which is what a report read weeks later needs:
 # the environment that launched the run is gone by then.
-report_line "knobs:   deliverables=$(IFS=,; printf '%s' "${D_NAME[*]}") width=$WIDTH height=$HEIGHT crop_offset=${CROP_OFFSET_OK:--} match=$MATCH stab=$STAB smoothing=$SMOOTHING grain=$GRAIN_STRENGTH fps_out=${FPS_OUT:--} proof=${PROOF:--} frame=${FRAME:--} frame_height=$FRAME_HEIGHT frame_stage=$FRAME_STAGE look_lut=${LOOK_LUT:-none}@$LOOK_STRENGTH print_lut=${PRINT_LUT:-none}@$PRINT_STRENGTH halation=${HAL_STRENGTH}/${HAL_THRESHOLD}/${HAL_RADIUS}/${HAL_TINT} grain_weights=${GRAIN_SHADOWS}/${GRAIN_HIGHLIGHTS} audio_highpass=${AUDIO_HIGHPASS_HZ} bits=$DELIVERY_BITS correct_size=$CORRECT_SIZE convert=$CONVERT_NAME reference_stops=$REF_STOPS denoise=$DENOISE_STRENGTH sharpen=$SHARPEN gauge=$GAUGE dry=$DRY json=$JSON"
+report_line "knobs:   deliverables=$(IFS=,; printf '%s' "${D_NAME[*]}") width=$WIDTH height=$HEIGHT crop_offset=${CROP_OFFSET_OK:--} match=$MATCH stab=$STAB smoothing=$SMOOTHING grain=$GRAIN_STRENGTH fps_out=${FPS_OUT:--} proof=${PROOF:--} frame=${FRAME:--} frame_height=$FRAME_HEIGHT frame_stage=$FRAME_STAGE halation=${HAL_STRENGTH}/${HAL_THRESHOLD}/${HAL_RADIUS}/${HAL_TINT} grain_weights=${GRAIN_SHADOWS}/${GRAIN_HIGHLIGHTS} audio_highpass=${AUDIO_HIGHPASS_HZ} bits=$DELIVERY_BITS correct_size=$CORRECT_SIZE convert=$CONVERT_NAME reference_stops=$REF_STOPS denoise=$DENOISE_STRENGTH sharpen=$SHARPEN gauge=$GAUGE dry=$DRY json=$JSON"
 report_line "work:    $WORK"
 report_line "preflight took $(fmt_ms "$T_PREFLIGHT")"
 say ""

@@ -85,52 +85,6 @@ deliverable_path() {  # deliverable_path <dir> <clip> <suffix> [proof-seconds]
 	fi
 }
 
-# The look LUT is part of the grade, so it is chosen in look.json like every other look value and
-# resolved HERE, once, rather than in each render path. Both scripts used to carry their own copy
-# of a hardcoded path: two places to change a look, which is the drift look.json exists to end.
-#
-# It is a choice now rather than a constant, because the app offers it as one. Two things that
-# follow are not obvious:
-#
-#   - "none" omits the filter entirely instead of passing an identity cube. An identity lookup
-#     still pays interpolation error on every pixel for no change, and a 13-point identity grid
-#     pays a visible amount of it.
-#   - the tone curve was tuned WITH this look in the chain, so a look and a tone belong to each
-#     other. Changing one without the other is a different grade, not the same grade in a
-#     different film stock. A preset is the pair.
-#
-# The print cube is resolved the same way from luts/print/, which is the third argument: a print is
-# a look in every respect this function cares about, and a second copy of it is what drifts.
-resolve_look_lut() {  # resolve_look_lut <name|none|path> <repo-root> [looks|print]  -> a path, or nothing
-	local name="$1" root="$2" folder="${3:-looks}" path
-	case "$name" in
-		none|None|NONE|"") printf '' ; return 0;;
-		*/*|*.cube) path="$name";;
-		*) path="$root/luts/$folder/${name}.cube";;
-	esac
-	# The path is spliced into `lut3d=file='...'` so a quote or a filter separator in it closes
-	# ffmpeg's quoting from the inside — the same reason require_clip_name exists one level up.
-	case "$path" in
-		*[\'\"\,\;\[\]]*)
-			echo "look LUT path contains filter syntax: $path" >&2
-			return 1;;
-	esac
-	if [ ! -f "$path" ]; then
-		echo "$folder LUT not found: $path" >&2
-		echo "  look.json names a cube in luts/$folder/ (without the extension)," >&2
-		echo "  or \"none\" for no cube at all. Available:" >&2
-		# A glob loop rather than `ls`: shellcheck rejects parsing ls output, and this also
-		# prints nothing at all when the folder is empty instead of an unmatched pattern.
-		for c in "$root/luts/$folder/"*.cube; do
-			[ -f "$c" ] || continue
-			c="${c##*/}"
-			echo "    ${c%.cube}" >&2
-		done
-		return 1
-	fi
-	printf '%s\n' "$path"
-}
-
 # ffprobe misreports these files two ways at once, and this function exists to survive both.
 #
 #   1. The video stream prints TWICE (once inside [STREAM_GROUP], once as a top-level [STREAM])
@@ -1070,45 +1024,12 @@ DELIVERY_AUDIO_HIGHPASS_HZ=60
 # shellcheck disable=SC2034  # used by the stage scripts
 PRORES_MASTER=(-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le -c:a copy)
 
-# The look values that are not part of a delivery: which film cubes, at what strength, and the
-# colour trims. Read into globals because every render path needs the same set and grade_chain
-# reads them too; each script used to read them itself, and only two of the three honoured the
-# LOOK and PRINT overrides.
+# The colour trims, which a render path hands grade_chain as arguments: a caller measuring the
+# chain at other values must not have look.json's read in underneath it.
 #
-# UNSET IS NOT EMPTY, and the difference is load-bearing. An empty LOOK_LUT is a deliberate choice
-# of no look; an unset one means nobody chose, which is look.json's question to answer. So a value
-# already set is kept, and only an unset one is read.
-#
-# Call it at the top level, `load_film_look || exit 1`: it sets globals, which a `$(...)` would
-# set in a subshell and throw away.
-load_film_look() {
-	# The NAME is read on its own line. Nested inside resolve_look_lut's argument, a missing key
-	# came back as an empty name — which resolve_look_lut rightly reads as "none" — and the run
-	# rendered with no film look at all, having been asked for the one look.json lost.
-	local name
-	if [ -z "${LOOK_LUT+set}" ]; then
-		name="${LOOK:-}"
-		[ -n "$name" ] || name="$(look .look.lut)" || return 1
-		LOOK_LUT="$(resolve_look_lut "$name" "$LIB_ROOT")" || return 1
-	fi
-	if [ -z "${PRINT_LUT+set}" ]; then
-		name="${PRINT:-}"
-		[ -n "$name" ] || name="$(look .print.lut)" || return 1
-		PRINT_LUT="$(resolve_look_lut "$name" "$LIB_ROOT" print)" || return 1
-	fi
-	if [ -z "${LOOK_STRENGTH+set}" ]; then
-		LOOK_STRENGTH="$(require_unit look.strength "$(look .look.strength)")" || return 1
-	fi
-	if [ -z "${PRINT_STRENGTH+set}" ]; then
-		PRINT_STRENGTH="$(require_unit print.strength "$(look .print.strength)")" || return 1
-	fi
-}
-
-# The film look plus the colour trims: everything a render path hands grade_chain. The trims are
-# separate because grade_chain takes them as arguments, and a caller measuring the chain at other
-# values must not have look.json's read in underneath it.
+# UNSET IS NOT EMPTY: a value already set is kept, and only an unset one is read. Call it at the
+# top level, `load_grade_look || exit 1`: it sets globals, which a `$(...)` would throw away.
 load_grade_look() {
-	load_film_look || return 1
 	if [ -z "${SAT+set}" ]; then
 		SAT="$(require_number colour.saturation "$(look .colour.saturation)")" || return 1
 	fi
@@ -1153,7 +1074,7 @@ delivery_pix_fmt() {  # delivery_pix_fmt  -> yuv420p|yuv420p10le, from DELIVERY_
 	[ "${DELIVERY_BITS:-8}" = 10 ] && printf 'yuv420p10le\n' || printf 'yuv420p\n'
 }
 
-# THE GRADE ITSELF, as a spliceable filter chain: look LUT, tone curve, saturation, warmth. Both
+# THE GRADE ITSELF, as a spliceable filter chain: hue curves, tone curve, saturation, warmth. Both
 # render paths use it — the one-pass grade.sh and the staged 02-grade.sh — and they used to build
 # it separately. That had already drifted once (grade.sh carried its own copy of the tone block, so
 # a grade sent from the since-removed Bench moved one path and not the other), and at the time
@@ -1179,20 +1100,15 @@ delivery_pix_fmt() {  # delivery_pix_fmt  -> yuv420p|yuv420p10le, from DELIVERY_
 # applied it back in stage 01), and tag is DELIVERY_SETPARAMS wherever the result feeds filters
 # that negotiate a colourspace.
 #
-# A NEUTRAL STAGE IS ABSENT, as in film_lut_stage: an empty <tone-lut> leaves out the whole luma
+# A NEUTRAL STAGE IS ABSENT: an empty <tone-lut> leaves out the whole luma
 # branch (whether a curve is neutral is the caller's `tone_state`), saturation 1 leaves out `hue`,
 # and warmth 0 leaves out `colorbalance`, which would otherwise round-trip every pixel through RGB.
 # With every stage neutral the grade is the head and the tag, which is what makes "everything off"
 # a plain CST export. With nothing at all it is `null`, so a caller's `[0:v]...[o]` stays a graph.
 grade_chain() {  # grade_chain <tone-lut|empty> <sat> <warm> [head-prefix] [tag-prefix]
 	local tone="$1" sat="$2" warm="$3" head="${4:-}" tag="${5:-}" chain
-	# Two callers sourced lib.sh, called this function without loading the look, and received a
-	# chain with no look filter in it. Both looked correct; the golden's freshness guard is what
-	# caught it. So a look nobody loaded is loaded here, by the same function the scripts call.
-	load_film_look || return 1
-	chain="$head$(film_lut_stage "${LOOK_LUT:-}" "$LOOK_STRENGTH" gc_look)"
-	chain="$chain$(film_lut_stage "${PRINT_LUT:-}" "$PRINT_STRENGTH" gc_print)"
-	# THE HUE CURVES follow the print, so they act on the colours the stock rendered, and precede
+	chain="$head"
+	# THE HUE CURVES follow the conversion, so they act on the colours on screen, and precede
 	# the tone curve, which is luma-only and keeps their chroma. A caller that never generated the
 	# cube gets flat curves left out, and active ones refused rather than dropped in silence.
 	if [ -z "${HUE_LUT+set}" ]; then
@@ -1210,31 +1126,6 @@ grade_chain() {  # grade_chain <tone-lut|empty> <sat> <warm> [head-prefix] [tag-
 	[ "$(awk -v k="$warm" 'BEGIN { print (k == 0) }')" = 1 ] || chain="${chain}colorbalance=rm=$warm:bm=-$warm,"
 	chain="${chain%,}"
 	printf '%s' "${chain:-null}"
-}
-
-# One film cube — the look or the print — at a strength, as a prefix with its own trailing comma.
-#
-# THE PRINT COMES AFTER THE LOOK AND BEFORE THE TONE CURVE. That is a negative printed and then
-# exposure-shaped, and it keeps the print's per-channel contrast ahead of the luma-only tone stage,
-# which is the stage that stops saturated signage going neon (ADR 0003). Placing the look itself
-# after the tone curve instead was measured on IMG_0607 and moved the frame by 3 code values on
-# average, which is not worth a different chain.
-#
-# A STRENGTH BELOW 1 blends the cube's output back toward its input with `mix`, in the chain's own
-# 10-bit format — within 0.18 code values on average of doing the same blend in float, so there is
-# no reason to leave 10-bit for it. At 1 there is no blend in the graph and at 0 there is no cube:
-# absent rather than idle, so a look at full strength and no print renders the chain it always did.
-film_lut_stage() {  # film_lut_stage <cube-path|empty> <strength> <label-prefix>
-	[ -n "$1" ] || return 0
-	case "$(awk -v k="$2" 'BEGIN { print (k == 0) ? "off" : (k == 1) ? "full" : "blend" }')" in
-		off) return 0;;
-		full) printf "lut3d=file='%s':interp=tetrahedral," "$1";;
-		blend)
-			printf "split=2[%s_in][%s_src];[%s_src]lut3d=file='%s':interp=tetrahedral[%s_out];" \
-				"$3" "$3" "$3" "$1" "$3"
-			printf "[%s_in][%s_out]mix=inputs=2:weights=%s %s:scale=1," "$3" "$3" \
-				"$(awk -v k="$2" 'BEGIN { printf "%.6f", 1 - k }')" "$2";;
-	esac
 }
 
 # HALATION, as a spliceable prefix that runs between the correction and Apple's conversion: in
@@ -1391,7 +1282,7 @@ delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-pre
 		printf '%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=%s' "$3" "$4" "$1" "$2" "$(delivery_pix_fmt)"
 		return
 	fi
-	# Read here if nobody loaded them, as grade_chain loads the film look.
+	# Read here if nobody loaded them.
 	[ -n "${SHARPEN+set}" ] || load_delivery_look || return 1
 	# The log denoise (denoise_prefix) cleans chroma at the source, and hqdn3d on top of it only
 	# tints static colour, so the two are never both in the graph.

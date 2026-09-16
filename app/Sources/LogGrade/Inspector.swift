@@ -21,7 +21,6 @@ struct InspectorView: View {
                 correctStage
                 toneStage
                 trimsStage
-                filmLookStage
                 hueStage
                 halationStage
                 deliveryStage
@@ -75,8 +74,8 @@ struct InspectorView: View {
         default:
             return "This preset replaces the conversion with a film stock simulated from its "
                 + "datasheets (spektrafilm), rendered straight from the log picture so the "
-                + "highlights keep their latitude. The stock is the tone and colour, so leave the "
-                + "film look and tone neutral." + metered
+                + "highlights keep their latitude. The stock is the tone and colour, so keep "
+                + "tone moves small." + metered
         }
     }
 
@@ -118,8 +117,8 @@ struct InspectorView: View {
             "Hue curves", bypass: .hue,
             help: "Move one colour without the others: its hue, its saturation or its "
                 + "lightness. The strip along the bottom is the colour each point acts on; "
-                + "drag a point up or down.\n\nThey act on the colours after the film "
-                + "look, so the greens here are the greens on screen. Grey and near-grey "
+                + "drag a point up or down.\n\nThey act on the colours after the "
+                + "conversion, so the greens here are the greens on screen. Grey and near-grey "
                 + "are left alone, so skin and sky do not tint when a neighbouring colour "
                 + "moves. Double-click a curve to reset it."
         ) {
@@ -165,63 +164,6 @@ struct InspectorView: View {
                     default: model.defaultLook.halation.tint(channel))
             }
         }
-    }
-
-    private var filmLookStage: some View {
-        stage(
-            "Film look", bypass: .filmLook,
-            help: "A film-emulation lookup, applied after the conversion.\n\nThe tone "
-                + "curve below was set with this cube already in the chain, so changing "
-                + "one without the other is a different grade rather than another "
-                + "stock. Switch them together using a preset."
-        ) {
-            cubePicker($model.look.lookLUT, options: model.availableLooks)
-            control(
-                "Strength", $model.look.lookStrength, 0...1, format: "%.2f",
-                default: model.defaultLook.lookStrength)
-            printSubsection
-        }
-    }
-
-    /// FOLDED INTO FILM LOOK, NOT ITS OWN STAGE. The default is "none" — off — and a whole
-    /// section that is usually empty was a row to explain or hide rather than one worth reading
-    /// (backlog). It still needs its own switch: `.print` bypasses independently of `.filmLook`
-    /// at the engine (`Look.bypassing`), so a look can stay on with the print off, or the print
-    /// can stay reachable with the look off — the switch below overrides Film look's own
-    /// `.disabled(!enabled)` for exactly that reason.
-    private var printSubsection: some View {
-        let enabled = !model.bypassed.contains(.print)
-        return VStack(alignment: .leading, spacing: Space.s) {
-            HStack(spacing: Space.xs) {
-                Text("Print")
-                    .font(Type.label)
-                    .foregroundColor(enabled ? Palette.inkSecondary : Palette.inkTertiary)
-                HelpButton(
-                    text: "The paper stock the negative was printed on — Kodak 2383 is the "
-                        + "cinema print stock — applied after the film look. Off by default: "
-                        + "it adds the print's own contrast and colour, which at full strength "
-                        + "over a tuned tone curve is usually too much.")
-                Spacer(minLength: 0)
-                bypassToggle(
-                    isOn: Binding(
-                        get: { enabled },
-                        set: { model.setEnabled(.print, $0) }),
-                    label: "print")
-            }
-            VStack(alignment: .leading, spacing: Space.s) {
-                cubePicker($model.look.printLUT, options: model.availablePrints)
-                control(
-                    "Strength", $model.look.printStrength, 0...1, format: "%.2f",
-                    default: model.defaultLook.printStrength)
-            }
-            .opacity(enabled ? 1 : 0.4)
-            .disabled(!enabled)
-        }
-        .padding(.top, Space.xs)
-        // OVERRIDES FILM LOOK'S OWN `.disabled`, for the whole subsection. `.print` bypasses
-        // independently of `.filmLook` at the engine, so this switch — and, when it is on, the
-        // picker and strength above it — must stay reachable even with the look switched off.
-        .disabled(false)
     }
 
     private var toneStage: some View {
@@ -439,20 +381,6 @@ struct InspectorView: View {
             .help(
                 isOn.wrappedValue
                     ? "Switch \(label.lowercased()) off" : "Switch \(label.lowercased()) on")
-    }
-
-    /// A film cube by stem, or none. The look and the print are the same control over different
-    /// folders, so they share one body and cannot come to refresh the picture differently.
-    private func cubePicker(_ selection: Binding<String>, options: [String]) -> some View {
-        Picker("", selection: selection) {
-            Text("None").tag("none")
-            ForEach(options, id: \.self) { Text($0).tag($0) }
-        }
-        .labelsHidden()
-        .onChange(of: selection.wrappedValue) { _ in
-            model.liveUpdate()  // instantly, from the cubes already in memory
-            model.renderPreview()  // then the exact frame, as with every control
-        }
     }
 
     /// A label, a track, and a readout you can type into. Dragging finds a value; typing repeats

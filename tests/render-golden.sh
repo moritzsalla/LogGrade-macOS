@@ -61,7 +61,7 @@ ffmpeg_build() { ffmpeg -version | head -1; }
 # generated from look.json by a script already on the list; check.sh because it renders nothing.
 inputs() {
 	local f
-	for f in look.json scripts/* luts/rendering/*.cube luts/looks/*.cube luts/print/*.cube; do
+	for f in look.json scripts/* luts/rendering/*.cube; do
 		[ -f "$ROOT/$f" ] || continue
 		[ "$f" = scripts/check.sh ] && continue
 		printf '%s\n' "$f"

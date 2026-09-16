@@ -302,8 +302,10 @@ extension Project {
     static let conversionVersion = 3
     /// The first version whose looks carry hue curves.
     static let hueVersion = 4
+    /// The first version whose looks carry no film look or print cube.
+    static let noFilmLookVersion = 5
     /// The format this build writes.
-    static let fileVersion = hueVersion
+    static let fileVersion = noFilmLookVersion
 
     public func serialised() throws -> Data {
         var presetList: [[String: Any]] = []
@@ -355,8 +357,8 @@ extension Project {
     ///
     /// NOT A FALLBACK, and the difference is the whole point. `Look` refuses a missing key because
     /// substituting a value renders a different look under the same name. A version-1 project was
-    /// written before the film stages existed, so its looks carry no `halation` or `print` block, no
-    /// look strength and no grain weights, for a reason that is known exactly: that look had none. Adding the neutral
+    /// written before the film stages existed, so its looks carry no `halation` block and no grain
+    /// weights, for a reason that is known exactly: that look had none. Adding the neutral
     /// values says the same thing the file meant. A version-2 file missing them is damaged, and is
     /// refused like any other.
     static func look(from object: Any, version: Int) throws -> Look {
@@ -369,11 +371,6 @@ extension Project {
                     "radius": neutral.radius, "tint": neutral.tint,
                 ]
             }
-            if var film = look["look"] as? [String: Any], film["strength"] == nil {
-                film["strength"] = 1.0
-                look["look"] = film
-            }
-            if look["print"] == nil { look["print"] = ["lut": "none", "strength": 1.0] }
             if var grain = look["grain"] as? [String: Any] {
                 if grain["shadows"] == nil { grain["shadows"] = 1.0 }
                 if grain["highlights"] == nil { grain["highlights"] = 1.0 }
@@ -410,6 +407,15 @@ extension Project {
         if version < hueVersion, var look = upgraded as? [String: Any], look["hue"] == nil {
             let flat = Look.Hue()
             look["hue"] = ["rot": flat.rot, "sat": flat.sat, "lum": flat.lum]
+            upgraded = look
+        }
+        // Before version 5 a look could stack a film look and a print cube on the rendering. They
+        // are gone: a second stock over a finished picture was a different look, not a finer one,
+        // and the presets are the stocks now. Dropped rather than preserved, or `Look` would carry
+        // the dead blocks forward verbatim in every file it writes.
+        if version < noFilmLookVersion, var look = upgraded as? [String: Any] {
+            look.removeValue(forKey: "look")
+            look.removeValue(forKey: "print")
             upgraded = look
         }
         return try Look(data: try JSONSerialization.data(withJSONObject: upgraded))

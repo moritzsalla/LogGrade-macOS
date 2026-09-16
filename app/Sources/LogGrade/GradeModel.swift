@@ -36,7 +36,7 @@ final class GradeModel: ObservableObject {
     /// reads `effectiveLook`, so what you see with a stage off is what the shoot renders.
     ///
     /// NOT SAVED, deliberately: not in the preset, the project or the defaults. A bypass left on
-    /// from yesterday's comparison silently renders a whole shoot without its film look.
+    /// from yesterday's comparison silently renders a whole shoot without a stage.
     @Published var bypassed: Set<Look.Stage> = []
 
     var effectiveLook: Look { look.bypassing(bypassed) }
@@ -72,9 +72,6 @@ final class GradeModel: ObservableObject {
         UserDefaults.standard.set(Array(openStages), forKey: DefaultsKey.openStages)
     }
 
-    /// The cubes on disk, read once: the interface offers what is there.
-    let availableLooks: [String]
-    let availablePrints: [String]
     /// The engine's `presets/`, offered in every project, including one saved before they existed.
     let shippedPresets: [Project.Preset]
 
@@ -101,7 +98,7 @@ final class GradeModel: ObservableObject {
     // Exposure drag, which spent the frame the slider's thumb needed to redraw. The queue is not
     // what makes this serial: `gradeInFlight` allows one grade at a time, so no two jobs overlap.
 
-    /// Film looks and prints, read on first use and kept. There are a handful and they are small.
+    /// Conversion cubes, read on first use and kept. There are a handful.
     private var filmCubeCache: [URL: Cube3D] = [:]
     /// The correction cube and what it was built from, so an unchanged correction is not rebuilt
     /// 60 times a second.
@@ -117,7 +114,7 @@ final class GradeModel: ObservableObject {
     /// `make-correct-lut.py`.
     private static let correctionCubeSize = 33
     /// The source through the colour stages, kept so a tone or trim drag costs only the curve.
-    /// Dragging midtone does not move the correction, the conversion or the look, and those three
+    /// Dragging midtone does not move the correction, the conversion or the hue curves, and those
     /// are most of the work.
     private var convertedFrame: LiveChain.Converted?
     private var convertedFor: ColourKey?
@@ -131,10 +128,6 @@ final class GradeModel: ObservableObject {
         let convertCube: String
         let correct: Look.Correct
         let halation: Look.Halation
-        let lookLUT: String
-        let lookStrength: Double
-        let printLUT: String
-        let printStrength: Double
         let hue: Look.Hue
 
         /// `look`'s correction is the one the frame was converted with, metering included.
@@ -142,36 +135,17 @@ final class GradeModel: ObservableObject {
             convertCube = look.convertCube
             correct = look.correct
             halation = look.halation
-            lookLUT = look.lookLUT
-            lookStrength = look.lookStrength
-            printLUT = look.printLUT
-            printStrength = look.printStrength
             hue = look.hue
         }
     }
 
-    /// Whether a stem asks for a cube at all. Mirrors `EngineLocation.lookCube(named:)`, which
-    /// answers nil both for "none" and for a cube it cannot find — and only the first of those is
-    /// a picture the live tier may draw without the stage.
-    private static func namesCube(_ stem: String) -> Bool { stem != "none" && !stem.isEmpty }
-
-    private func lookCube(for stem: String) -> Cube3D? {
-        filmCube(at: engine.lookCube(named: stem))
-    }
-
-    private func printCube(for stem: String) -> Cube3D? {
-        filmCube(at: engine.printCube(named: stem))
-    }
-
-    /// Apple's cube or a film one, through the same cache: each is 65 points, and parsing one
-    /// costs more than a frame does, so it is read once rather than on a drag.
+    /// The rendering or a film stock, cached: each is 65 points, and parsing one costs more than a
+    /// frame does, so it is read once rather than on a drag. Keyed by the resolved file, which is
+    /// unique across `luts/rendering/` and `luts/film/` where a stem need not be.
     private func conversionCube(for stem: String) -> Cube3D? {
         filmCube(at: engine.conversionCube(named: stem))
     }
 
-    /// KEYED BY FILE, NOT BY STEM. A stem names a cube within its own folder, and nothing stops a
-    /// look and a print sharing one — which is why this was two caches. The resolved path is
-    /// unique across both folders, so one cache cannot hand a look's cube to the print.
     private func filmCube(at url: URL?) -> Cube3D? {
         guard let url else { return nil }
         if let cached = filmCubeCache[url] { return cached }
@@ -235,7 +209,7 @@ final class GradeModel: ObservableObject {
     /// Follows the controls.
     ///
     /// EVERY CHANGE, not only a drag. This used to require the pointer to be down, which meant
-    /// picking a film look or a preset skipped the live tier entirely and cost a three-second
+    /// picking a preset skipped the live tier entirely and cost a three-second
     /// engine render to see — the slowest thing in the app, for the control with the biggest
     /// effect on the picture.
     func liveUpdate() {
@@ -329,17 +303,6 @@ final class GradeModel: ObservableObject {
         if !wanted.halation.isNeutral && halation == nil {
             return .refused("That halation tint isn’t a value the engine accepts.")
         }
-        // The same refusal for a film cube that was named and would not load: drawn without it,
-        // the picture is a grade with a stage missing that reads as the grade.
-        let lookStage = lookCube(for: wanted.lookLUT)
-        if Self.namesCube(wanted.lookLUT) && lookStage == nil {
-            return .refused("The film look “\(wanted.lookLUT)” couldn’t be read.")
-        }
-        let printStage = printCube(for: wanted.printLUT)
-        if Self.namesCube(wanted.printLUT) && printStage == nil {
-            return .refused("The print “\(wanted.printLUT)” couldn’t be read.")
-        }
-
         if hueFor != wanted.hue {
             hueCube =
                 wanted.hue.isNeutral
@@ -364,12 +327,7 @@ final class GradeModel: ObservableObject {
         } else {
             let stages = LiveChain.colourStages(
                 correction: correctionCube, halation: halation,
-                conversion: conversion,
-                look: lookStage,
-                lookStrength: wanted.lookStrength,
-                print: printStage,
-                printStrength: wanted.printStrength,
-                hue: hueCube)
+                conversion: conversion, hue: hueCube)
             converted = LiveChain.converted(source, through: stages)
             if let converted {
                 convertedFrame = converted
@@ -461,8 +419,6 @@ final class GradeModel: ObservableObject {
     init(engine: EngineLocation, look: Look) {
         self.engine = engine
         self.look = look
-        self.availableLooks = engine.availableLooks()
-        self.availablePrints = engine.availablePrints()
         let shipped = engine.shippedPresets()
         self.shippedPresets = shipped
         self.project = Project(
