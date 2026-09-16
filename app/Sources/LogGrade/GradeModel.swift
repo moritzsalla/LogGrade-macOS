@@ -630,6 +630,15 @@ final class GradeModel: ObservableObject {
         }
     }
 
+    /// Everything in the inspector back to the active preset, bypass switches included: a stage
+    /// left off after a reset is an adjustment the reset did not remove.
+    func resetAdjustments() {
+        bypassed = []
+        apply(preset: project.activePreset)
+    }
+
+    var hasAdjustments: Bool { hasUnsavedChanges || !bypassed.isEmpty }
+
     /// Keeps the current grade under a name. The rule is `Project.savePreset`, where it is tested.
     func savePreset(named name: String) {
         project.savePreset(named: name, look: look)
