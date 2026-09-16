@@ -357,10 +357,11 @@ struct DeliveryPanel: View {
         }
     }
 
-    /// Passes over the footage, which is what actually decides how long convert takes.
+    /// Passes over the footage, which is what actually decides how long convert takes. One per
+    /// clip however many shapes it delivers: the engine grades once and splits.
     private var workload: String {
         let clips = model.clipNames.count
-        let passes = model.project.delivery.targets.count
+        let passes = model.project.delivery.targets.isEmpty ? 0 : 1
         let stabilised = model.clipNames.filter { model.project.settings(for: $0).stabilise }.count
         let total = clips * passes + stabilised
         guard total > 0 else { return "Nothing selected to deliver." }

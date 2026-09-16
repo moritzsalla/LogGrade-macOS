@@ -590,30 +590,44 @@ for SRC in "${CLIPS[@]}"; do
 	LIMIT=""
 	[ -n "$PROOF" ] && LIMIT="-t $PROOF"
 
-	render() {  # render <w> <h> <suffix> [crop]
-		local w=$1 h=$2 suffix=$3 crop=${4:-}
-		local out
-		out="$(deliverable_path "$OUT_DIR" "$CLIP" "$suffix" "$PROOF")"
-		local t0; t0=$(now_ms)
-		# The glow is built per deliverable: the graph grades the cropped, shrunk frame
-		# (delivery_geometry), so its blur is in that frame's pixels, not the source's.
+	# Every deliverable of the clip in ONE ffmpeg: decoded, stabilised, shrunk and graded once, then
+	# split into each deliverable's crop, finish and encode (render_deliverables). Reels and feed
+	# used to be two whole passes over the source, grade included.
+	render() {  # render — reads R_* for the clip's deliverables
+		local n="${#R_SUFFIX[@]}" i specs=() scale fw fh
+		for (( i = 0; i < n; i++ )); do
+			specs+=("${R_H[$i]}:${R_CROP[$i]:--}")
+		done
+		scale="$(delivery_scale "$SRC_H" "${specs[@]}")"
+		fw="$(scaled_even "$SRC_W" "$scale")"; fh="$(scaled_even "$SRC_H" "$scale")"
+		# The glow is in the shared frame's pixels, which is what it is blurred in.
 		local HALATION_PREFIX=""
 		[ -z "$HAL_DIR" ] || HALATION_PREFIX="$(halation_prefix "$HAL_DIR" \
-			"$(delivery_halation_sigma "$SRC_W" "$SRC_H" "$HAL_RADIUS" "$crop" "$h")" "$HAL_STRENGTH" "$HAL_TINT")"
+			"$(delivery_halation_sigma "$SRC_W" "$SRC_H" "$HAL_RADIUS" "$scale")" "$HAL_STRENGTH" "$HAL_TINT")"
+		local shared
+		shared="$(delivery_geometry "$fw" "$fh" "$SFX")$(grade_chain "$TONE" "$SAT" "$WARM" \
+  "${DENOISE_PREFIX}${CLIP_CORRECT_PREFIX}${HALATION_PREFIX}lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},")"
+		local args=() label=""
+		for (( i = 0; i < n; i++ )); do
+			args+=("${R_OUT[$i]}" "$WIDTH" "${R_H[$i]}" \
+				"$(scaled_crop "${R_CROP[$i]}" "$scale" "$fw" "$fh")$(delivery_image_chain "$WIDTH" "${R_H[$i]}" "" "" "$FINISH" "$FPS")${FPS_FILTER}")
+			label="${label:+$label+}${R_SUFFIX[$i]}"
+		done
+		local t0; t0=$(now_ms)
 		# shellcheck disable=SC2086  # $LIMIT is a deliberate split: a numeric flag pair or nothing
-		render_deliverable "$out" "$suffix encode" "$SRC" "$w" "$h" "$FPS" \
-"$(delivery_geometry "$w" "$h" "$SFX" "$crop")$(grade_chain "$TONE" "$SAT" "$WARM" \
-  "${DENOISE_PREFIX}${CLIP_CORRECT_PREFIX}${HALATION_PREFIX}lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},"),\
-$(delivery_image_chain "$w" "$h" "" "" "$FINISH" "$FPS")${FPS_FILTER}" \
-			$LIMIT || return 1
+		render_deliverables "$label encode" "$SRC" "$FPS" "$shared" "$n" "${args[@]}" $LIMIT || return 1
 		# `|| return 1` above is load-bearing now that the caller invokes render() inside an `if`:
 		# that suppresses `set -e` for this whole body, so without it a failed render would fall
 		# through to `stat` on a file that was never written.
 		local ms=$(( $(now_ms) - t0 )); T_ENCODE=$(( T_ENCODE + ms ))
-		report_encode "$suffix encode" "$out" "$ms"
-		local bytes; bytes=$(stat -f%z "$out")
-		say "      -> $(basename "$out")  $(( bytes / 1048576 ))MB"
-		emit output clip "$CLIP" deliverable "$suffix" path "$out" bytes "$bytes"
+		[ "$n" -eq 1 ] || report_line "      one pass for $n deliverables; each line below is that pass's time"
+		local bytes
+		for (( i = 0; i < n; i++ )); do
+			report_encode "${R_SUFFIX[$i]} encode" "${R_OUT[$i]}" "$ms"
+			bytes=$(stat -f%z "${R_OUT[$i]}")
+			say "      -> $(basename "${R_OUT[$i]}")  $(( bytes / 1048576 ))MB"
+			emit output clip "$CLIP" deliverable "${R_SUFFIX[$i]}" path "${R_OUT[$i]}" bytes "$bytes"
+		done
 	}
 
 	# A FAILED CLIP MUST NOT TAKE THE BATCH WITH IT. render_delivery leaves the previous deliverable
@@ -632,6 +646,7 @@ $(delivery_image_chain "$w" "$h" "" "" "$FINISH" "$FPS")${FPS_FILTER}" \
 	# pixel or two off the number that was asked for. Stating it is the difference between a
 	# rounding and a silent wrongness; this file has no budget for the second kind.
 	CLIP_OK=1
+	R_OUT=(); R_H=(); R_CROP=(); R_SUFFIX=()
 	_i=0
 	while [ "$_i" -lt "${#D_NAME[@]}" ]; do
 		_h="$(deliverable_height "$WIDTH" "${D_AW[$_i]}" "${D_AH[$_i]}")"
@@ -650,9 +665,11 @@ $(delivery_image_chain "$w" "$h" "" "" "$FINISH" "$FPS")${FPS_FILTER}" \
 		# actually landed — the same silence the derived height is printed to avoid. The window's
 		# size is printed too, because a small source is upscaled to the delivery width without it.
 		say "      ${D_NAME[$_i]}: ${WIDTH}x${_h}${_crop:+ $(crop_description "$_crop")}"
-		render "$WIDTH" "$_h" "${D_SUFFIX[$_i]}" "$_crop" || { CLIP_OK=0; break; }
+		R_OUT+=("$(deliverable_path "$OUT_DIR" "$CLIP" "${D_SUFFIX[$_i]}" "$PROOF")")
+		R_H+=("$_h"); R_CROP+=("$_crop"); R_SUFFIX+=("${D_SUFFIX[$_i]}")
 		_i=$(( _i + 1 ))
 	done
+	[ "$CLIP_OK" = 0 ] || render || CLIP_OK=0
 	report_line "      clip took $(fmt_ms $(( $(now_ms) - CLIP_T0 )))"
 	if [ "$CLIP_OK" = "1" ]; then
 		OK=$((OK+1))

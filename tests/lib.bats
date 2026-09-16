@@ -2547,12 +2547,19 @@ sys.exit(None if 0 <= hue < tone else "order is hue@%d tone@%d" % (hue, tone))
 @test "the one-pass render crops and shrinks before it grades, and sizes the glow for that frame" {
 	# The grade is per pixel or a fraction of the frame, so it runs at delivery size: a quarter of the
 	# work at 4K. The glow is in the shrunk frame's pixels, and a crop must not make it grow.
-	run delivery_geometry 1080 1350 "" "crop=2160:2700:0:750,"
-	[ "$output" = "crop=2160:2700:0:750,zscale=w=1080:h=1350:f=lanczos,format=yuv444p10le," ] || fail "$output"
-	run delivery_halation_sigma 2160 3840 0.006 "" 1920
+	run delivery_geometry 1080 1920 ""
+	[ "$output" = "zscale=w=1080:h=1920:f=lanczos,format=yuv444p10le," ] || fail "$output"
+	run delivery_halation_sigma 2160 3840 0.006 0.5
 	[ "$output" = "11.52" ] || fail "full frame at half size: $output"
-	run delivery_halation_sigma 2160 3840 0.006 "crop=2160:2700:0:750," 1350
-	[ "$output" = "11.52" ] || fail "the 4:5 crop changed the glow's size: $output"
+	# Reels needs 1920 of 3840 rows, feed 1350 of a 2700-row window: both a half, so a 1080x1920
+	# frame serves both, and feed's window moves onto it at half every number.
+	run delivery_scale 3840 "1920:-" "1350:crop=2160:2700:0:750,"
+	[ "$output" = "0.500000" ] || fail "scale: $output"
+	run scaled_crop "crop=2160:2700:0:750," 0.5 1080 1920
+	[ "$output" = "crop=1080:1350:0:374," ] || fail "window on the shared frame: $output"
+	# A window that rounds past the edge is held inside the frame.
+	run scaled_crop "crop=2160:2700:0:1141," 0.5 1080 1920
+	[ "$output" = "crop=1080:1350:0:570," ] || fail "not held inside: $output"
 	# And in the render itself, the reduction comes before the conversion, not after the grade.
 	local work="$BATS_TEST_TMPDIR/shrink-first" report
 	mkdir -p "$work/src"
@@ -2563,6 +2570,27 @@ sys.exit(None if 0 <= hue < tone else "order is hue@%d tone@%d" % (hue, tone))
 	[ -n "$report" ] || fail "no run report: $output"
 	grep -qE "^\[0:v\]zscale=w=72:h=128:f=lanczos,format=yuv444p10le,.*lut3d=file='[^']*neutral\.cube'" "$report" \
 		|| fail "the graph does not shrink before the conversion: $(grep -F '[0:v]' "$report")"
+}
+
+# bats test_tags=slow
+@test "a clip's deliverables render in one pass, and every one of them lands" {
+	# One ffmpeg, one decode, one grade, split per deliverable. The sharpener and a weighted grain
+	# merge each define labels, and two of them in one graph must not collide: ffmpeg refuses the
+	# whole graph if they do, which is what a lost renumbering looks like.
+	local work="$BATS_TEST_TMPDIR/one-pass" report look="$BATS_TEST_TMPDIR/one-pass.json"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	jq '.finish.sharpen = 0.6 | .grain.strength = 4 | .grain.highlights = 0.5' "$BATS_TEST_DIRNAME/../look.json" > "$look"
+	LOOK_FILE="$look" DELIVERABLES=reels,feed CROP_OFFSET=centre MATCH=0 STAB=0 HEIGHT=128 PROOF=0.2 \
+		GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || fail "render failed: $output"
+	[ -s "$work/dist/proofs/CLIP_reels-stories_9x16_proof-0.2s.mp4" ] || fail "no reels: $output"
+	[ -s "$work/dist/proofs/CLIP_feed_4x5_proof-0.2s.mp4" ] || fail "no feed: $output"
+	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
+	[ "$(grep -c -- '--- graph [0-9]* (reels-stories_9x16+feed_4x5 encode, -filter_complex) ---' "$report")" = 1 ] \
+		|| fail "not one pass for both: $(grep -F -- '--- graph' "$report")"
+	grep -qE '^\[0:v\].*split=2\[s0\]\[s1\];.*\[sh1_in\].*\[gw1_image\]' "$report" \
+		|| fail "the second deliverable's labels are not its own: $(grep -F '[0:v]' "$report")"
 }
 
 @test "the hue generator refuses a curve it cannot mean" {

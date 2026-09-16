@@ -1199,15 +1199,11 @@ halation_sigma() {  # halation_sigma <width> <height> <radius>  -> sigma in pixe
 	awk -v w="$1" -v h="$2" -v r="$3" 'BEGIN { printf "%.2f", (w > h ? w : h) * r }'
 }
 
-# The same glow in a deliverable's pixels, for a graph that crops and shrinks before it grades
-# (delivery_geometry): the source's sigma scaled by output height over the window's height, so a
-# crop does not make the glow grow. The window is the crop's, or the whole source without one.
-delivery_halation_sigma() {  # delivery_halation_sigma <src-w> <src-h> <radius> <crop-prefix|empty> <out-h>
-	local window_h="$2" dims
-	if [ -n "$4" ]; then
-		dims="${4#crop=}"; dims="${dims#*:}"; window_h="${dims%%:*}"
-	fi
-	awk -v s="$(halation_sigma "$1" "$2" "$3")" -v o="$5" -v h="$window_h" 'BEGIN { printf "%.2f", s * o / h }'
+# The same glow in the pixels of a frame shrunk by <scale> (delivery_scale), which is what the
+# one-pass render grades: the radius stays a fraction of the SOURCE frame, so a crop cut from the
+# graded frame afterwards does not make the glow grow.
+delivery_halation_sigma() {  # delivery_halation_sigma <src-w> <src-h> <radius> <scale>
+	awk -v s="$(halation_sigma "$1" "$2" "$3")" -v f="$4" 'BEGIN { printf "%.2f", s * f }'
 }
 
 # Camera-motion analysis into a transform, staged. Both entry points write the same cache path, so
@@ -1258,17 +1254,57 @@ stab_prefix() {  # stab_prefix <trf> <smoothing>
 		"$1" "$2"
 }
 
-# SHRINK FIRST, for the one-pass render: the stabiliser's warp and the crop at source resolution,
-# then the reduction to the deliverable, and only then the denoise, correction, halation, conversion
-# and grade. Every one of those is per pixel or sized as a fraction of the frame, so grading 1080p
-# instead of 4K costs a quarter of the work: IMG_0609's grade and encode went from 2.0 to 4.1 fps.
-# It also matches the live preview, which resamples and then grades.
+# SHRINK FIRST, for the one-pass render: the stabiliser's warp at source resolution, then the
+# reduction of the WHOLE frame to the size the deliverables need, and only then the denoise,
+# correction, halation, conversion and grade. Every one of those is per pixel or sized as a fraction
+# of the frame, so grading 1080p instead of 4K costs a quarter of the work: IMG_0609's grade and
+# encode went from 2.0 to 4.1 fps. It also matches the live preview, which resamples and then grades.
+#
+# GRADED ONCE, CROPPED AFTER. Every deliverable of a clip is cut from this one graded frame
+# (render_deliverables), so reels and feed decode and grade once between them. The frame is shrunk
+# only as far as the most demanding deliverable allows (delivery_scale), so no crop is upscaled.
 #
 # 10-bit 4:4:4 out, NOT DITHERED: the dither to the delivery depth stays in delivery_image_chain,
 # after the grade, where it has always been. The staged path grades its master at full resolution
 # and does not use this.
-delivery_geometry() {  # delivery_geometry <w> <h> <stab-prefix> <crop-prefix>  -> a prefix with its trailing comma
-	printf '%s%szscale=w=%s:h=%s:f=lanczos,format=yuv444p10le,' "$3" "$4" "$1" "$2"
+delivery_geometry() {  # delivery_geometry <w> <h> <stab-prefix>  -> a prefix with its trailing comma
+	printf '%szscale=w=%s:h=%s:f=lanczos,format=yuv444p10le,' "$3" "$1" "$2"
+}
+
+# How far the shared frame shrinks: the largest of each deliverable's output height over the height
+# of the source window it is cut from, so the deliverable needing the most pixels gets them.
+delivery_scale() {  # delivery_scale <src-h> <out-h>:<crop-prefix|-> ...  -> a factor
+	local src_h="$1" spec out_h crop window_h dims best=0
+	shift
+	for spec in "$@"; do
+		out_h="${spec%%:*}"; crop="${spec#*:}"; window_h="$src_h"
+		if [ "$crop" != "-" ]; then
+			dims="${crop#crop=}"; dims="${dims#*:}"; window_h="${dims%%:*}"
+		fi
+		best=$(awk -v b="$best" -v o="$out_h" -v h="$window_h" 'BEGIN { f = o / h; printf "%.6f", (f > b) ? f : b }')
+	done
+	printf '%s\n' "$best"
+}
+
+# A dimension at a scale, even, because 4:2:0 and libx264 need it.
+scaled_even() {  # scaled_even <n> <scale>
+	awk -v n="$1" -v f="$2" 'BEGIN { v = int(n * f + 0.5); printf "%d\n", v - v % 2 }'
+}
+
+# A source crop window moved onto the shared frame: every number scaled and made even, then held
+# inside the frame, so rounding cannot push the window past an edge. Empty stays empty.
+scaled_crop() {  # scaled_crop <crop-prefix|empty> <scale> <frame-w> <frame-h>  -> "crop=...," or nothing
+	[ -n "$1" ] || return 0
+	local cw ch x y
+	IFS=: read -r cw ch x y <<< "${1#crop=}"
+	y="${y%,}"
+	cw="$(scaled_even "$cw" "$2")"; ch="$(scaled_even "$ch" "$2")"
+	x="$(scaled_even "$x" "$2")"; y="$(scaled_even "$y" "$2")"
+	[ "$cw" -le "$3" ] || cw="$3"
+	[ "$ch" -le "$4" ] || ch="$4"
+	[ $(( x + cw )) -le "$3" ] || x=$(( $3 - cw ))
+	[ $(( y + ch )) -le "$4" ] || y=$(( $4 - ch ))
+	printf 'crop=%s:%s:%s:%s,\n' "$cw" "$ch" "$x" "$y"
 }
 
 # Grain and sharpen come AFTER the downscale, not before: grain sized for the 4K master is crushed
@@ -1420,12 +1456,12 @@ delivery_grain_branch() {  # delivery_grain_branch <w> <h> <strength>
 # no filter it does not use. `maskedmerge` has no `shortest` option, and does not need one: its
 # mask comes from the image, which ends, and the blend after it keeps its own `shortest=1` for the
 # plate.
-delivery_grain_merge() {  # delivery_grain_merge <image-label> <grain-label> <out-label> <shadows> <highlights>
+delivery_grain_merge() {  # delivery_grain_merge <image-label> <grain-label> <out-label> <shadows> <highlights> [label-prefix]
 	if [ "$(awk -v s="$4" -v h="$5" 'BEGIN { print (s == 1 && h == 1) ? "flat" : "weighted" }')" = "flat" ]; then
 		printf '[%s][%s]%s[%s]' "$1" "$2" "$DELIVERY_BLEND" "$3"
 		return
 	fi
-	local shadows="$4" highlights="$5" expr black=16 span=219 full=255 mid=128
+	local shadows="$4" highlights="$5" p="${6:-gw}" expr black=16 span=219 full=255 mid=128
 	[ "$(delivery_pix_fmt)" = yuv420p ] || { black=64; span=876; full=1023; mid=512; }
 	# ld(0) is luma out of limited range as 0..1; ld(1) runs 0..1 across the shadow ramp below 0.45
 	# and ld(2) across the highlight ramp above 0.55. Each ramp is eased by a smoothstep.
@@ -1436,42 +1472,83 @@ delivery_grain_merge() {  # delivery_grain_merge <image-label> <grain-label> <ou
 	local highlight_ease='ld(2)*ld(2)*(3-2*ld(2))'
 	# Quoted, because the expression holds both of the graph's own separators, `,` and `;`.
 	expr="$level;$shadow_ramp;$highlight_ramp;$full*(($shadows+(1-$shadows)*$shadow_ease)+($highlights-1)*$highlight_ease)"
-	printf "[%s]split=2[gw_image][gw_luma];[gw_luma]lutyuv=y='%s':u=%s:v=%s[gw_mask];" "$1" "$expr" "$mid" "$mid"
-	printf '[%s]split=2[gw_noise][gw_level];[gw_level]lutyuv=y=%s[gw_flat];' "$2" "$mid"
-	printf '[gw_flat][gw_noise][gw_mask]maskedmerge=planes=1[gw_grain];'
-	printf '[gw_image][gw_grain]%s[%s]' "$DELIVERY_BLEND" "$3"
+	printf "[%s]split=2[%s_image][%s_luma];[%s_luma]lutyuv=y='%s':u=%s:v=%s[%s_mask];" \
+		"$1" "$p" "$p" "$p" "$expr" "$mid" "$mid" "$p"
+	printf '[%s]split=2[%s_noise][%s_level];[%s_level]lutyuv=y=%s[%s_flat];' "$2" "$p" "$p" "$p" "$mid" "$p"
+	printf '[%s_flat][%s_noise][%s_mask]maskedmerge=planes=1[%s_grain];' "$p" "$p" "$p" "$p"
+	printf '[%s_image][%s_grain]%s[%s]' "$p" "$p" "$DELIVERY_BLEND" "$3"
 }
 
-# One deliverable, source to installed file: the grain plate, the graph around a caller's image
-# chain, and the encode. The two delivery paths each assembled this and differ only in what comes
-# before the delivery tail — the whole grade on the one-pass path, nothing on stage 3 — so that is
-# the one argument they supply. Reads the grain globals load_delivery_look sets; under `set -u` an
+# Deliverables, source to installed files, in ONE ffmpeg: a shared chain, split once per
+# deliverable into its own tail, grain plate and encode. The one-pass render passes the grade as the
+# shared chain, so a clip's deliverables decode and grade once between them; stage 3 passes a single
+# deliverable and no shared chain. Reads the grain globals load_delivery_look sets; under `set -u` an
 # unloaded one stops the run rather than rendering without grain.
+#
+# ONE DELIVERABLE BUILDS THE GRAPH IT ALWAYS DID: no split, and the labels b, g and o. Two or more
+# number every label a tail or grain merge owns (sh_, gw_), because a filter graph's labels are
+# global and the sharpener's would otherwise be defined twice.
+render_deliverables() {  # render_deliverables <label> <input> <fps> <shared-chain|empty> <n> [<out> <w> <h> <tail>]... [ffmpeg-arg]...
+	local label="$1" in="$2" fps="$3" shared="$4" n="$5" i
+	shift 5
+	local outs=() ws=() hs=() tails=()
+	for (( i = 0; i < n; i++ )); do
+		outs+=("$1"); ws+=("$2"); hs+=("$3"); tails+=("$4")
+		shift 4
+	done
+	local af="" grain=1
+	[ "$AUDIO_HIGHPASS_HZ" -eq 0 ] || af="highpass=f=$AUDIO_HIGHPASS_HZ"
+	# Strength 0 is no plate and no merge: absent rather than idle, like a neutral grade stage.
+	[ "$(awk -v k="$GRAIN_STRENGTH" 'BEGIN { print (k == 0) }')" = 1 ] && grain=0
+	local inputs=(-y -i "$in") graph="" outargs=() b g o t
+	if [ "$n" -gt 1 ]; then
+		graph="[0:v]${shared:+$shared,}split=$n"
+		for (( i = 0; i < n; i++ )); do graph="${graph}[s$i]"; done
+		graph="${graph};"
+	fi
+	for (( i = 0; i < n; i++ )); do
+		t="${tails[$i]}"
+		if [ "$n" -eq 1 ]; then
+			b=b; g=g; o=o
+			graph="${graph}[0:v]${shared:+$shared,}$t"
+		else
+			b="b$i"; g="g$i"; o="o$i"
+			t="${t//\[sh_/[sh${i}_}"
+			[ "$i" -eq 0 ] || graph="${graph};"
+			graph="${graph}[s$i]$t"
+		fi
+		if [ "$grain" = 0 ]; then
+			graph="${graph}[$o]"
+		else
+			inputs+=(-f lavfi -i "$(grain_plate "${ws[$i]}" "${hs[$i]}" "$fps")")
+			graph="${graph}[$b];[$(( i + 1 )):v]$(delivery_grain_branch "${ws[$i]}" "${hs[$i]}" "$GRAIN_STRENGTH")[$g];"
+			if [ "$n" -eq 1 ]; then
+				graph="${graph}$(delivery_grain_merge "$b" "$g" "$o" "$GRAIN_SHADOWS" "$GRAIN_HIGHLIGHTS")"
+			else
+				graph="${graph}$(delivery_grain_merge "$b" "$g" "$o" "$GRAIN_SHADOWS" "$GRAIN_HIGHLIGHTS" "gw$i")"
+			fi
+		fi
+		# `${af:+-af "$af"}` is zero words when the filter is off and exactly two when it is on. An
+		# array would be the obvious spelling, but an empty one under `set -u` is "unbound" on bash 3.2.
+		outargs+=(-map "[$o]" "${DELIVERY_ENCODE[@]:2}" ${af:+-af "$af"})
+		if [ "$DELIVERY_BITS" = 10 ]; then
+			outargs+=("${DELIVERY_VIDEO_10[@]}")
+		else
+			outargs+=("${DELIVERY_VIDEO_8[@]}")
+		fi
+		[ "$#" -eq 0 ] || outargs+=("$@")
+		outargs+=("@OUT$(( i + 1 ))@")
+	done
+	render_deliveries "$label" "$n" "${outs[@]}" "${inputs[@]}" -filter_complex "$graph" "${outargs[@]}"
+}
+
 render_deliverable() {  # render_deliverable <final-out> <label> <input> <w> <h> <fps> <image-chain> [ffmpeg-arg]...
 	local out="$1" label="$2" in="$3" w="$4" h="$5" fps="$6" chain="$7"
 	shift 7
-	local af=""
-	[ "$AUDIO_HIGHPASS_HZ" -eq 0 ] || af="highpass=f=$AUDIO_HIGHPASS_HZ"
-	if [ "$DELIVERY_BITS" = 10 ]; then
-		set -- "${DELIVERY_VIDEO_10[@]}" "$@"
-	else
-		set -- "${DELIVERY_VIDEO_8[@]}" "$@"
-	fi
-	# `${af:+-af "$af"}` is zero words when the filter is off and exactly two when it is on. An
-	# array would be the obvious spelling, but an empty one under `set -u` is "unbound" on bash 3.2.
-	# Strength 0 is no plate and no merge: absent rather than idle, like a neutral grade stage.
-	if [ "$(awk -v k="$GRAIN_STRENGTH" 'BEGIN { print (k == 0) }')" = 1 ]; then
-		render_delivery "$out" "$label" -y -i "$in" -filter_complex "[0:v]${chain}[o]" \
-			"${DELIVERY_ENCODE[@]}" ${af:+-af "$af"} "$@"
-		return
-	fi
-	render_delivery "$out" "$label" \
-		-y -i "$in" -f lavfi -i "$(grain_plate "$w" "$h" "$fps")" \
-		-filter_complex "[0:v]${chain}[b];[1:v]$(delivery_grain_branch "$w" "$h" "$GRAIN_STRENGTH")[g];$(delivery_grain_merge b g o "$GRAIN_SHADOWS" "$GRAIN_HIGHLIGHTS")" \
-		"${DELIVERY_ENCODE[@]}" ${af:+-af "$af"} "$@"
+	render_deliverables "$label" "$in" "$fps" "" 1 "$out" "$w" "$h" "$chain" "$@"
 }
 
-# Renders to a staging file and installs it only once the render has succeeded, been checked for
+# Renders to staging files and installs each only once the render has succeeded, been checked for
 # content, and had its colour tags verified. Takes the FINAL path, a label for messages, then every
 # ffmpeg argument except the output path.
 #
@@ -1486,47 +1563,73 @@ render_deliverable() {  # render_deliverable <final-out> <label> <input> <w> <h>
 render_delivery() {  # render_delivery <final-out> <label> <ffmpeg-arg>...
 	local out="$1" label="$2"
 	shift 2
-	local tmp="${out%.*}.partial.${out##*.}"
-	rm -f "$tmp"          # a staging file left by an earlier interrupted run
+	render_deliveries "$label" 1 "$out" "$@" "@OUT1@"
+}
+
+# render_delivery for any number of outputs from one ffmpeg. An argument spelled @OUT<i>@ is where
+# output i's staging path goes. A failed ffmpeg installs nothing; after a good one, each output is
+# checked, tagged and installed on its own, and one that fails that leaves its previous file alone.
+render_deliveries() {  # render_deliveries <label> <n> <final-out>... <ffmpeg-arg>...
+	local label="$1" n="$2" i a
+	shift 2
+	local outs=() tmps=()
+	for (( i = 0; i < n; i++ )); do
+		outs+=("$1")
+		tmps+=("${1%.*}.partial.${1##*.}")
+		rm -f "${tmps[$i]}"   # a staging file left by an earlier interrupted run
+		shift
+	done
+	local args=()
+	for a in "$@"; do
+		case "$a" in
+			@OUT[0-9]*@) i="${a#@OUT}"; args+=("${tmps[$(( ${i%@} - 1 ))]}");;
+			*) args+=("$a");;
+		esac
+	done
 
 	# PROGRESS, and only under JSON=1. Piping ffmpeg changes the process tree and the exit status
 	# has to come out of PIPESTATUS rather than $?, so the default path is left exactly as it was
 	# rather than carrying that for a consumer that is not listening. `-nostats` because the
 	# human-facing stats line is what -progress replaces.
-	report_command "$label" "$@" "$tmp"
+	report_command "$label" "${args[@]}"
 	local rc=0
 	if [ "$JSON" = "1" ]; then
 		# errexit is suspended for exactly one pipeline: this file sets `pipefail`, so a failing
 		# ffmpeg would abort the function before PIPESTATUS could be read — and then the staging
 		# file would never be cleaned up and the caller would see a crash instead of a verdict.
 		set +e
-		ffmpeg "$@" -progress pipe:1 -nostats "$tmp" -v error | progress_events "$label"
+		ffmpeg -v error -progress pipe:1 -nostats "${args[@]}" | progress_events "$label"
 		rc="${PIPESTATUS[0]}"
 		set -e
 	else
-		ffmpeg "$@" "$tmp" -v error || rc=$?
+		ffmpeg -v error "${args[@]}" || rc=$?
 	fi
 	if [ "$rc" -ne 0 ]; then
-		rm -f "$tmp"
-		echo "$label FAILED (ffmpeg error) — $out left exactly as it was" >&2
+		for (( i = 0; i < n; i++ )); do
+			rm -f "${tmps[$i]}"
+			echo "$label FAILED (ffmpeg error) — ${outs[$i]} left exactly as it was" >&2
+		done
 		return 1
 	fi
-	if ! require_nonempty "$tmp" "$label"; then
-		rm -f "$tmp"
-		echo "  $out left exactly as it was" >&2
-		return 1
-	fi
-	# Tag before installing, so the file that lands is the one that was verified — and CHECK the
-	# result, like the two guards above. A bare call here fails open: it only aborted because the
-	# callers run under `set -e`, so any context that suppresses it (bats `run`, an
-	# `if render_delivery ...`) installed an untagged file and returned 0. Verified by stubbing
-	# safe_retag to fail: the installed file measured unknown,unknown,unknown. That is the
-	# double-transform this file's header exists to prevent, arriving through the function written
-	# to prevent it.
-	if ! safe_retag "$tmp" -movflags +faststart >/dev/null; then
-		rm -f "$tmp"
-		echo "$label FAILED (could not tag) — $out left exactly as it was" >&2
-		return 1
-	fi
-	mv "$tmp" "$out"
+	for (( i = 0; i < n; i++ )); do
+		if ! require_nonempty "${tmps[$i]}" "$label"; then
+			rm -f "${tmps[$i]}"
+			echo "  ${outs[$i]} left exactly as it was" >&2
+			rc=1; continue
+		fi
+		# Tag before installing, so the file that lands is the one that was verified — and CHECK the
+		# result, like the two guards above. A bare call here fails open: it only aborted because the
+		# callers run under `set -e`, so any context that suppresses it (bats `run`, an
+		# `if render_delivery ...`) installed an untagged file and returned 0. Verified by stubbing
+		# safe_retag to fail: the installed file measured unknown,unknown,unknown. That is the
+		# double-transform this file's header exists to prevent, arriving through the function written
+		# to prevent it.
+		if ! safe_retag "${tmps[$i]}" -movflags +faststart >/dev/null; then
+			rm -f "${tmps[$i]}"
+			echo "$label FAILED (could not tag) — ${outs[$i]} left exactly as it was" >&2
+			rc=1; continue
+		fi
+		mv "${tmps[$i]}" "${outs[$i]}"
+	done
+	return "$rc"
 }
