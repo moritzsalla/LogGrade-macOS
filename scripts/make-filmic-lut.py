@@ -32,7 +32,7 @@ Apply with ffmpeg's `lut3d` filter (interp=tetrahedral).
 USAGE
     ./make-filmic-lut.py OUT.cube [--exposure 1.0] [--white 11.2]
                                   [--contrast 1.0] [--toe 0.20] [--sat 1.0]
-                                  [--loglin luts/apple/AppleLogToLin-v1.0.cube]
+                                  [--loglin <AppleLogToLin-v1.0.cube>]
 
     --exposure  linear gain before the tone curve. >1 brighter. This is the main exposure control
                 and it operates in LINEAR, which is why highlights roll off instead of clipping.
@@ -45,7 +45,8 @@ USAGE
                 each channel independently, which desaturates — badly in the highlights. This is
                 the standard compensation; without it the output measures markedly flatter than
                 Apple's own CST (brick R-B 8.6 vs 17.0 when first tested).
-    --loglin    Apple's AppleLogToLin cube. Defaults to luts/apple/ in this checkout.
+    --loglin    Apple's AppleLogToLin cube. It is not in this repo (Apple's licence), and this
+                route is abandoned anyway — see docs/PIPELINE.md.
 """
 import argparse
 import os
@@ -122,7 +123,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out", help="file to write")
     ap.add_argument("--loglin", default=None,
-                    help="path to AppleLogToLin-v1.0.cube; defaults to luts/apple/ in this checkout")
+                    help="path to Apple's AppleLogToLin-v1.0.cube, which this repo does not ship")
     ap.add_argument("--exposure", type=float, default=1.0,
                     help="linear gain before the tone curve; >1 brighter")
     ap.add_argument("--white", type=float, default=11.2,
@@ -137,7 +138,7 @@ def main():
     loglin_path = a.loglin
     if loglin_path is None:
         here = os.path.dirname(os.path.abspath(__file__))
-        loglin_path = os.path.join(here, "..", "luts", "apple", "AppleLogToLin-v1.0.cube")
+        loglin_path = os.path.join(here, "..", "AppleLogToLin-v1.0.cube")
 
     table = read_apple_log_to_lin(loglin_path)
     norm = hable(a.white, D=a.toe)
