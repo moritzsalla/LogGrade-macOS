@@ -20,8 +20,10 @@ struct PreviewView: View {
         VStack(spacing: 12) {
             ZStack {
                 Rectangle().fill(Palette.well)
+                // WITHOUT A BASELINE YET, THE PICTURE STAYS AS IT IS and the readout says so, rather
+                // than showing the adjusted grade under the "as shipped" label.
                 if let image = comparing
-                    ? (preview.comparison ?? preview.image)
+                    ? (preview.baseline ?? preview.image)
                     : preview.image
                 {
                     ZStack {
@@ -85,15 +87,12 @@ struct PreviewView: View {
                 // that changes the look now does that on its own: live while you move a control,
                 // and an engine render the moment you let go. A button that re-does what just
                 // happened is a button that teaches you to distrust the picture.
-                Text("hold C for the picture before this change")
+                Text("hold C to compare with the look as it ships")
                     .font(Type.label)
-                    .foregroundColor(
-                        preview.comparison == nil
-                            ? Palette.inkTertiary
-                            : Palette.inkSecondary)
+                    .foregroundColor(Palette.inkSecondary)
                 Spacer()
                 if comparing {
-                    Readout(text: "before")
+                    Readout(text: preview.baseline == nil ? "preparing…" : "as shipped")
                 } else if preview.isLive {
                     Readout(text: "live")
                 } else if model.isStale {

@@ -27,7 +27,6 @@ struct DeliveryPanel: View {
             if model.project.exportPreset == .custom {
                 aspectRow
                 sizeRow
-                sizeCostNote
                 codecRow
                 formatRow
             } else {
@@ -107,33 +106,6 @@ struct DeliveryPanel: View {
         // The engine derives height from width and aspect; mirrored here only for the label.
         let tall = d.width * shape.aspectHeight / shape.aspectWidth
         return "\(side)p · \(d.width) × \(tall - tall % 2)"
-    }
-
-    // WHAT THIS COSTS, BEFORE IT COSTS IT. A 2160-tall delivery is four times the pixels of a
-    // 1080 one and takes proportionally longer, and Instagram re-encodes everything to 1080 wide
-    // anyway — so the larger sizes buy nothing downstream while multiplying the render. The look
-    // was also tuned at 1080: grain and the sharpener have radii in pixels, and scaling them with
-    // height is an assumption rather than a measurement.
-    @ViewBuilder private var sizeCostNote: some View {
-        if model.project.customDelivery.shortSide > Project.Delivery.defaultShortSide {
-            Label(
-                "This renders \(pixelRatio)× longer than 1080p, and grain and sharpening were "
-                    + "tuned at 1080p. Instagram re-encodes to 1080 anyway.",
-                systemImage: "info.circle"
-            )
-            .font(Type.caption)
-            .foregroundColor(Palette.inkTertiary)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    /// The chosen size's pixels over 1080p's, as the note prints it. In Double: integer division
-    /// made 1440 "1×". A String, because an interpolated number in a SwiftUI Text is localised and a
-    /// German locale would print "1,8".
-    private var pixelRatio: String {
-        let linear = Double(model.project.customDelivery.shortSide) / 1080
-        let ratio = linear * linear
-        return String(format: ratio == ratio.rounded() ? "%.0f" : "%.1f", ratio)
     }
 
     private var presetRow: some View {

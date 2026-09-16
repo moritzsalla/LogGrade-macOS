@@ -1794,9 +1794,10 @@ PY
 	[ "$status" -eq 0 ] || fail "refused the last valid offset: $output"
 }
 
-@test "the sharpener's radius follows the output height" {
-	# Its 5x5 was measured at 1080x1920 and the radius is in PIXELS, so at another height it
-	# sharpens a different real-world detail size.
+@test "the sharpener's radius and the grain plate follow the output's short edge" {
+	# Both were tuned at a 1080 short edge and are in PIXELS, so at another size they would act on a
+	# different real-world detail size. Scaled by the short edge, a landscape export gets the same
+	# radius as the portrait one it matches.
 	run delivery_image_chain 1080 1920 "" "" 1
 	[[ "$output" == *"unsharp=5:5:0.6:3:3"* ]] || fail "1920 should be the measured radius: $output"
 	run delivery_image_chain 2160 3840 "" "" 1
@@ -1804,6 +1805,12 @@ PY
 	# unsharp rejects a radius below 3, so a small output must not ask for one.
 	run delivery_image_chain 360 640 "" "" 1
 	[[ "$output" == *"unsharp=3:3:0.6:3:3"* ]] || fail "radius went below the floor: $output"
+	run delivery_image_chain 1920 1080 "" "" 1
+	[[ "$output" == *"unsharp=5:5:0.6:3:3"* ]] || fail "a 1080p landscape export lost the radius: $output"
+	run grain_plate 1080 1920 24
+	[[ "$output" == *"s=540x960:"* ]] || fail "the tuned size's plate moved: $output"
+	run grain_plate 3840 2160 24
+	[[ "$output" == *"s=960x540:"* ]] || fail "a 2160p plate did not keep the grain's size: $output"
 }
 
 @test "fps_filter accepts an integer relation and refuses retiming" {

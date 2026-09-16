@@ -15,11 +15,10 @@ final class LivePreview: ObservableObject {
     /// True when the picture is this app's approximation rather than the engine's render. The
     /// interface says which, always, because they are not the same claim.
     @Published var isLive = false
-    /// The last frame the ENGINE produced. Compare reaches for this so that holding a key answers
-    /// a question about the grade rather than about the model.
-    @Published var lastExact: NSImage?
-    /// The render before that one, which is what compare shows once the exact frame IS the picture.
-    @Published var previous: NSImage?
+    /// What holding C shows: this clip in the look as it ships, with no Adjust and the stages at
+    /// their defaults. ALWAYS THAT, never the step before the last change: the question a person
+    /// asks with it is "what have my adjustments done", which the previous step cannot answer.
+    @Published var baseline: NSImage?
     @Published var status = ""
     @Published var statusIsFailure = false
     @Published var isRendering = false
@@ -27,11 +26,6 @@ final class LivePreview: ObservableObject {
     /// is regenerated on every control change, and on the model that meant every tick of a drag
     /// invalidated the inspector for a graph the inspector does not contain.
     @Published var curve: ToneCurve?
-
-    /// What holding the compare key shows: the picture as it was before the adjustment in
-    /// progress. Mid-drag that is the render the drag started from; once the render lands, that
-    /// frame is the picture, so the comparison moves back one.
-    var comparison: NSImage? { isLive ? lastExact : previous }
 
     func say(_ text: String, failure: Bool = false) {
         status = text
