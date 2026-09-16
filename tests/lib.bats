@@ -2707,6 +2707,99 @@ sys.exit("; ".join(problems) or None)
 		|| fail "10-bit strength-0 grain moved the picture: $(cmp -l "$dir/clean.yuv" "$dir/grained.yuv" | head -3)"
 }
 
+@test "every delivery format setting is refused by name before anything renders" {
+	local work="$BATS_TEST_TMPDIR/bad-format" setting words
+	mkdir -p "$work/src"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
+	# Each: an environment, then the words its refusal must say.
+	while IFS='|' read -r setting words; do
+		env $setting FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
+			"$SCRIPTS/grade.sh" "$work/src/CLIP.mov" < /dev/null > "$work/out.txt" 2>&1 && fail "rendered with $setting"
+		grep -qF -- "$words" "$work/out.txt" || fail "$setting refused without saying '$words': $(cat "$work/out.txt")"
+		[ ! -d "$work/.loggrade/frames" ] || fail "$setting got as far as rendering"
+	done <<'CASES'
+DELIVERY_CODEC=av1|DELIVERY_CODEC must be h264, hevc, hevc10, prores422 or prores422hq
+DELIVERY_QUALITY=best|DELIVERY_QUALITY must be auto, high or max
+DELIVERY_CONTAINER=mkv|DELIVERY_CONTAINER must be mp4 or mov
+DELIVERY_AUDIO=yes|DELIVERY_AUDIO must be 0 or 1
+DELIVERY_CODEC=prores422hq DELIVERY_CONTAINER=mp4|DELIVERY_CONTAINER=mp4 cannot hold prores422hq
+DELIVERY_CODEC=prores422 DELIVERY_CONTAINER=mov DELIVERY_QUALITY=max|a ProRes file's quality is its profile
+DELIVERY_CODEC=h264 DELIVERY_BITS=10|DELIVERY_BITS=10 contradicts DELIVERY_CODEC=h264
+CASES
+}
+
+@test "each codec gets its own pixel format, encoder and audio, and h264 auto is the encode it was" {
+	_format() {  # _format <env...>  -> pix_fmt, then the encode args, one line
+		env "$@" bash -c 'source "$1"; load_delivery_format || exit 1; delivery_encode_args
+			printf "%s|%s|%s\n" "$(delivery_pix_fmt)" "${DELIVERY_ARGS[*]}" "$(deliverable_path d c s)"' _ "$SCRIPTS/lib.sh"
+	}
+	local out
+	out="$(_format)"
+	[[ "$out" == "yuv420p|"*"-map 0:a:0? -c:a aac -b:a 192k -c:v libx264 -profile:v high -preset medium -crf 18|d/c_s.mp4" ]] \
+		|| fail "the default encode moved: $out"
+	out="$(_format DELIVERY_BITS=10)"
+	[[ "$out" == "yuv420p10le|"*"libx265 -preset slow -crf 18 -pix_fmt yuv420p10le -tag:v hvc1"* ]] \
+		|| fail "DELIVERY_BITS=10 is no longer hevc10: $out"
+	out="$(_format DELIVERY_CODEC=hevc DELIVERY_QUALITY=high DELIVERY_AUDIO=0)"
+	[[ "$out" == "yuv420p|"*"-an -c:v libx265 -preset slow -crf 18 -pix_fmt yuv420p "* ]] || fail "hevc high, no audio: $out"
+	[[ "$out" != *"0:a:0"* ]] || fail "DELIVERY_AUDIO=0 still maps audio: $out"
+	out="$(_format DELIVERY_CODEC=prores422hq DELIVERY_CONTAINER=mov)"
+	[[ "$out" == "yuv422p10le|"*"-c:a pcm_s16le -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le"*"|d/c_s.mov" ]] \
+		|| fail "ProRes 422 HQ: $out"
+	# 4:2:2 is 10-bit numbers everywhere a depth decides them, and is never dithered to 4:2:0 first.
+	# Set, not prefixed: a prefix on a function call lasts only for that call.
+	DELIVERY_CODEC=prores422; DELIVERY_CONTAINER=mov
+	load_delivery_format
+	DENOISE_STRENGTH=0 SHARPEN=1 GAUGE=none run delivery_image_chain 1080 1920 "" "" 1 24
+	[[ "$output" == *"d=error_diffusion,format=yuv422p10le,"*"undershoot=8:overshoot=8"* ]] || fail "ProRes finish: $output"
+	[[ "$output" != *yuv420p* ]] || fail "ProRes passed through 4:2:0: $output"
+}
+
+@test "a frame rate within 0.1% of the source is the source's, not a retime" {
+	run fps_filter 30000/1001 30
+	[ "$status" -eq 0 ] && [ -z "$output" ] || fail "30 from an iPhone's 29.97: $output"
+	run fps_filter 24/1 25
+	[ "$status" -ne 0 ] || fail "25 from 24 is a retime and must stay refused"
+	run fps_filter 60/1 30
+	[ "$output" = ",fps=30" ] || fail "60 to 30 drops every other frame: $output"
+}
+
+# bats test_tags=slow
+@test "every codec delivers a tagged file of the format it names, from real footage" {
+	local src work codec container want_codec want_pix want_audio out streams
+	src=$(_real_clip)
+	[ -n "$src" ] || skip "no source footage"
+	while read -r codec container want_codec want_pix want_audio; do
+		work="$BATS_TEST_TMPDIR/codec-$codec"
+		mkdir -p "$work"
+		DELIVERY_CODEC="$codec" DELIVERY_CONTAINER="$container" PROOF=1 STAB=0 HEIGHT=640 \
+			GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$src" < /dev/null
+		# ffmpeg reads stdin, which is this loop's list of codecs, so it is given nothing.
+		[ "$status" -eq 0 ] || fail "$codec render failed: $output"
+		out=$(find "$work/.loggrade/proofs" -name "*.$container")
+		[ -s "$out" ] || fail "$codec wrote no .$container proof: $output"
+		[ "$(probe_tags "$out")" = "bt709,bt709,bt709" ] || fail "$codec is not tagged Rec.709: $(probe_tags "$out")"
+		[ "$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,pix_fmt -of csv=p=0 "$out" | head -1)" \
+			= "$want_codec,$want_pix" ] || fail "$codec delivered $(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,pix_fmt -of csv=p=0 "$out")"
+		streams=$(ffprobe -v error -select_streams a -show_entries stream=codec_name -of default=nw=1:nk=1 "$out" | head -1)
+		[ "$streams" = "$want_audio" ] || fail "$codec audio: '$streams', expected '$want_audio'"
+	done <<'CODECS'
+h264 mp4 h264 yuv420p aac
+hevc mp4 hevc yuv420p aac
+hevc10 mov hevc yuv420p10le aac
+prores422 mov prores yuv422p10le pcm_s16le
+prores422hq mov prores yuv422p10le pcm_s16le
+CODECS
+	# And no audio when asked for none.
+	work="$BATS_TEST_TMPDIR/codec-silent"
+	mkdir -p "$work"
+	DELIVERY_AUDIO=0 PROOF=1 STAB=0 HEIGHT=640 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$src"
+	[ "$status" -eq 0 ] || fail "silent render failed: $output"
+	out=$(find "$work/.loggrade/proofs" -name '*.mp4')
+	[ "$(ffprobe -v error -show_entries stream=codec_type -of default=nw=1:nk=1 "$out")" = video ] \
+		|| fail "DELIVERY_AUDIO=0 still delivered audio"
+}
+
 @test "a DELIVERY_BITS that is not 8 or 10 is refused before anything renders" {
 	local work="$BATS_TEST_TMPDIR/bad-bits"
 	mkdir -p "$work/src"
