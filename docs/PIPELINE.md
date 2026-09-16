@@ -12,7 +12,9 @@ ADR 0003.
   conversion, where the noise is still the sensor's.
 - **Master:** the graded ProRes. Re-export from it, never from a delivered MP4.
 - **Final:** Lanczos downscale, then sharpen (mild, luma only), then grain (a half-resolution plate,
-  after the sharpener). Grain before the sharpener gets rung by it.
+  after the sharpener). Grain before the sharpener gets rung by it. The one-pass render downscales
+  BEFORE the grade (`delivery_geometry`): twice as fast on IMG_0609, and against grading at 4K the
+  final measured 41.7 dB luma / 50 dB chroma PSNR with mean level and saturation within 0.1.
 
 ### Encode
 

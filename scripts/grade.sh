@@ -581,8 +581,8 @@ for SRC in "${CLIPS[@]}"; do
 
 	# What makes this path ONE pass is the head: the CST is spliced into grade_chain rather than
 	# spent on its own decode, so conversion, look and tone all happen in the single graph below.
-	# Everything else — the grade, then the stabilisation warp onward — is shared with the staged
-	# path and lives in lib.sh, which is where the measurements for each part of it live.
+	# The warp, crop and reduction come FIRST (delivery_geometry), so the grade runs at delivery
+	# size; the pieces live in lib.sh, which is where the measurements for each part of them live.
 	#
 	# A numeric flag pair or nothing at all. Built as a plain string rather than an array because
 	# macOS ships bash 3.2, where expanding an EMPTY array under `set -u` raises "unbound
@@ -595,11 +595,16 @@ for SRC in "${CLIPS[@]}"; do
 		local out
 		out="$(deliverable_path "$OUT_DIR" "$CLIP" "$suffix" "$PROOF")"
 		local t0; t0=$(now_ms)
+		# The glow is built per deliverable: the graph grades the cropped, shrunk frame
+		# (delivery_geometry), so its blur is in that frame's pixels, not the source's.
+		local HALATION_PREFIX=""
+		[ -z "$HAL_DIR" ] || HALATION_PREFIX="$(halation_prefix "$HAL_DIR" \
+			"$(delivery_halation_sigma "$SRC_W" "$SRC_H" "$HAL_RADIUS" "$crop" "$h")" "$HAL_STRENGTH" "$HAL_TINT")"
 		# shellcheck disable=SC2086  # $LIMIT is a deliberate split: a numeric flag pair or nothing
 		render_deliverable "$out" "$suffix encode" "$SRC" "$w" "$h" "$FPS" \
-"$(grade_chain "$TONE" "$SAT" "$WARM" \
+"$(delivery_geometry "$w" "$h" "$SFX" "$crop")$(grade_chain "$TONE" "$SAT" "$WARM" \
   "${DENOISE_PREFIX}${CLIP_CORRECT_PREFIX}${HALATION_PREFIX}lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},"),\
-$(delivery_image_chain "$w" "$h" "$SFX" "$crop" "$FINISH" "$FPS")${FPS_FILTER}" \
+$(delivery_image_chain "$w" "$h" "" "" "$FINISH" "$FPS")${FPS_FILTER}" \
 			$LIMIT || return 1
 		# `|| return 1` above is load-bearing now that the caller invokes render() inside an `if`:
 		# that suppresses `set -e` for this whole body, so without it a failed render would fall
