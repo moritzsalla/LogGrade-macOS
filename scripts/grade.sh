@@ -540,9 +540,9 @@ for SRC in "${CLIPS[@]}"; do
 			# renders nothing and a real one refreshes it.
 			#
 			# Both this branch and the next say the cost out loud: whether a transform exists is the
-			# one decision in a plan that costs ~65s per clip to get wrong, and it used to be made
+			# one decision in a plan that costs a detect pass per clip to get wrong, and it used to be made
 			# silently.
-			say "      stale transform at $TRF — a real run will recompute it (~65s)"
+			say "      stale transform at $TRF — a real run will recompute it"
 			emit_code STALE_TRANSFORM
 			emit stabilisation clip "$CLIP" state stale transform "$TRF"
 		else
@@ -682,12 +682,19 @@ for SRC in "${CLIPS[@]}"; do
 		done
 		scale="$(delivery_scale "$SRC_H" "${specs[@]}")"
 		fw="$(scaled_even "$SRC_W" "$scale")"; fh="$(scaled_even "$SRC_H" "$scale")"
+		# The transform is in source pixels, and the warp runs on the shrunk frame.
+		local stab=""
+		if [ -n "$SFX" ]; then
+			local scaled_trf="$CACHE/${CLIP}_stab_${fw}x${fh}.trf"
+			scale_transform "$TRF" "$scale" > "$scaled_trf" || return 1
+			stab="$(stab_prefix "$scaled_trf" "$SMOOTHING")"
+		fi
 		# The glow is in the shared frame's pixels, which is what it is blurred in.
 		local HALATION_PREFIX=""
 		[ -z "$HAL_DIR" ] || HALATION_PREFIX="$(halation_prefix "$HAL_DIR" \
 			"$(delivery_halation_sigma "$SRC_W" "$SRC_H" "$HAL_RADIUS" "$scale")" "$HAL_STRENGTH" "$HAL_TINT")"
 		local shared
-		shared="$(delivery_geometry "$fw" "$fh" "$SFX")$(grade_chain "$TONE" "$SAT" "$WARM" \
+		shared="$(delivery_geometry "$fw" "$fh" "$stab")$(grade_chain "$TONE" "$SAT" "$WARM" \
   "${DENOISE_PREFIX}${CLIP_CORRECT_PREFIX}${HALATION_PREFIX}lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},")"
 		local args=() label=""
 		for (( i = 0; i < n; i++ )); do

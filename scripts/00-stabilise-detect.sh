@@ -13,11 +13,8 @@
 # as a shimmer crawling along fine lettering (spotted on the street sign, described as "moving like
 # a sine wave"). Holding the frame still stops the shimmer moving.
 #
-# Cost: roughly 65s for a 26s 4K clip on this machine (measured 12.4s for a 5s segment). Analysis
-# is decode-bound, so it is far cheaper than the encode that follows.
-#
-# Detection runs on the MASTER, at full 4K, so the transforms are in master pixel units and the
-# finals can warp before downscaling — the warp then resamples at 4K instead of at delivery size.
+# Detection runs on the MASTER, at half size, and the transforms are written in master pixel units
+# (detect_transform), so the finals can warp before downscaling.
 # Transforms describe MOTION only, so they survive a re-grade: change the look or tone and the
 # same .trf still applies. Only a change to rotation or framing invalidates it.
 set -euo pipefail

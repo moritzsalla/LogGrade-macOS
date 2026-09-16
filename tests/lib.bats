@@ -625,7 +625,7 @@ PY
 	local work="$BATS_TEST_TMPDIR/prov"
 	mkdir -p "$work/src" "$work/.loggrade/masters" "$work/.loggrade/stabilisation"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	printf 'transform measured on this source\n' > "$work/.loggrade/stabilisation/CLIP.trf"
+	printf 'VID.STAB 1\n# transform measured on this source\n' > "$work/.loggrade/stabilisation/CLIP.trf"
 	# The master is re-rendered AFTER the transform. That is a re-grade, not a re-shoot.
 	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
 	# Stamp the order explicitly. bash 3.2's -nt compares whole seconds, and all three files are
@@ -638,6 +638,44 @@ PY
 		|| fail "called a valid transform stale after a re-grade: $output"
 }
 
+@test "scale_transform scales a transform's pixels and nothing else" {
+	local trf="$BATS_TEST_TMPDIR/t.trf"
+	printf 'VID.STAB 1\n#      accuracy = 15\nFrame 1 (List 0 [])\nFrame 2 (List 2 [(LM -3 5 864 216 112 0.921565 1.826291),(LM 0 1 702 340 111 0.5 4.6)])\n' > "$trf"
+	run scale_transform "$trf" 2
+	[ "$status" -eq 0 ] || fail "$output"
+	[ "$(printf '%s\n' "$output" | sed -n 4p)" = "Frame 2 (List 2 [(LM -6 10 1728 432 224 0.921565 1.826291),(LM 0 2 1404 680 222 0.5 4.6)])" ] \
+		|| fail "doubled: $output"
+	[ "$(printf '%s\n' "$output" | sed -n 1,3p)" = "$(sed -n 1,3p "$trf")" ] || fail "other lines changed: $output"
+	# Halves round away from zero, symmetrically, so a sway left is the mirror of a sway right.
+	run scale_transform "$trf" 0.5
+	[ "$(printf '%s\n' "$output" | sed -n 4p)" = "Frame 2 (List 2 [(LM -2 3 432 108 56 0.921565 1.826291),(LM 0 1 351 170 56 0.5 4.6)])" ] \
+		|| fail "halved: $output"
+}
+
+# bats test_tags=slow
+@test "a stabilised render detects at half size in source pixels, and warps the shrunk frame" {
+	local work="$BATS_TEST_TMPDIR/stab" report trf w
+	mkdir -p "$work/src"
+	# Detail that sways, big enough for vid.stab's fields at half size; tagged the way
+	# make_tagged_clip tags, in a separate remux.
+	ffmpeg -y -v error -f lavfi -i "testsrc2=s=520x904:r=24:d=1" \
+		-vf "crop=480:864:x='20+12*sin(n*0.7)':y='20+12*cos(n*0.9)'" \
+		-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le "$work/raw.mov"
+	ffmpeg -y -v error -i "$work/raw.mov" -map 0:v:0 -c copy \
+		-color_primaries bt709 -color_trc bt709 -colorspace bt709 "$work/src/CLIP.mov"
+	CROP_OFFSET=centre MATCH=0 STAB=1 HEIGHT=128 PROOF=0.5 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || fail "render failed: $output"
+	trf="$work/.loggrade/stabilisation/CLIP.trf"
+	[ "$(head -1 "$trf")" = "VID.STAB 1" ] || fail "not an ASCII transform: $(head -c 80 "$trf")"
+	# Field positions reach past half the frame only if the half-size analysis was scaled back up.
+	w="$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=nw=1:nk=1 "$work/src/CLIP.mov" | head -1)"
+	grep -oE '\(LM -?[0-9]+ -?[0-9]+ [0-9]+ ' "$trf" | awk -v w="$w" '$4 > w / 2 { found = 1 } END { exit !found }' \
+		|| fail "no field beyond half of $w: the transform is in half-size pixels"
+	report=$(ls "$work"/.loggrade/reports/run-*.txt 2>/dev/null | head -1) || true
+	grep -qE "^\[0:v\]zscale=w=[0-9]+:h=[0-9]+:f=lanczos,vidstabtransform=input='[^']*CLIP_stab_[0-9]+x[0-9]+\.trf'" "$report" \
+		|| fail "the warp is not on the shrunk frame: $(grep -F '[0:v]' "$report")"
+}
+
 @test "transform_is_fresh refuses when the source it was measured from is gone" {
 	# Cannot prove freshness, so do not warp. A stale transform fights footage it was never
 	# measured on, which is visibly wrong output; dropping stabilisation is merely less good.
@@ -645,6 +683,19 @@ PY
 	printf 'x\n' > "$trf"
 	run transform_is_fresh "$trf" "$BATS_TEST_TMPDIR/no-such-source.mov"
 	[ "$status" -ne 0 ]
+}
+
+@test "a binary transform from before the ASCII detect is measured again, not rescaled" {
+	# scale_transform cannot rescale the binary format, so warping from one would be garbage.
+	local src="$BATS_TEST_TMPDIR/src.mov" trf="$BATS_TEST_TMPDIR/bin.trf"
+	printf 'x' > "$src"
+	printf 'TRF1\000\000\000\001' > "$trf"
+	touch -t 202609010000 "$src"; touch -t 202609020000 "$trf"
+	run transform_is_fresh "$trf" "$src"
+	[ "$status" -ne 0 ] || fail "a binary transform passed as fresh"
+	printf 'VID.STAB 1\n' > "$trf"; touch -t 202609020000 "$trf"
+	run transform_is_fresh "$trf" "$src"
+	[ "$status" -eq 0 ] || fail "an ASCII transform newer than its source was called stale"
 }
 
 @test "every stage creates its own output directory" {
@@ -2629,6 +2680,10 @@ sys.exit(None if 0 <= hue < tone else "order is hue@%d tone@%d" % (hue, tone))
 	# work at 4K. The glow is in the shrunk frame's pixels, and a crop must not make it grow.
 	run delivery_geometry 1080 1920 ""
 	[ "$output" = "zscale=w=1080:h=1920:f=lanczos,format=yuv444p10le," ] || fail "$output"
+	# The warp runs on the shrunk frame, not the 4K one.
+	run delivery_geometry 1080 1920 "vidstabtransform=input='t.trf',"
+	[ "$output" = "zscale=w=1080:h=1920:f=lanczos,vidstabtransform=input='t.trf',format=yuv444p10le," ] \
+		|| fail "the warp is not after the shrink: $output"
 	run delivery_halation_sigma 2160 3840 0.006 0.5
 	[ "$output" = "11.52" ] || fail "full frame at half size: $output"
 	# Reels needs 1920 of 3840 rows, feed 1350 of a 2700-row window: both a half, so a 1080x1920
