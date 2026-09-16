@@ -15,6 +15,8 @@ ADR 0003.
   after the sharpener). Grain before the sharpener gets rung by it. The one-pass render downscales
   BEFORE the grade (`delivery_geometry`): twice as fast on IMG_0609, and against grading at 4K the
   final measured 41.7 dB luma / 50 dB chroma PSNR with mean level and saturation within 0.1.
+  A clip's deliverables share that pass (`render_deliverables`): reels and feed of 3s of IMG_0609
+  went 33.5s to 27.2s. The two x264 encoders then take most of the time.
 
 ### Encode
 
