@@ -3187,7 +3187,6 @@ _low_band_db() {  # _low_band_db <file> <hz>
 }
 
 @test "a render golden from another ffmpeg build is skipped by name, not compared" {
-	[ -f "$BATS_TEST_DIRNAME/../luts/apple/AppleLogToRec709-v1.0.cube" ] || skip "no Apple cube"
 	local golden="$BATS_TEST_TMPDIR/render-golden.json"
 	printf '{"clip":{"name":"IMG_0607.mov","bytes":1},"proof_secs":0.1,"ffmpeg":"ffmpeg version 0-other","arch":"%s","stream_md5":"x","inputs":{}}\n' \
 		"$(uname -m)" > "$golden"

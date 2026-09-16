@@ -45,16 +45,15 @@ SKIPPED=""
 SLOW_SWIFT='LiveChainTests|EndToEndTests|DeliveryTests|PreviewRendererTests|ClipListTests'
 
 # Parallel runs lose one signal: `swift test --parallel` reports a skipped test as passed, where
-# the serial run printed "N tests skipped". Nearly every skip in this suite means missing footage
-# or Apple's cube, both gitignored, so the absence is checked directly rather than left to be
-# inferred from a count nobody reads.
+# the serial run printed "N tests skipped". Every skip left in this suite means missing footage,
+# which is gitignored, so the absence is checked directly rather than left to be inferred from a
+# count nobody reads.
 MISSING_MEDIA=""
 ls src/*.mov >/dev/null 2>&1 || MISSING_MEDIA="$MISSING_MEDIA src/*.mov"
-[ -f luts/apple/AppleLogToRec709-v1.0.cube ] || MISSING_MEDIA="$MISSING_MEDIA luts/apple/AppleLogToRec709-v1.0.cube"
 if [ -n "$MISSING_MEDIA" ]; then
 	echo "NOTE — missing:$MISSING_MEDIA"
-	echo "  Every test that needs real footage or Apple's conversion will skip, and in the parallel"
-	echo "  Swift run a skip reads as a pass. Green here does not cover the render."
+	echo "  Every test that needs real footage will skip, and in the parallel Swift run a skip"
+	echo "  reads as a pass. Green here does not cover the render."
 	echo
 fi
 

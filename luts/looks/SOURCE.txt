@@ -59,6 +59,6 @@ YahiaAngelo/Film-Luts is MIT licensed, which permits redistribution provided the
 copyright notice travels with it. The upstream notice is therefore kept beside
 the .cube files as LICENSE_FILM_LUTS.txt (Copyright (c) 2024 Yahia).
 
-This is the opposite of luts/apple/, which is NOT redistributable and is
+This is the opposite of Apple's own cubes, which are NOT redistributable and are
 gitignored. If you add another look LUT, check its terms before committing it —
 most "free" LUT packs are free-to-use, not free-to-redistribute.
