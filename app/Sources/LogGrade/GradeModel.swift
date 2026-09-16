@@ -381,29 +381,42 @@ final class GradeModel: ObservableObject {
     /// `look` is passed in rather than read here: this runs off the main thread, and reading a
     /// published property from one races the main thread's writes to it.
     ///
-    /// METERED HERE, not by the graded render. The engine decodes this frame once for its picture,
-    /// its size and its meter together, so the live grade is right the moment it lands and the
-    /// graded render that follows is handed both instead of measuring again.
+    /// METERED HERE, not by the graded render, so the live grade is right the moment it lands and
+    /// the graded render that follows is handed the reading instead of measuring again.
+    ///
+    /// IN THIS PROCESS, NOT THROUGH grade.sh: the frame from AVFoundation (`NativeSource`, held to
+    /// the engine's source frame by `NativeSourceTests`) and the meter from the engine's own
+    /// function (`ExposureMeter`), side by side. It was a 2–3.5 s grade.sh call per selection.
     @discardableResult
     private func refreshSource(for clip: ClipList.Entry, seconds: Double, look: Look)
-        -> PreviewRenderer.Frame?
+        -> (size: FrameSize, metered: PreviewRenderer.Metered)?
     {
-        let frame: PreviewRenderer.Frame
+        var decoded: Result<NativeSource.Frame, Error>?
+        var reading = PreviewRenderer.Metered()
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            decoded = Result {
+                try NativeSource.frame(of: clip.url, at: seconds, height: Self.sourceFrameHeight)
+            }
+            group.leave()
+        }
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            reading =
+                (try? self.meter.measure(clip.url, referenceStops: look.matchReferenceStops))
+                ?? PreviewRenderer.Metered()
+            group.leave()
+        }
+        group.wait()
+        let frame: NativeSource.Frame
         do {
-            frame = try renderer.render(
-                clip: clip.url, seconds: seconds, look: look,
-                height: Self.sourceFrameHeight, match: true, stage: .source)
+            frame = try decoded!.get()
         } catch {
             sourceFailed("The live preview couldn’t read this clip: \(error)")
             return nil
         }
-        guard
-            let image = NSImage(contentsOf: frame.url)?
-                .cgImage(forProposedRect: nil, context: nil, hints: nil)
-        else {
-            sourceFailed("The live preview couldn’t decode the frame it rendered.")
-            return nil
-        }
+        let image = frame.image
         DispatchQueue.main.async {
             self.sourceImage = image
             self.sourceClip = clip.url
@@ -413,14 +426,14 @@ final class GradeModel: ObservableObject {
             // sliders respond, right where you're looking — and a toast in the top-right corner
             // only sat on top of them.
 
-            // What this render metered, so the first drag already grades with it.
-            if let size = frame.sourceSize { self.frameSizes[clip.stem] = size }
-            self.measuredMetering[clip.url] = frame.metered
+            // What was metered, so the first drag already grades with it.
+            self.frameSizes[clip.stem] = frame.sourceSize
+            self.measuredMetering[clip.url] = reading
             // THE PICTURE NOW, from the live tier, rather than after the graded render.
             if self.selectedClip?.url == clip.url { self.liveUpdate() }
         }
-        lastSource = (clip.url, seconds, look.matchReferenceStops, frame)
-        return frame
+        lastSource = (clip.url, seconds, look.matchReferenceStops, frame.sourceSize, reading)
+        return (frame.sourceSize, reading)
     }
 
     /// SAID, not only reset. Clearing the flag alone left the controls answering nothing with no
@@ -444,12 +457,16 @@ final class GradeModel: ObservableObject {
     /// Engine renders, which take seconds and must not overlap: they share a work directory and a
     /// per-clip tone cube.
     private let queue = DispatchQueue(label: "loggrade.engine")
-    /// The last source frame the engine rendered, with the reference it metered against. READ AND
-    /// WRITTEN ONLY ON `queue`: a selection queues its source fetch before the graded render, so by
-    /// the time the graded render runs this already holds it, and fetching again rendered every
-    /// clip's source twice.
+    /// The last source frame fetched, with its size and the meter reading taken against the
+    /// look's reference. READ AND WRITTEN ONLY ON `queue`: a selection queues its source fetch
+    /// before the graded render, so by the time the graded render runs this already holds it, and
+    /// fetching again fetched every clip's source twice.
     private var lastSource:
-        (clip: URL, seconds: Double, referenceStops: Double, frame: PreviewRenderer.Frame)?
+        (
+            clip: URL, seconds: Double, referenceStops: Double, size: FrameSize,
+            metered: PreviewRenderer.Metered
+        )?
+    private lazy var meter = ExposureMeter(engine: engine)
     /// The live grade, on its OWN queue. Sharing the engine's serial queue meant every live frame
     /// waited behind the three-second render that the last control change had started — so letting
     /// go of one slider froze the next one, which is the exact stutter this tier exists to remove.
@@ -858,7 +875,7 @@ final class GradeModel: ObservableObject {
                 self.lastSource.map {
                     $0.clip == clip.url && $0.seconds == seconds
                         && $0.referenceStops == look.matchReferenceStops
-                } == true ? self.lastSource?.frame.metered : nil
+                } == true ? self.lastSource?.metered : nil
             let pixels: CGImage
             do {
                 let frame = try self.renderer.render(
@@ -961,8 +978,8 @@ final class GradeModel: ObservableObject {
             }
             let usable =
                 fresh() && source?.referenceStops == look.matchReferenceStops ? source : nil
-            let hintSize = usable?.frame.sourceSize ?? knownSize
-            let hintMetering = usable?.frame.metered
+            let hintSize = usable?.size ?? knownSize
+            let hintMetering = usable?.metered
             guard generation == self.previewGeneration else { return }
             do {
                 let frame = try self.renderer.render(
