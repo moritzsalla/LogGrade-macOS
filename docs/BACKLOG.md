@@ -2,48 +2,72 @@
 
 Open work only. Finished work lives in git.
 
-**The point of the app:** give iPhone Apple Log footage an incredible look, very easily. Today it
-takes lots of input and still doesn't look good. Judge entries by that, and by whether a
-non-technical photographer could use the result.
+## What the app is
+
+Footage in, pick a look, and it looks finished. The better it does by itself, the less anyone
+touches. Two users: Moritz and a non-technical photographer. Adjustment is optional and out of the
+way for whoever doesn't want it. Judge every entry by that.
+
+**Looks.** Five fixed presets, each owning its grain (not editable, only switchable):
+
+| Look | Grain | Judged against |
+|---|---|---|
+| Neutral: our own rendering, finished, nothing clipped for effect | off | eye |
+| **Portra 160**, the one that matters most | on | the partner's analog scans |
+| Portra 800 | coarse | public references, then eye |
+| IMAX | fine | public references, then eye |
+| Super 8 | heavy | public references, then eye |
+
+Sign-off is both users calling a look good enough. It stays improvable. None has reached that bar.
+
+**Right panel.** Look picker, one per batch. Adjust, per clip: Exposure, Warmth, Tint, Contrast,
+Saturation, and the per-clip exposure match (on by default). Scopes (levels, parade, vectorscope)
+and the curve, read-only. Sections with a bypass: Stabilisation (strength, off by default), Denoise
+(strength, off by default), Grain (on/off; off for Neutral, on for film).
+
+**Export.** A picker: Instagram Story, Instagram Post (no fields), Custom (resolution, aspect and
+crop, frame rate, codec up to ProRes 422 HQ, quality, container, audio). SDR only. Framing defaults
+to centre, dragged per clip; export warns about clips whose framing was never looked at.
+
+**Tests** earn their place by speeding iteration: the silent-failure guards and the render golden
+(a change detector, not an approved image) stay; parity against the precursor goes.
 
 ## Next, in order
 
-1. **The look, judged against the partner's analog scans**, not the Portra LUT (a coarse community
-   emulation). Needs scans and iPhone clips of similar scenes. Measure tone, colour and grain against
-   them, and the user judges by eye. The default image may move (`render-golden.sh --regenerate`).
-   This includes the unsigned v4 look and the grain strength (8, never judged by eye). The film
-   presets (`presets/`) were tuned by eye on 3–4 frames of one overcast shoot: judge the Portra and
-   400H scans, the 65mm look, and each preset's grain and halation against real references too.
-2. **Verify the universal app on the Apple silicon Mac** (built in #10). Launch shows Kind: Apple for
-   LogGrade and ffmpeg; one render with stabilisation; how far it differs from this Mac's render
-   (arm64 ffmpeg is OSXExperts 9.0, x86 is evermeet 9.0.1); jq 1.8.2 (minos 14) runs if that Mac is
-   on macOS 13. `docs/UNIVERSAL_APP_PLAN.md`.
+1. **Cut the panel to the model above.** Hue curves, wheels, halation, tone internals and grain
+   parameters leave the UI; the engine keeps them only while the presets are tuned, then whatever no
+   preset uses is deleted.
+2. **Export picker.** ProRes needs its own pix_fmt path: the finish dithers to 8/10-bit 4:2:0
+   before sharpen and grain.
+3. **Preset lineup.** Delete Pro 400H and RZ67 Portra 400; add Portra 160 and 800. A new stock is
+   encoded for Apple playback (`cubefile.py` `display_encode`, `display=apple` in its TITLE), or it
+   renders milky.
+4. **Prune what the old app needed:** precursor parity (`tests/grade-parity.py`, ADR 0014's
+   conformance), tests of removed controls, stale words in `CONTEXT.md`, README.
+5. **Portra 160 against the scans** (arriving). Tone, colour and grain side by side, then both users
+   judge. The render golden moves with it (`render-golden.sh --regenerate`).
+6. **Portra 800, IMAX, Super 8** against public references.
+7. **Neutral on a sunny, contrasty scene.** `luts/rendering/neutral.cube` was judged on one overcast
+   shoot and IMG_0609 only.
 
-## The app, as it feels to use
+## Also open
 
+- **Verify the universal app on the Apple silicon Mac.** Kind: Apple for LogGrade and ffmpeg; one
+  render with stabilisation; how far it differs from this Mac's (arm64 ffmpeg is OSXExperts 9.0,
+  x86 evermeet 9.0.1); jq 1.8.2 (minos 14) if that Mac runs macOS 13. `docs/UNIVERSAL_APP_PLAN.md`.
 - **Export is slow on the Intel Mac.** Measure where the time goes first.
+- **Judge sharpen and grain at other heights by eye**, now that Custom exports any size. Grain stays
+  ~1 output px, 1.7× coarser relative to the picture at 960 than at 1920 (`docs/PIPELINE.md`).
+- **Rename "look" where it means the whole grade** (`look.json`, `LOOK_FILE`). Wait for step 1: the
+  file's contents change with the panel.
 
-## Open work
+## Not doing
 
-- **Local adjustments** (a sky or a face held separately). Global grading uses Apple Log's latitude
-  only across the whole frame. A product decision before a design: what a non-technical user draws.
-- **Judge sharpen and grain at other heights by eye.** Measured (`docs/PIPELINE.md`, sheets in
-  `dist/measure-sizes/`). Grain stays ~1 output px, so it is 1.7× coarser relative to the picture at
-  960 than at 1920.
-- **Rename "look" where it means the whole grade.** `look.json`, `grade.sh` and `LOOK_FILE` say look;
-  CONTEXT.md defines look as the film LUT. Built into file and variable names, so a rename.
-- **Audio:** a separate ambience recording for street detail handheld capture misses.
-- **Optional: tighten the parity ceilings.** A dry-run remeasure found seven loose by 0.1–0.9 code
-  values and `extreme` 0.25 above its ceiling (inside the margin).
-  `tests/grade-parity.py --remeasure "<why>"`.
-- **Defaults kept only for the precursor's sake** (ADR 0014): the stabiliser's `unsharp=5:5:0.2`.
-- **Judge the shipped rendering against a reference.** `luts/rendering/neutral.cube` (contrast 1.6,
-  saturation 1.1) was tuned by eye on one overcast shoot, and confirmed by the user on IMG_0609 once
-  it displayed on Apple playback's curve. Not yet judged on a sunny, contrasty scene. Its tone scale
-  and gamut compression are published maths, but where it sits between them is a judgement.
-
-## Considered and declined
-
-- **The filmic route.** It lost on colour (`docs/PIPELINE.md`).
-- **A native render in AVFoundation.** ADR 0008.
-- **Python linting.** Run `ruff` once if it bothers you.
+- Trimming, cutting, a timeline.
+- Local adjustments (a sky or a face held separately).
+- A separate ambience recording.
+- Importing LUTs; editable tone or hue curves.
+- HDR delivery.
+- Cameras other than iPhone Apple Log. Apple Log 2 maybe, much later.
+- The filmic route: it lost on colour (`docs/PIPELINE.md`).
+- A native render in AVFoundation (ADR 0008).
