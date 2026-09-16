@@ -75,7 +75,7 @@ probe_scene_exposure() {  # probe_scene_exposure <src> <reference-stops>
 
 # Where each stage writes, by clip. Spelled once because two stages read what a third wrote, and a
 # path that differs by one component is a cache nobody hits: grade.sh once built the transform path
-# from the wrong root and paid ~65s a clip to redo analysis stage 00 had already done.
+# from the wrong root and paid a second analysis per clip to redo what stage 00 had already done.
 source_path()        { printf '%s/src/%s.mov\n' "$1" "$2"; }                      # <work> <clip>
 baseline_path()      { printf '%s/baseline/%s_baseline.mov\n' "$(work_cache "$1")" "$2"; }  # <work> <clip>
 graded_master_path() { printf '%s/masters/%s_graded.mov\n' "$(work_cache "$1")" "$2"; }    # <work> <clip>
@@ -977,10 +977,14 @@ require_nonempty() {
 #
 # No source, no verdict: refuse. A stale transform fights footage it was never measured on, which
 # is visibly wrong output, where dropping stabilisation is merely less good.
+#
+# A BINARY transform is stale too. Caches written before detect_transform went ASCII are binary, and
+# scale_transform cannot rescale one, so it is measured again rather than warped with garbage.
 transform_is_fresh() {  # transform_is_fresh <trf> <source-clip>
 	[ -f "$1" ] || return 1
 	[ -f "$2" ] || return 1
-	[ "$1" -nt "$2" ]
+	[ "$1" -nt "$2" ] || return 1
+	[ "$(head -c 8 "$1")" = "VID.STAB" ]
 }
 
 # --- the delivery chain -------------------------------------------------------
@@ -1332,27 +1336,50 @@ delivery_halation_sigma() {  # delivery_halation_sigma <src-w> <src-h> <radius> 
 # <head> is a prefix with its own trailing comma: the camera CST when detecting on the source, which
 # the one-pass path does, and nothing on a master that is already converted. The staging path is a
 # global because an EXIT trap runs after this function's locals are gone.
+#
+# AT HALF SIZE, WRITTEN IN FULL-SIZE PIXELS. Detecting on the 4K frame took 101s for a 5s clip and
+# half size 12.7s, with the same residual shake measured on the stabilised output (IMG_0607). The
+# transform is ASCII so scale_transform can double it back: the cache stays in source pixels, which
+# is what the staged path warps its full-size master with, and the one-pass path scales it again to
+# the frame it warps. `scale`, not `zscale`: this shrink only feeds the analysis, and zscale refuses
+# an untagged source.
 detect_transform() {  # detect_transform <input> <trf> [head-prefix]
 	DETECT_PARTIAL="$2.partial"
 	mkdir -p "$(dirname "$2")"
-	trap 'rm -f "$DETECT_PARTIAL"' EXIT
+	trap 'rm -f "$DETECT_PARTIAL" "$DETECT_PARTIAL.half"' EXIT
 	if ! ffmpeg -v error -y -i "$1" \
-		-vf "${3:-}vidstabdetect=shakiness=5:accuracy=15:stepsize=6:result=${DETECT_PARTIAL}" -f null -; then
-		rm -f "$DETECT_PARTIAL"
-		echo "stabilisation analysis FAILED (ffmpeg error) for $1" >&2
+		-vf "scale=trunc(iw/2):trunc(ih/2):flags=bilinear,${3:-}vidstabdetect=shakiness=5:accuracy=15:stepsize=6:fileformat=ascii:result=${DETECT_PARTIAL}.half" -f null - \
+		|| ! require_nonempty "$DETECT_PARTIAL.half" "stabilisation analysis" \
+		|| ! scale_transform "$DETECT_PARTIAL.half" 2 > "$DETECT_PARTIAL"; then
+		rm -f "$DETECT_PARTIAL" "$DETECT_PARTIAL.half"
+		echo "stabilisation analysis FAILED for $1" >&2
 		return 1
 	fi
-	if ! require_nonempty "$DETECT_PARTIAL" "stabilisation analysis"; then
-		rm -f "$DETECT_PARTIAL"
-		return 1
-	fi
+	rm -f "$DETECT_PARTIAL.half"
 	mv "$DETECT_PARTIAL" "$2"
 	trap - EXIT
 }
 
-# The warp resamples BEFORE the downscale, so it happens at master resolution rather than at
-# delivery size. The trailing comma belongs to the prefix: callers splice the result directly into
-# a filter chain, and an absent transform must leave no trace.
+# An ASCII vid.stab transform in pixels of a frame <factor> times the size. Each local motion is
+# `(LM vx vy fx fy fsize contrast match)`: the first five are pixels and scale, rounded, because
+# vid.stab reads them as integers; the two scores do not. Every other line passes through.
+scale_transform() {  # scale_transform <trf> <factor>  -> the scaled transform on stdout
+	awk -v k="$2" '
+		function px(v) { v = v * k; return (v < 0) ? -int(-v + 0.5) : int(v + 0.5) }
+		{
+			out = ""; rest = $0
+			while (match(rest, /\(LM -?[0-9]+ -?[0-9]+ -?[0-9]+ -?[0-9]+ -?[0-9]+ /)) {
+				split(substr(rest, RSTART + 4, RLENGTH - 5), v, " ")
+				out = out substr(rest, 1, RSTART - 1) sprintf("(LM %d %d %d %d %d ", px(v[1]), px(v[2]), px(v[3]), px(v[4]), px(v[5]))
+				rest = substr(rest, RSTART + RLENGTH)
+			}
+			print out rest
+		}' "$1"
+}
+
+# The staged path warps its master at full resolution; the one-pass path warps the shrunk frame
+# (delivery_geometry). The trailing comma belongs to the prefix: callers splice the result directly
+# into a filter chain, and an absent transform must leave no trace.
 #
 # The light `unsharp` after the warp (luma 5x5 at 0.2, chroma untouched) and the transform's options
 # came over from the precursor as they were; nothing in either repo records a measurement behind
@@ -1362,9 +1389,9 @@ stab_prefix() {  # stab_prefix <trf> <smoothing>
 		"$1" "$2"
 }
 
-# SHRINK FIRST, for the one-pass render: the stabiliser's warp at source resolution, then the
-# reduction of the WHOLE frame to the size the deliverables need, and only then the denoise,
-# correction, halation, conversion and grade. Every one of those is per pixel or sized as a fraction
+# SHRINK FIRST, for the one-pass render: the reduction of the WHOLE frame to the size the
+# deliverables need, then the stabiliser's warp, and only then the denoise, correction, halation,
+# conversion and grade. Every one of those is per pixel or sized as a fraction
 # of the frame, so grading 1080p instead of 4K costs a quarter of the work: IMG_0609's grade and
 # encode went from 2.0 to 4.1 fps. It also matches the live preview, which resamples and then grades.
 #
@@ -1372,11 +1399,16 @@ stab_prefix() {  # stab_prefix <trf> <smoothing>
 # (render_deliverables), so reels and feed decode and grade once between them. The frame is shrunk
 # only as far as the most demanding deliverable allows (delivery_scale), so no crop is upscaled.
 #
+# THE WARP AFTER THE SHRINK. At 4K it was 66s of an 84s render of a 5s clip; its transform is scaled
+# to the shrunk frame (scale_transform). vid.stab only takes 8-bit, so a stabilised frame is squeezed
+# to 8 bits either way; after the shrink rather than before, the graded low-frequency error in smooth
+# areas measured 0.04 display codes against 0.02 (p99 0.14), which is no visible banding.
+#
 # 10-bit 4:4:4 out, NOT DITHERED: the dither to the delivery depth stays in delivery_image_chain,
 # after the grade, where it has always been. The staged path grades its master at full resolution
 # and does not use this.
 delivery_geometry() {  # delivery_geometry <w> <h> <stab-prefix>  -> a prefix with its trailing comma
-	printf '%szscale=w=%s:h=%s:f=lanczos,format=yuv444p10le,' "$3" "$1" "$2"
+	printf 'zscale=w=%s:h=%s:f=lanczos,%sformat=yuv444p10le,' "$1" "$2" "$3"
 }
 
 # How far the shared frame shrinks: the largest of each deliverable's output height over the height
