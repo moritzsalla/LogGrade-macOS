@@ -10,7 +10,6 @@ public struct HueCube {
     private static let span = 360.0 / Double(knots)
     private static let chromaFade = 0.08
     private static let fitSteps = 18
-    private static let displayGamma = 2.4
     private static let gamutEpsilon = 1e-9
 
     typealias Matrix = (
@@ -48,6 +47,17 @@ public struct HueCube {
             m.1.0 * v.0 + m.1.1 * v.1 + m.1.2 * v.2,
             m.2.0 * v.0 + m.2.1 * v.1 + m.2.2 * v.2
         )
+    }
+
+    /// Apple playback's display curve, as `cubefile.py` defines it and says why.
+    static func displayDecode(_ v: Double) -> Double {
+        let v = max(0, v)
+        return v < 0.081 ? v / 4.5 : pow((v + 0.099) / 1.099, 1.0 / 0.45)
+    }
+
+    static func displayEncode(_ light: Double) -> Double {
+        let light = min(1, max(0, light))
+        return light < 0.018 ? 4.5 * light : 1.099 * pow(light, 0.45) - 0.099
     }
 
     /// Python's `%` for a positive divisor: the result takes the divisor's sign.
@@ -89,8 +99,7 @@ public struct HueCube {
         _ rgb: (Double, Double, Double), rot: [Double], sat: [Double], lum: [Double]
     ) -> (Double, Double, Double) {
         let lin = (
-            pow(max(0, rgb.0), displayGamma), pow(max(0, rgb.1), displayGamma),
-            pow(max(0, rgb.2), displayGamma)
+            displayDecode(rgb.0), displayDecode(rgb.1), displayDecode(rgb.2)
         )
         let lms = mul(m1, lin)
         let lab = mul(m2, (cubeRoot(lms.0), cubeRoot(lms.1), cubeRoot(lms.2)))
@@ -120,9 +129,7 @@ public struct HueCube {
             out = toLinear((lightness, k * cos(turned), k * sin(turned)))
         }
         return (
-            pow(min(1, max(0, out.0)), 1.0 / displayGamma),
-            pow(min(1, max(0, out.1)), 1.0 / displayGamma),
-            pow(min(1, max(0, out.2)), 1.0 / displayGamma)
+            displayEncode(out.0), displayEncode(out.1), displayEncode(out.2)
         )
     }
 

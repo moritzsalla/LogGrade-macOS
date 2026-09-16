@@ -3,7 +3,7 @@
 Generate a 3D .cube LUT for the hue curves: hue against hue, hue against saturation and hue against
 lightness, the per-colour controls a grading app gives as three curves.
 
-WHAT IT ACTS ON. Display-referred Rec.709 code values (BT.1886, gamma 2.4), after the conversion
+WHAT IT ACTS ON. Display-referred Rec.709 code values (Apple playback, cubefile.py), after the conversion
 and before the tone curve: the colours as the rendering or the stock left them, so
 "the greens" means the greens on screen. The tone stage that follows is luma-only and merges this
 stage's chroma back unchanged.
@@ -42,7 +42,7 @@ import sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cubefile import is_current, number, title, write_staged  # noqa: E402
+from cubefile import display_decode, display_encode, is_current, number, title, write_staged  # noqa: E402
 
 KNOTS = 12
 SPAN = 360.0 / KNOTS
@@ -71,7 +71,6 @@ M2I = inverse(M2)
 CHROMA_FADE = 0.08
 LIMITS = {"rot": 60.0, "sat": 1.0, "lum": 0.5}
 FIT_STEPS = 18
-DISPLAY_GAMMA = 2.4
 GAMUT_EPSILON = 1e-9
 
 
@@ -122,7 +121,7 @@ def in_gamut(rgb):
 
 def shape(rgb, a):
     """One triple of display code values in, one out."""
-    lin = tuple(max(0.0, c) ** DISPLAY_GAMMA for c in rgb)
+    lin = tuple(display_decode(c) for c in rgb)
     lms = mul(M1, lin)
     L, A, B = mul(M2, (cube_root(lms[0]), cube_root(lms[1]), cube_root(lms[2])))
     C = math.sqrt(A * A + B * B)
@@ -146,7 +145,7 @@ def shape(rgb, a):
                 hi = mid
         k = chroma * lo
         lin = to_linear((L, k * math.cos(turned), k * math.sin(turned)))
-    return tuple(min(1.0, max(0.0, c)) ** (1.0 / DISPLAY_GAMMA) for c in lin)
+    return tuple(display_encode(c) for c in lin)
 
 
 def is_neutral(a):

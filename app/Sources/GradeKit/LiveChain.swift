@@ -207,6 +207,18 @@ public struct LiveChain {
         }
     }
 
+    /// The picture as it is SHOWN: the same pixels, tagged as Rec.709 so macOS displays them the
+    /// way QuickTime, Photos and iOS display the exported file (`scripts/cubefile.py`). Untagged, a
+    /// Mac shows them as sRGB, lighter than the export in the midtones and darker in the shadows, so
+    /// the preview and the file disagreed about exactly what was being judged.
+    ///
+    /// ONLY FOR DISPLAY. Scopes and the live grade read pixel values by drawing into an untagged
+    /// context, and a tagged image drawn there is colour-converted on the way in.
+    public static func forDisplay(_ image: CGImage) -> CGImage {
+        guard let space = CGColorSpace(name: CGColorSpace.itur_709) else { return image }
+        return image.copy(colorSpace: space) ?? image
+    }
+
     /// Splits the rows into one band per core and runs them at once.
     ///
     /// Bands rather than individual rows because the per-chunk overhead of `concurrentPerform` is

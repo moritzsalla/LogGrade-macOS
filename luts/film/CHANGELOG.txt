@@ -10,9 +10,11 @@ These cubes encode spektrafilm profiles and are therefore under CC BY-SA 4.0
   Modified by Moritz Salla, 2026-09-15 (spektrafilm main, v0.3.4) — see below.
 
 Every cube is Apple Log (full-range RGB, as ffmpeg lut3d reads it) in, Rec.709
-display code values (BT.1886, gamma 2.4) out, 65^3, and replaces Apple's
+display code values for Apple playback (scripts/cubefile.py) out, 65^3, and replaces Apple's
 AppleLogToRec709 cube as the conversion. Each TITLE carries its exact bake
-parameters.
+parameters. They were baked for BT.1886 (gamma 2.4) and re-encoded on
+2026-09-16 to Apple playback, value by value (the same light, a different code
+value); "display=apple" in each TITLE marks it.
 
 What was modified
 -----------------
