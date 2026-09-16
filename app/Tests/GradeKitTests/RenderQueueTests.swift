@@ -88,6 +88,33 @@ final class RenderQueueTests: XCTestCase {
         XCTAssertEqual(queue.jobs[0].outputs.map(\.lastPathComponent), ["A_reels.mp4"])
     }
 
+    /// The count the "clips delivered" toast shows. It was read before the delivered state landed,
+    /// so a run that delivered a clip announced zero.
+    func testTheFinishedCountIncludesTheClipJustDelivered() throws {
+        let engine = try stubEngine(
+            script: """
+                #!/bin/bash
+                echo '{"event":"output","clip":"A","deliverable":"reels","path":"/tmp/A_reels.mp4","bytes":10}'
+                echo '{"event":"run_done","rendered":1,"skipped":0,"failed":0}'
+                """)
+        defer { try? FileManager.default.removeItem(at: engine.root) }
+        let queue = RenderQueue(engine: engine)
+        queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A", nil)])
+        let finished = expectation(description: "finished")
+        var counts: (Int, Int)?
+        queue.onFinished = { delivered, failed in
+            counts = (delivered, failed)
+            finished.fulfill()
+        }
+        // ON THE MAIN THREAD, blocking it. The per-job state updates are queued to main, so while
+        // `start` runs they cannot land; a count taken inside `start` then reads the stale state
+        // every time, not only when the app's main thread happens to be busy.
+        queue.start(environment: { _ in [:] })
+        wait(for: [finished], timeout: 30)
+        XCTAssertEqual(counts?.0, 1, "a delivered clip was not counted")
+        XCTAssertEqual(counts?.1, 0)
+    }
+
     func testCancelStopsTheEngineAndWhatItSpawned() throws {
         // Terminating the shell alone is not enough: grade.sh spends its time inside ffmpeg, a
         // child in the same group, which would carry on encoding into a staging file nobody wants.

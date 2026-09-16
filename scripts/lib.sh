@@ -1488,24 +1488,28 @@ edge_limited_sharpen() {  # edge_limited_sharpen <radius> <amount>
 }
 
 # SUPER 8, the format rather than the stock (the stock is the conversion cube). In order, before the
-# delivery reduction and still in 10-bit: the picture drops to the gauge's resolution (a Super 8
-# frame resolves roughly 480 lines across its height, 0.45 of a 1920 deliverable), a slight lens and
-# printer softness, dye-cloud colour noise at that scale, gate weave as a per-frame crop wander, and
-# 18 fps. Pinned to 10-bit YUV first: behind the halation stage the picture is float RGB, where
-# `noise` would scatter colour at full scale across R and B. Luma grain is the shared grain stage's, at the preset's strength.
+# delivery reduction and still in 10-bit: the picture drops to 0.3 of the deliverable's size, a lens
+# and printer softness on top, dye-cloud colour noise at that scale, gate weave as a per-frame crop
+# wander, and 18 fps. Pinned to 10-bit YUV first: behind the halation stage the picture is float RGB,
+# where `noise` would scatter colour at full scale across R and B. Luma grain is the shared grain
+# stage's, at the preset's strength.
+#
+# SOFT ON PURPOSE. It was 0.45 with a 0.7 blur, from a "~480 lines" resolving figure; the user, who
+# shoots film, said real Super 8 is far softer than that. Judged by eye, not derived.
 gauge_super8() {  # gauge_super8 <w> <h>  -> a prefix with its trailing comma
 	local gw gh
-	gw=$(( $1 * 9 / 20 / 2 * 2 )); gh=$(( $2 * 9 / 20 / 2 * 2 ))
-	printf "format=yuv444p10le,scale=w=%s:h=%s:flags=area,gblur=sigma=0.7,noise=c1s=8:c1f=t+u:c2s=8:c2f=t+u," "$gw" "$gh"
+	gw=$(( $1 * 3 / 10 / 2 * 2 )); gh=$(( $2 * 3 / 10 / 2 * 2 ))
+	printf "format=yuv444p10le,scale=w=%s:h=%s:flags=area,gblur=sigma=1.2,noise=c1s=8:c1f=t+u:c2s=8:c2f=t+u," "$gw" "$gh"
 	printf "crop=w=iw-8:h=ih-8:x='4+1.5*sin(n*0.9)+(random(1)-0.5)':y='4+2*sin(n*0.37)+1.5*(random(2)-0.5)',fps=18,"
 }
 
-# After the reduction: projector flicker as a per-frame brightness wobble (`hue`, whose
-# expressions are evaluated per frame, where `lutyuv` builds its table once and holds still), the
-# lens vignette, and back to the clip's rate by repeating frames, so 18 fps judders as a projector
-# does. Without a rate the stream stays at 18.
+# After the reduction: the lens vignette, and back to the clip's rate by repeating frames, so 18 fps
+# judders as a projector does. Without a rate the stream stays at 18.
+#
+# NO FLICKER. A per-frame brightness wobble was here; real Super 8 does not pulse lighter and darker
+# frame to frame, and the user called it a cliché. Don't add it back.
 gauge_super8_tail() {  # gauge_super8_tail [fps]
-	printf "hue=b='0.25*(random(3)-0.5)',vignette=angle=PI/5"
+	printf "vignette=angle=PI/5"
 	[ -z "${1:-}" ] || printf ",fps=%s" "$1"
 }
 
