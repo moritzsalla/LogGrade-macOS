@@ -18,7 +18,8 @@ way for whoever doesn't want it. Judge every entry by that.
 | IMAX | fine | public references, then eye |
 | Super 8 | heavy | public references, then eye |
 
-Sign-off is both users calling a look good enough. It stays improvable. None has reached that bar.
+Sign-off is both users calling a look good enough. It stays improvable. Moritz called Portra 800,
+IMAX and Super 8 good enough for now, not exceptional; the partner has not judged them.
 
 **Right panel.** Look picker, one per batch. Adjust, per clip: Exposure, Warmth, Tint, Contrast,
 Saturation, and the per-clip exposure match (on by default). Scopes (levels, parade, vectorscope)
@@ -36,10 +37,9 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
 
 1. **Portra 160 against the scans** (arriving). Tone, colour and grain side by side, then both users
    judge.
-2. **Portra 800, IMAX, Super 8** against public references.
-3. **Neutral on a sunny, contrasty scene.** `luts/rendering/neutral.cube` was judged on one overcast
+2. **Neutral on a sunny, contrasty scene.** `luts/rendering/neutral.cube` was judged on one overcast
    shoot and IMG_0609 only. The render golden is Neutral, so it moves with this.
-4. **Delete the engine controls no look uses**, once the looks are signed off: wheels, hue curves,
+3. **Delete the engine controls no look uses**, once the looks are signed off: wheels, hue curves,
    halation and tone internals, with their tests and the live preview's copies.
 
 ## Also open
