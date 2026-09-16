@@ -15,20 +15,14 @@
 #
 # The render golden (tests/render-golden.sh) renders one clip through the real chain and compares it
 # with the default image this repo recorded. That is the check that says the image moved.
-#
-# --conformance additionally renders through the frozen precursor and REPORTS whether this fork
-# still matches it. It is information, not a gate: the precursor is provenance, and the default is
-# allowed to depart from it on purpose (docs/adr/0014). A render that fails is still a failure.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 ALLOW_SKIPS=0
-CONFORMANCE=0
 FAST=0
 for a in "$@"; do
 	case "$a" in
 		--allow-skips) ALLOW_SKIPS=1;;
-		--conformance) CONFORMANCE=1;;
 		--fast) FAST=1;;
 		*) echo "unknown option: $a" >&2; exit 2;;
 	esac
@@ -63,9 +57,9 @@ if command -v shellcheck >/dev/null; then
 	# `*.sh` glob for its whole existence.
 	# `mapfile` is bash 4.0+; macOS ships 3.2, where it silently does nothing and the check
 	# stops testing anything. Use a plain loop.
-	# tests/ is included because a shell script there is production code too: conformance.sh was
-	# unlinted for exactly as long as this loop only looked in scripts/, and render-golden.sh is now
-	# the guard on the default image.
+	# tests/ is included because a shell script there is production code too: render-golden.sh is
+	# the guard on the default image, and a script there once went unlinted for as long as this
+	# loop only looked in scripts/.
 	(
 		targets=""
 		for f in scripts/* tests/*; do
@@ -168,23 +162,6 @@ else
 		3) [ -n "$MISSING_MEDIA" ] || SKIPPED="$SKIPPED render-golden";;
 		*) exit "$rc";;
 	esac
-fi
-
-echo
-echo "== conformance (this fork vs the frozen precursor, information only) =="
-# OPT-IN, and never counted as a skip or a failure when the images differ. It renders through two
-# engines, which takes minutes. A difference is expected once the default has been moved through
-# the render golden; what it tells you is whether it has.
-if [ "$CONFORMANCE" = "1" ]; then
-	set +e; ./tests/conformance.sh; rc=$?; set -e
-	case "$rc" in
-		0) ;;
-		3) echo "(conformance skipped)";;
-		4) echo "(the default render has departed from the precursor — see recorded_because in tests/fixtures/render-golden.json)";;
-		*) exit "$rc";;
-	esac
-else
-	echo "not run — opt in with --conformance. It renders through both engines, so it costs minutes."
 fi
 
 echo

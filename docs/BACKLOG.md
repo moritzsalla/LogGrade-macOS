@@ -34,15 +34,13 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
 
 ## Next, in order
 
-1. **Prune what the old app needed:** precursor parity (`tests/grade-parity.py`, ADR 0014's
-   conformance), tests of removed controls, stale words in `CONTEXT.md`, README. Once the looks
-   are tuned, delete the engine's wheels, hue curves, halation and tone internals that no preset
-   uses.
-3. **Portra 160 against the scans** (arriving). Tone, colour and grain side by side, then both users
-   judge. The render golden moves with it (`render-golden.sh --regenerate`).
-4. **Portra 800, IMAX, Super 8** against public references.
-5. **Neutral on a sunny, contrasty scene.** `luts/rendering/neutral.cube` was judged on one overcast
-   shoot and IMG_0609 only.
+1. **Portra 160 against the scans** (arriving). Tone, colour and grain side by side, then both users
+   judge.
+2. **Portra 800, IMAX, Super 8** against public references.
+3. **Neutral on a sunny, contrasty scene.** `luts/rendering/neutral.cube` was judged on one overcast
+   shoot and IMG_0609 only. The render golden is Neutral, so it moves with this.
+4. **Delete the engine controls no look uses**, once the looks are signed off: wheels, hue curves,
+   halation and tone internals, with their tests and the live preview's copies.
 
 ## Also open
 
@@ -52,8 +50,6 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
 - **Export is slow on the Intel Mac.** Measure where the time goes first.
 - **Judge sharpen and grain at other heights by eye**, now that Custom exports any size. Grain stays
   ~1 output px, 1.7× coarser relative to the picture at 960 than at 1920 (`docs/PIPELINE.md`).
-- **Rename "look" where it means the whole grade** (`look.json`, `LOOK_FILE`). Wait for step 1: the
-  file's contents change with the panel.
 
 ## Not doing
 

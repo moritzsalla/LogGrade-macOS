@@ -4,7 +4,7 @@
     "rendered is a claim nothing produced.",
     "",
     "This is the DEFAULT image this repo renders, recorded from its own chain. Moving it",
-    "is allowed and takes a reason, which lands in recorded_because. See docs/adr/0014."
+    "is allowed and takes a reason, which lands in recorded_because."
   ],
   "recorded_because": "display encoding for Apple playback (BT.709 inverse OETF, as QuickTime/iOS decode) instead of gamma 2.4; same designed light",
   "clip": {

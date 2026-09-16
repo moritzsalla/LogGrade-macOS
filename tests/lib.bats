@@ -3148,7 +3148,7 @@ _low_band_db() {  # _low_band_db <file> <hz>
 		|| fail "a neutral frame asked for a cast: $out"
 }
 
-# tests/render-golden.sh holds the default image to this repo's own recorded render (ADR 0014). Its
+# tests/render-golden.sh holds the default image to this repo's own recorded render. Its
 # render cannot run here in seconds, and check.sh runs it for real; these cover the two ways it can
 # be relaxed without anyone seeing, and assert the work was not attempted, since a render that
 # fails for any other reason would also exit non-zero.

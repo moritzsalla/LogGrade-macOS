@@ -11,8 +11,8 @@ alongside footage from professional cinema cameras.
 
 Getting there requires an understanding of colour spaces, LUTs and exposure, and usually
 professional software. This tool gets about as much image quality out of iPhone footage as the
-format actually holds, without opening an NLE. The final look is Kodak Portra, but that's one line
-in `look.json`.
+format actually holds, without opening an NLE. Pick a look (Neutral, or a film stock: Portra 160,
+Portra 800, IMAX, Super 8) and the footage comes out finished.
 
 **Why not an existing app?** Log files are ordinary video, so any app opens them, but they look
 flat and grey until they are converted and graded. The free tool that does that properly is
@@ -63,13 +63,12 @@ it stopped the image from ever getting better than the old edit.
 ```sh
 ./tests/render-golden.sh                        # is the default render the recorded one?
 ./tests/render-golden.sh --regenerate "<why>"   # it moved on purpose; record it, with the reason
-./scripts/check.sh --conformance                # has it departed from the precursor yet? (information)
 ```
 
 A hash says the image changed, not that it improved. Both renders are kept in `dist/golden/` to judge
 by eye.
 
-→ [`adr/0014`](docs/adr/0014_THE_PRECURSOR_IS_PROVENANCE_NOT_THE_ORACLE.md) · [`PROVENANCE.md`](PROVENANCE.md)
+→ [`PROVENANCE.md`](PROVENANCE.md)
 
 ---
 
@@ -83,27 +82,25 @@ by eye.
 pixels tagged BT.2020 get transformed a second time by anything that trusts the tag. It looks like
 someone bleached the footage.
 
-**The crop is dragged per clip.** Default it to centre and a batch of twelve gives you twelve files
-that all look finished and are all framed wrong. So there is no default at all: a deliverable that
-crops is refused without an offset, and `CROP_OFFSET=centre` is how you say out loud that one clip does
-not need a considered one.
+**The crop is placed per clip.** Default it to centre in silence and a batch of twelve gives you
+twelve files that all look finished and are all framed wrong. The app renders an unplaced clip
+centred and names every clip nobody framed; the command line refuses a crop without
+`CROP_OFFSET`, and `CROP_OFFSET=centre` is how you say it out loud.
 
 ---
 
-## Film is more than a cube
+## A film look is picked, not built
 
-A Portra LUT supplies colour and almost nothing else. What reads as film sits outside it, so it is
-built as stages of its own, each measured against the render and absent from it until turned on:
+Each film look is a stock simulated from its datasheets (spektrafilm), rendered straight from the
+log picture so the highlights keep their latitude. What reads as film beyond colour comes with it:
 
 - **Halation** — the warm glow bright things spill past their edges, added in linear light before
-  Apple's conversion, where a sky and a white car are still different amounts of light.
-- **A print** — Kodak 2383 and kin after the negative, as film is printed, at a strength.
-- **Grain that follows the picture** — most in the midtones, receding into shadow and highlight.
+  the conversion, where a sky and a white car are still different amounts of light.
+- **Grain that follows the picture** — most in the midtones, receding into shadow and highlight,
+  coarse for Portra 800 and fine for IMAX.
 
-![Film ladder](docs/grade-ladder-film.jpg)
-
-Five clips, four rows: the shipped look, then halation, then a softer tone curve, then a 2383 print
-at 40%. None of it is the default yet — the look is still a decision for an eye, not a test.
+You pick the stock; its halation and grain are not sliders. The looks are judged by eye against real
+film: Portra 160 against analog scans, the others against reference frames.
 
 → [`adr/0012`](docs/adr/0012_HALATION_IN_LINEAR_BEFORE_THE_CONVERSION.md)
 
@@ -150,7 +147,7 @@ MATCH=0 ./scripts/grade.sh src/     # render every clip as shot instead
 app/        Swift. GradeKit = models + engine adapter. LogGrade = the window.
 scripts/    The engine. bash + ffmpeg. Start at lib.sh.
 docs/       PIPELINE.md is the real documentation. adr/ holds the decisions.
-look.json   The look. One source, every stage reads it.
+look.json   The Neutral look. presets/ holds the film looks, in the same format.
 tests/      Every test here exists because the thing it covers already broke.
 ```
 

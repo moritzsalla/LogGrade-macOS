@@ -24,13 +24,16 @@ _Avoid_: cache, "the masters"
 Presets: Reels/Stories 9:16 and Feed 4:5; any `name:w:h` works (ADR 0010). A shape, not a size.
 _Avoid_: format, cut, version
 
-**Final**: the delivered H.264 for one clip in one deliverable. _Avoid_: export, `<clip>_final`
+**Export preset**: Instagram Story, Instagram Post, or Custom: the delivery settings picked in the
+app. The two Instagram ones fix every field. _Avoid_: deliverable (that is the shape)
+
+**Final**: the delivered file for one clip in one deliverable. _Avoid_: export, `<clip>_final`
 
 **Proof**: a cheap, undelivered render through the whole delivery chain, made to decide something.
 _Avoid_: draft, test render
 
 **Preview**: the still the app shows while a control moves. It covers the grade only (correction,
-halation, conversion, look, print, hue curves, tone, trims), not grain, sharpening, denoise, stabilisation or dither.
+halation, conversion, hue curves, tone, trims), not grain, sharpening, denoise, stabilisation or dither.
 A proof answers "is this deliverable"; a preview answers "is this the grade".
 
 ## The grade
@@ -40,28 +43,27 @@ A proof answers "is this deliverable"; a preview answers "is this the grade".
 scan in its place. Either takes the log picture to the display in one scene-referred step. Apple's
 own cube was the third option until it was dropped. _Avoid_: CST, "the Apple LUT"
 
-**Film preset**: a complete look file in `presets/` built on a film conversion. _Avoid_: film look
-(that is the Look stage)
+**Look**: one complete look file, picked once per batch: Neutral (`look.json`) or a film stock in
+`presets/`. Fixed; a person only switches its grain. _Avoid_: preset (ambiguous with export preset),
+style
 
-**Look**: the film-emulation LUT: colour character, almost no contrast. _Avoid_: preset, style, grade
+**Adjust**: a clip's own moves on top of the look (exposure, warmth, tint, contrast, saturation,
+match), stored per clip in the project. _Avoid_: override, grade
 
 **Halation**: the warm glow past bright edges, added in linear light before the conversion.
 _Avoid_: bloom
 
-**Print**: the print-film LUT (Kodak 2383 and kin), after the look and before the tone, with a
-strength. _Avoid_: second look, output LUT
-
-**Hue curves**: per-colour hue, saturation and lightness, twelve knots on Oklab hue, after the print
-and before the tone (`make-hue-lut.py`). Distinct from the trims' global saturation.
+**Hue curves**: per-colour hue, saturation and lightness, twelve knots on Oklab hue, after the
+conversion and before the tone. Set by a look, not in the panel (`make-hue-lut.py`). Distinct from the trims' global saturation.
 
 **Tone**: the generated luma curve that gives density. _Avoid_: S-curve, tone map, grade
 
 **Correction**: the input stage: exposure, white balance and wheels, applied in Apple Log before
-the conversion, and what each clip's metering is added to. Left out of the graph when neutral.
+the conversion, and what each clip's metering and Adjust are added to. Left out of the graph when neutral.
 _Avoid_: colour correction, input LUT
 
-**Grade**: correction + halation + look + print + hue curves + tone + trims: the whole creative transform.
-_Avoid_: look, edit
+**Grade**: correction + halation + conversion + hue curves + tone + trims: the whole transform a
+look and a clip's Adjust produce. _Avoid_: edit
 
 **Colour correction**: moving colour toward its measured spec. Not the correction stage.
 
@@ -83,7 +85,7 @@ It says where the image is, not where it should go. _Avoid_: target, chart
 until someone re-records it with a reason. It says what the engine did, not whether that was good.
 Grade golden: ffmpeg's output per patch. Render golden: the default image. _Avoid_: oracle, snapshot
 
-**Precursor**: `ffgrade`, frozen at the fork point. Provenance, not a standard (ADR 0014).
+**Precursor**: `ffgrade`, frozen at the fork point. Provenance, not a standard.
 _Avoid_: reference, oracle, upstream
 
 ## Failures, by name
@@ -100,4 +102,5 @@ stretched (ADR 0010). _Avoid_: stretched
 **Engine**: `scripts/`, the LUTs and `look.json`. It owns the image; the app sets variables, spawns it
 and reads its events, and never builds a filter graph. _Avoid_: backend
 
-**Grading session**: one sitting over one clip, ending in a grade saved to `look.json`.
+**Grading session**: one sitting over a shoot: a look picked, clips adjusted and framed, saved as a
+project.

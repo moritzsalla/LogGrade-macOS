@@ -12,7 +12,7 @@ The traps, and where things live. `CONTEXT.md` defines the words (*look* ≠ *to
 - A missing tool fails the run; `--allow-skips` accepts a partial one on purpose.
 - shellcheck and bats catch different bugs. macOS runs **bash 3.2**, whose empty arrays under `set -u` differ from modern bash. Run both.
 - Tag a bats test that renders footage or builds the app `slow`, and one that writes outside `$BATS_TEST_TMPDIR` `serial` (top of `tests/lib.bats`). Wait for a condition, never a duration.
-- `tests/render-golden.sh` holds the default image. If a change is meant to move it, compare the renders in `dist/golden/` and run `--regenerate "<why>"`. Never regenerate just to go green. `--conformance` only reports whether the default still matches the precursor (ADR 0014).
+- `tests/render-golden.sh` holds the default image. If a change is meant to move it, compare the renders in `dist/golden/` and run `--regenerate "<why>"`. Never regenerate just to go green.
 
 ## Filter traps
 
