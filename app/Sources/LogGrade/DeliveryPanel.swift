@@ -32,7 +32,6 @@ struct DeliveryPanel: View {
             sizeRow
             sizeCostNote
             depthRow
-            stabiliseRow
             cropSection
             workloadNote
             saveRow
@@ -256,25 +255,6 @@ struct DeliveryPanel: View {
             .font(Type.caption)
             .foregroundColor(Palette.inkTertiary)
             .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    /// Per clip, because it is a property of the shot rather than of the shoot. The engine has
-    /// always taken it; until now nothing in the interface set it, so every clip was stabilised
-    /// whether it needed to be or not.
-    private var stabiliseRow: some View {
-        HStack(spacing: 10) {
-            Toggle(
-                "stabilise this clip",
-                isOn: Binding(
-                    get: { model.stabilise },
-                    set: { model.stabilise = $0 })
-            )
-            .toggleStyle(.checkbox)
-            .font(Type.label)
-            .foregroundColor(Palette.inkSecondary)
-            .disabled(model.selectedClip == nil)
-            Spacer()
         }
     }
 

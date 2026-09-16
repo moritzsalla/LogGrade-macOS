@@ -37,7 +37,23 @@ final class GradeModel: ObservableObject {
     ///
     /// NOT SAVED, deliberately: not in the preset, the project or the defaults. A bypass left on
     /// from yesterday's comparison silently renders a whole shoot without a stage.
-    @Published var bypassed: Set<Look.Stage> = []
+    ///
+    /// Denoise and grain start off: denoise because daylight footage is clean once scaled down,
+    /// grain because Neutral is what opens. `apply(preset:)` turns grain on for a film preset.
+    @Published var bypassed: Set<Look.Stage> = [.denoise, .grain]
+
+    /// Per-clip exposure metering, which makes a shoot land together. A switch of its own because a
+    /// deliberately dark scene needs a way out of it without losing the sliders. Adjust switched
+    /// off takes it out too: off is the preset as shipped.
+    @Published var matchExposure = true
+
+    var matches: Bool { matchExposure && !bypassed.contains(.adjust) }
+
+    func setMatch(_ on: Bool) {
+        matchExposure = on
+        liveUpdate()
+        renderPreview()
+    }
 
     var effectiveLook: Look { look.bypassing(bypassed) }
 
@@ -65,7 +81,8 @@ final class GradeModel: ObservableObject {
 
     /// Which inspector stages are open. Remembered across launches, because which part of the
     /// chain you are working on outlives a window.
-    @Published var openStages: Set<String> = ["Tone"]
+    /// All closed at first: a preset is meant to be finished, so the panel opens on nothing to do.
+    @Published var openStages: Set<String> = []
 
     func setStage(_ title: String, open: Bool) {
         if open { openStages.insert(title) } else { openStages.remove(title) }
@@ -429,10 +446,7 @@ final class GradeModel: ObservableObject {
         self.workDirectory = work
         self.renderer = PreviewRenderer(engine: engine, workDirectory: work)
         if let remembered = UserDefaults.standard.stringArray(forKey: DefaultsKey.openStages) {
-            // "Trims" is what the inspector called this section before it was renamed
-            // "Colour" — read as the new title, so an already-open section stays open.
-            self.openStages = Set(
-                remembered.map { $0 == "Trims" ? "Colour" : $0 })
+            self.openStages = Set(remembered)
         }
         refreshCurve()
 
@@ -476,10 +490,10 @@ final class GradeModel: ObservableObject {
         publishedTone = tone
     }
 
-    /// What the engine metered for the selected clip, when the render will meter it. Nil with the
-    /// correction bypassed, which is what switches metering off in the render too.
+    /// What the engine metered for the selected clip, when the render will meter it. Nil when matching
+    /// is off, which is what switches metering off in the render too.
     private var matchedMetering: PreviewRenderer.Metered? {
-        guard !bypassed.contains(.correct), let clip = selectedClip?.url else { return nil }
+        guard matches, let clip = selectedClip?.url else { return nil }
         return measuredMetering[clip]
     }
 
@@ -498,6 +512,12 @@ final class GradeModel: ObservableObject {
         guard let preset = project.presets.first(where: { $0.name == name }) else { return }
         project.activePreset = name
         look = preset.look
+        // Grain follows the preset: a film stock has one, Neutral does not.
+        if preset.look.convertCube == Look.neutralConversion {
+            bypassed.insert(.grain)
+        } else {
+            bypassed.remove(.grain)
+        }
         refreshCurve()
         // Live FIRST. A preset is the biggest change the interface can make, and waiting three
         // seconds to see it was the slowest thing in the app.
@@ -508,15 +528,15 @@ final class GradeModel: ObservableObject {
     /// Everything in the inspector back to the active preset, bypass switches included: a stage
     /// left off after a reset is an adjustment the reset did not remove.
     func resetAdjustments() {
-        bypassed = []
+        bypassed = [.denoise]
+        matchExposure = true
         apply(preset: project.activePreset)
     }
 
-    var hasAdjustments: Bool { hasUnsavedChanges || !bypassed.isEmpty }
-
-    /// Keeps the current grade under a name. The rule is `Project.savePreset`, where it is tested.
-    func savePreset(named name: String) {
-        project.savePreset(named: name, look: look)
+    var hasAdjustments: Bool {
+        hasUnsavedChanges || !matchExposure || bypassed.contains(.adjust)
+            || !bypassed.contains(.denoise)
+            || bypassed.contains(.grain) != (look.convertCube == Look.neutralConversion)
     }
 
     /// The grade differs from the preset it came from. Worth showing: an unsaved adjustment that
@@ -582,8 +602,7 @@ final class GradeModel: ObservableObject {
         let export = Project.exportFolder(in: destination)
         lastExportFolder = export
         let project = self.project
-        let match = !bypassed.contains(.correct)
-        let finish = Look.finishes(bypassing: bypassed)
+        let match = matches
         // The look file is scratch and stays in the scratch directory; the RENDER goes where the
         // person said, or beside their footage.
         let lookFile = workDirectory.appendingPathComponent("render-look.json")
@@ -613,7 +632,6 @@ final class GradeModel: ObservableObject {
                 env["GRADE_WORK_DIR"] = destination.path
                 env["EXPORT_DIR"] = export.path
                 if !match { env["MATCH"] = "0" }
-                if !finish { env["FINISH"] = "0" }
                 return env
             })
         }
@@ -739,7 +757,7 @@ final class GradeModel: ObservableObject {
     func renderPreview() {
         guard let clip = selectedClip, clip.isUsable else { return }
         let look = effectiveLook
-        let match = !bypassed.contains(.correct)
+        let match = matches
         let seconds = previewSeconds
 
         // A NEWER REQUEST CANCELS THE ONE IN FLIGHT. Moving three controls in a row used to mean
