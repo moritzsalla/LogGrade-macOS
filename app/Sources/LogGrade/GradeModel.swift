@@ -419,6 +419,7 @@ final class GradeModel: ObservableObject {
             // THE PICTURE NOW, from the live tier, rather than after the graded render.
             if self.selectedClip?.url == clip.url { self.liveUpdate() }
         }
+        lastSource = (clip.url, seconds, look.matchReferenceStops, frame)
         return frame
     }
 
@@ -443,6 +444,12 @@ final class GradeModel: ObservableObject {
     /// Engine renders, which take seconds and must not overlap: they share a work directory and a
     /// per-clip tone cube.
     private let queue = DispatchQueue(label: "loggrade.engine")
+    /// The last source frame the engine rendered, with the reference it metered against. READ AND
+    /// WRITTEN ONLY ON `queue`: a selection queues its source fetch before the graded render, so by
+    /// the time the graded render runs this already holds it, and fetching again rendered every
+    /// clip's source twice.
+    private var lastSource:
+        (clip: URL, seconds: Double, referenceStops: Double, frame: PreviewRenderer.Frame)?
     /// The live grade, on its OWN queue. Sharing the engine's serial queue meant every live frame
     /// waited behind the three-second render that the last control change had started — so letting
     /// go of one slider froze the next one, which is the exact stutter this tier exists to remove.
@@ -814,8 +821,7 @@ final class GradeModel: ObservableObject {
             prepareLivePreview()
             return
         }
-        var knownSize = frameSizes[clip.stem]
-        var knownMetering = measuredMetering[clip.url]
+        let knownSize = frameSizes[clip.stem]
 
         // A NEWER REQUEST CANCELS THE ONE IN FLIGHT. Moving three controls in a row used to mean
         // waiting for three renders in sequence, the first two answering questions nobody was
@@ -838,16 +844,27 @@ final class GradeModel: ObservableObject {
             guard let self else { return }
             // THE SOURCE FIRST, when this clip has none yet: it is the faster call, it puts a live
             // picture up, and it measures what the graded render would otherwise measure again.
-            if needsSource, let source = self.refreshSource(for: clip, seconds: seconds, look: look)
-            {
-                knownSize = source.sourceSize ?? knownSize
-                knownMetering = source.metered
+            //
+            // A METER COUNTS ONLY AGAINST THE REFERENCE IT WAS TAKEN FOR. It is solved against the
+            // look's match.reference_stops, which differs between Neutral and the film looks, so
+            // a reading from before a look change is not handed on; the render meters again.
+            var source = self.lastSource
+            let fresh = {
+                source.map { $0.clip == clip.url && $0.seconds == seconds } ?? false
             }
+            if needsSource && !fresh() {
+                _ = self.refreshSource(for: clip, seconds: seconds, look: look)
+                source = self.lastSource
+            }
+            let usable =
+                fresh() && source?.referenceStops == look.matchReferenceStops ? source : nil
+            let hintSize = usable?.frame.sourceSize ?? knownSize
+            let hintMetering = usable?.frame.metered
             guard generation == self.previewGeneration else { return }
             do {
                 let frame = try self.renderer.render(
                     clip: clip.url, seconds: seconds, look: look, match: match,
-                    knownSize: knownSize, knownMetering: knownMetering,
+                    knownSize: hintSize, knownMetering: hintMetering,
                     onStart: { [weak self] process in self?.previewProcess = process })
                 guard generation == self.previewGeneration else { return }
                 let pixels = NSImage(contentsOf: frame.url)?
