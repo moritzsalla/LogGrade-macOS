@@ -14,11 +14,12 @@ display code values for Apple playback (scripts/cubefile.py) out, 65^3, and repl
 AppleLogToRec709 cube as the conversion. Each TITLE carries its exact bake
 parameters. They were baked for BT.1886 (gamma 2.4) and re-encoded on
 2026-09-16 to Apple playback, value by value (the same light, a different code
-value); "display=apple" in each TITLE marks it.
+value); "display=apple" in each TITLE marks it. portra160 and portra800 were
+baked on 2026-09-16 the same way, so their TITLEs carry it too.
 
 What was modified
 -----------------
-imax65.cube, rz67_portra400.cube, pro400h.cube
+imax65.cube, portra160.cube, portra800.cube
   spektrafilm produces the developed negative's CMY dye densities only (its
   own scan of a negative is not inverted). The positive is NOT spektrafilm's:
   a lab-scan model written here inverts each channel's density, balances it
@@ -33,8 +34,8 @@ imax65.cube, rz67_portra400.cube, pro400h.cube
   raised above the profile default (the "dir" value in each TITLE).
     imax65          kodak_vision3_250d negative, +0.5 stop, scanned (a DI-
                     finished large-format look: neutral, deep, holds the sky)
-    rz67_portra400  kodak_portra_400, +1.5 stops, scanned
-    pro400h         fujifilm_pro_400h, +1 stop, scanned
+    portra160       kodak_portra_160, +1 stop, scanned
+    portra800       kodak_portra_800, +1 stop, scanned
 
 super8_kodachrome64.cube
   kodak_kodachrome_64 reversal, +0.7 stop, scanned directly (io.scan_film:

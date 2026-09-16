@@ -5,13 +5,12 @@
     "stock's own. Each clip's exposure and white balance are metered in linear before the cube",
     "(scripts/solve-exposure.py) against match.reference_stops; correct.* still adds on top.",
     "",
-    "Portra 400 on 6x7, a lab scan: +1.5 stops over, warm highlights from the stock's own",
-    "layer crossover. Medium format is about 3.4 times the area of 35mm, so grain is fine;",
-    "a negative scan shows it most in the thin shadows. Stills stocks carry an anti-halation",
-    "layer, so the glow is slight."
+    "Portra 160 on 35mm, a lab scan: +1 stop, the gentlest of the stocks, soft contrast and",
+    "colour. The finest-grained Portra, so grain is present but quiet. Stills stocks carry an",
+    "anti-halation layer, so the glow is slight."
   ],
   "convert": {
-    "cube": "rz67_portra400"
+    "cube": "portra160"
   },
   "correct": {
     "exposure": 0.0,
@@ -61,5 +60,5 @@
     "sharpen": 0.6,
     "gauge": "none"
   },
-  "name": "Mamiya RZ67 Portra 400"
+  "name": "Portra 160"
 }
