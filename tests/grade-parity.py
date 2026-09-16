@@ -155,11 +155,14 @@ LOOK = os.path.join(ROOT, "look.json")
 Case = namedtuple("Case", "name params sat warm look")
 NEUTRAL_TONE = dict(gamma=1.00, pivot=0.50, contrast=1.00, toe=0.00, shoulder=0.00, black=0.000)
 
-# Written out rather than read from look.json, because the golden records each case at the values
-# it was rendered at and a look re-tune must not silently re-point these cases. check() asserts
-# they still equal look.json, so a re-tune fails by name instead of leaving `shipped` stale.
-SHIPPED_TONE = dict(gamma=2.02, pivot=0.39, contrast=1.09, toe=0.00, shoulder=0.10, black=0.025)
-SHIPPED_SAT, SHIPPED_WARM = 1.27, 0.005
+# A STRONG CURVE AND TRIMS, written out rather than read from look.json. The golden records each
+# case at the values it was rendered at, so reading the file would silently re-point every case on a
+# re-tune. These were look.json's own values until the shipped look went neutral (the rendering is
+# the picture now); they are kept because what this golden measures is the tone and trim ARITHMETIC,
+# and neutral values exercise none of it. check() asserts the shipped look is still neutral, so a
+# default that grows a curve fails by name rather than going unmeasured.
+CURVED_TONE = dict(gamma=2.02, pivot=0.39, contrast=1.09, toe=0.00, shoulder=0.10, black=0.025)
+CURVED_SAT, CURVED_WARM = 1.27, 0.005
 
 CASES = [
     Case("floor", NEUTRAL_TONE, 1.00, 0.000, "none"),
@@ -169,9 +172,9 @@ CASES = [
     # the curve's APPLICATION — ffmpeg curves the Y plane in YUV, the Bench curved an RGB-derived
     # luma in full range. `trims-only` moves saturation and warmth with the curve neutral, which
     # isolates hue=s= against an RGB saturation and colorbalance against a flat offset.
-    Case("shipped", SHIPPED_TONE, SHIPPED_SAT, SHIPPED_WARM, "real"),
-    Case("tone-only", SHIPPED_TONE, 1.00, 0.000, "real"),
-    Case("trims-only", NEUTRAL_TONE, SHIPPED_SAT, SHIPPED_WARM, "real"),
+    Case("shipped", CURVED_TONE, CURVED_SAT, CURVED_WARM, "real"),
+    Case("tone-only", CURVED_TONE, 1.00, 0.000, "real"),
+    Case("trims-only", NEUTRAL_TONE, CURVED_SAT, CURVED_WARM, "real"),
     # One trim each, at a value large enough to see on its own. Without these the guard is
     # insensitive to a small trim regression: the shipped look's divergence is dominated by the
     # tone stage, so deleting the Bench's warmth line entirely hid underneath it and left
@@ -616,19 +619,17 @@ def remeasure(reason):
 
 
 # --- check --------------------------------------------------------------------
-def shipped_case_drift():
-    """Differences between the cases that claim to be the shipped look and look.json."""
-    look = json.load(open(os.path.join(ROOT, "look.json")))
-    tone = {k: float(v) for k, v in look["tone"].items()}
-    sat, warm = float(look["colour"]["saturation"]), float(look["colour"]["warmth"])
+def curved_case_drift():
+    """Cases that claim to carry the curve and trims and have gone neutral instead. Without this
+    the golden could be regenerated at neutral values and measure none of the arithmetic."""
     fails = []
     for name, params, case_sat, case_warm, _look in CASES:
         if name not in ("shipped", "tone-only"):
             continue
-        if {k: float(v) for k, v in params.items()} != tone:
-            fails.append("case %s's tone is not look.json's tone" % name)
-        if name == "shipped" and (case_sat, case_warm) != (sat, warm):
-            fails.append("case shipped's saturation and warmth are not look.json's")
+        if {k: float(v) for k, v in params.items()} == NEUTRAL_TONE:
+            fails.append("case %s has gone neutral, so it measures no curve" % name)
+        if name == "shipped" and (case_sat, case_warm) == (1.00, 0.000):
+            fails.append("case shipped has gone neutral, so it measures no trims")
     return fails
 
 
@@ -639,22 +640,22 @@ def check():
         golden = json.load(f)
     fails = []
 
-    # 0. The shipped cases are look.json's look. Checked before freshness so a re-tune fails by
-    #    this name even when the golden is also stale for another reason.
+    # 0. The shipped look still renders nothing in these stages. Checked before freshness so a
+    #    re-tune fails by this name even when the golden is also stale for another reason.
     with open(LOOK) as f:
         look_json = json.load(f)
     drift = []
-    if look_json["tone"] != SHIPPED_TONE:
-        drift.append("tone: look.json %s, harness %s" % (look_json["tone"], SHIPPED_TONE))
-    if (look_json["colour"]["saturation"], look_json["colour"]["warmth"]) != (SHIPPED_SAT,
-                                                                             SHIPPED_WARM):
-        drift.append("colour: look.json %s, harness saturation=%s warmth=%s"
-                     % (look_json["colour"], SHIPPED_SAT, SHIPPED_WARM))
+    if look_json["tone"] != NEUTRAL_TONE:
+        drift.append("tone: look.json %s, neutral %s" % (look_json["tone"], NEUTRAL_TONE))
+    if (look_json["colour"]["saturation"], look_json["colour"]["warmth"]) != (1.00, 0.000):
+        drift.append("colour: look.json %s, neutral saturation=1.0 warmth=0.0"
+                     % (look_json["colour"],))
     if drift:
-        print("SHIPPED CASE IS NOT THE SHIPPED LOOK\n"
-              "  The `shipped` and `tone-only` cases claim to be look.json's look and are not, so\n"
-              "  the app would be held to a look nothing ships. Update SHIPPED_* in\n"
-              "  tests/grade-parity.py, then run --remeasure with the reason.\n  "
+        print("THE SHIPPED LOOK IS NO LONGER NEUTRAL\n"
+              "  The conversion is the picture, so these stages ship at the values the engine\n"
+              "  leaves out of the graph, and the cases below cover the arithmetic at values\n"
+              "  nothing ships. A default that grows a curve needs its own case here, then\n"
+              "  --remeasure with the reason.\n  "
               + "\n  ".join(drift), file=sys.stderr)
         return 1
 
@@ -695,11 +696,10 @@ def check():
         elif not c.get("output"):
             fails.append("case %s has no recorded ffmpeg output" % case.name)
 
-    # 3b. The cases NAMED for the shipped look are at the shipped look. They are literals so that a
-    #    re-tune cannot quietly move what the golden recorded, and nothing tied them to look.json:
-    #    after a re-tune `shipped` would stay green while measuring a look nothing ships. Loud
-    #    instead — update the case, regenerate, and say so in the commit.
-    fails += shipped_case_drift()
+    # 3b. The cases that carry a curve and trims still carry them. They were look.json's own
+    #    values until the shipped look went neutral; what they exist to measure is the arithmetic,
+    #    and at neutral values there is none to measure.
+    fails += curved_case_drift()
 
     # 4. Every non-calibration case carries a tolerance. This is the guard on the field
     #    --regenerate carries forward rather than measures: LiveGradeTests reads it, and a case

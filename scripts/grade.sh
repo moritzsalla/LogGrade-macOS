@@ -19,11 +19,7 @@
 #                     so the default run is 1080 wide exactly as before.
 #   STAB=0            skip stabilisation entirely (faster)
 #   SMOOTHING=<n>     frames of camera-path lowpass; higher is closer to locked-off
-#   MATCH=0           skip exposure matching and use look.json's gamma raw
-#   MATCH=batch       solve every clip against the MEDIAN of this run's own clips instead of
-#                     look.json's reference_yavg, which was measured on one frame of one shoot
-#   YAVG_IN=<n>       the clip's post-CST mean, if it has already been measured. Skips the probe,
-#                     which costs about a second; the render is identical either way.
+#   MATCH=0           skip exposure metering and render every clip as shot
 #   GRAIN_STRENGTH=<n>  override look.json's grain strength
 #   PROOF=<seconds>   render this many seconds through the real chain into dist/proofs/
 #   DRY=1             plan only, render nothing
@@ -49,8 +45,8 @@
 #   GRADE_WORK_DIR=<dir>  where src/ is read from and dist/ is written, instead of the repo. A
 #                     `.workdir` file beside the repo does the same thing; resolve_work_dir in
 #                     lib.sh picks between them. The whole bats suite runs through this.
-#   CONVERT=<apple|film-stem>  the conversion out of Apple Log for this run, overriding look.json's
-#                     convert.cube: Apple's cube, or a film cube from luts/film/.
+#   CONVERT=<name>    the conversion out of Apple Log for this run, overriding look.json's
+#                     convert.cube: a cube from luts/rendering/ or luts/film/.
 #   LOOK_FILE=<path>  which look.json every stage reads (lib.sh). Changing it changes the grade,
 #                     so it is a knob like any other rather than an implementation detail.
 #
@@ -69,17 +65,11 @@
 # Orientation is NOT handled here or anywhere: it is an ingest concern and the source is trusted.
 # See docs/adr/0005_ORIENTATION_IS_AN_INGEST_CONCERN.md.
 #
-# EXPOSURE MATCHING is the part that makes "one recipe" actually mean "one look". Clips shot across
-# a shoot window land differently under a fixed curve, and in an unattended batch nobody notices
-# until the edit. Each clip's post-CST mean is measured and the tone curve's gamma is solved per
-# clip to land on the same place. Disable with MATCH=0 to get the frozen curve raw.
-#
-# WHERE "the same place" IS, is the part that does not travel. MATCH=1 lands every clip on
-# look.json's match.reference_yavg, which is a measurement of one frame of IMG_0609 ~20 minutes
-# before sunset. For that shoot it is the right anchor; for anyone else's footage, or for another
-# shoot under different light, it is a number with no meaning that still moves every clip's gamma.
-# MATCH=batch anchors on the run's OWN median instead, so a shoot is matched to itself. The default
-# stays MATCH=1 because changing it would change every existing render — see docs/adr/0011.
+# EXPOSURE METERING is the part that makes "one recipe" actually mean "one look". Clips shot across
+# a shoot window land differently, and in an unattended batch nobody notices until the edit. Each
+# clip's own log-average and grey balance are measured from one decoded frame and applied IN LINEAR
+# LIGHT, before the conversion, where a stop is a stop (scripts/solve-exposure.py). The move is
+# damped, so a dusk clip stays darker than a noon one. MATCH=0 renders every clip as shot.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
@@ -136,16 +126,7 @@ FRAME_DIR="$WORK/dist/frames"
 # that would otherwise fail into an empty measurement and plan every clip at the reference gamma.
 # A film cube is a conversion too: resolve_conversion refuses a missing one either way.
 CONVERT_NAME="${CONVERT:-$(look .convert.cube)}" || exit 1
-if [ -n "$FRAME" ] && [ "$FRAME_STAGE" = source ] && [ "$CONVERT_NAME" = apple ]; then
-	# An ungraded frame runs no conversion, and Apple's cube may be absent on a fresh clone.
-	CST="$APPLE_CST"
-else
-	CST="$(resolve_conversion "$CONVERT_NAME")" || exit 1
-fi
-# Under a film cube, exposure is metered in linear before it (solve-exposure.py) instead of solved
-# as a gamma after it, and the tone stage is left at look.json's own values.
-FILM_CONVERT=0
-[ "$CONVERT_NAME" = apple ] || FILM_CONVERT=1
+CST="$(resolve_conversion "$CONVERT_NAME")" || exit 1
 
 # Delivery shape. The sizes were 1080x1920 and 1080x1350 written into the render calls, then an
 # aspect plus one height; they are an aspect plus one shared WIDTH now, because the set of shapes
@@ -233,28 +214,19 @@ if [ -n "${_extra:-}" ] || [ -z "${_tb:-}" ]; then
 fi
 HAL_DIR=""
 TONE_SHAPE_ARGS="$(tone_shape_args)" || exit 1
-G_GAMMA_REF="$(require_number gamma "$(look .tone.gamma)")"   # gamma the look was tuned at...
-Y_REF="$(require_number reference_yavg "$(look .match.reference_yavg)")"  # ...against this mean
-REF_STOPS="$(require_number reference_stops "$(look .match.reference_stops)")"  # a film conversion's
+TONE_GAMMA="$(require_number gamma "$(look .tone.gamma)")"
+# Where a clip's metered log-average lands, in stops from mid grey.
+REF_STOPS="$(require_number reference_stops "$(look .match.reference_stops)")"
 STAB="${STAB:-1}"; MATCH="${MATCH:-1}"; DRY="${DRY:-0}"
 # Empty means NOT GIVEN, which is a different thing from 0; see crop_offset.
 CROP_OFFSET_OK="$(crop_offset CROP_OFFSET "${CROP_OFFSET:-}")" || exit 1
 [ "$CROP_OFFSET_OK" != "-" ] || CROP_OFFSET_OK=""
 case "$MATCH" in
 	0|1) ;;
-	batch)
-		if [ "$FILM_CONVERT" = 1 ]; then
-			echo "REFUSING: MATCH=batch, but convert.cube is the film cube '$CONVERT_NAME'." >&2
-			echo "  A film conversion meters each clip in linear against match.reference_stops;" >&2
-			echo "  a batch median of post-conversion means has no meaning there. Use MATCH=1 or 0." >&2
-			emit_code REFUSE_BATCH_FILM
-			emit refused code REFUSE_BATCH_FILM
-			exit 1
-		fi;;
 	*)
-		echo "REFUSING: MATCH must be 0, 1 or batch, got: $MATCH" >&2
-		echo "  0 uses look.json's gamma raw, 1 solves against look.json's reference_yavg," >&2
-		echo "  batch solves against the median of this run's own clips." >&2
+		echo "REFUSING: MATCH must be 0 or 1, got: $MATCH" >&2
+		echo "  1 meters each clip's exposure and white balance before the conversion," >&2
+		echo "  0 renders every clip as shot." >&2
 		emit_code REFUSE_MATCH_MODE
 		emit refused code REFUSE_MATCH_MODE
 		exit 1;;
@@ -408,43 +380,12 @@ if [ "$HAL_STATE" = "active" ]; then
 	[ "$DRY" = "1" ] || "$SCRIPT_DIR/make-halation-luts.py" "$HAL_DIR" --threshold "$HAL_THRESHOLD" >/dev/null
 fi
 
-# --- MATCH=batch: the exposure reference comes from this run's own clips -----------------
-# One probe per clip, up front, so the median is known before the first render. The results are
-# kept and handed to the loop: probing twice would double the cost for a number that cannot have
-# changed, and it is the same command either way because both callers use probe_yavg.
-#
-# A clip whose probe comes back empty is left out of the MEDIAN but still rendered — it falls back
-# to the reference gamma below, exactly as it does under MATCH=1.
 # Phase totals for the report's summary, in integer milliseconds (see now_ms). Everything from the
 # first line of this script to here — argument checks, the crop probe, the correction cube — is
 # "preflight".
 T_PREFLIGHT=$(( $(now_ms) - RUN_T0 - T_MEASURE )); T_PROBE=0; T_STAB=0; T_TONE=0; T_ENCODE=0; T_FRAME=0
-BATCH_YAVGS=()
-if [ "$MATCH" = "batch" ]; then
-	say "measuring ${#CLIPS[@]} clip(s) for a batch exposure reference"
-	_t=$(now_ms)
-	for SRC in "${CLIPS[@]}"; do
-		_y="$(probe_yavg "$SRC" "$CST")"
-		[ -n "$_y" ] || _y="-"
-		BATCH_YAVGS+=("$_y")
-	done
-	T_PROBE=$(( $(now_ms) - _t ))
-	report_line "      batch exposure probe took $(fmt_ms "$T_PROBE") for ${#CLIPS[@]} clip(s)"
-	# `|| true` would hide an all-empty run behind look.json's reference, which is the silent
-	# substitution this whole file refuses to make. Stop instead.
-	if ! Y_REF="$(printf '%s\n' "${BATCH_YAVGS[@]}" | grep -v '^-$' | median)"; then
-		echo "REFUSING: MATCH=batch, but not one clip's exposure could be measured." >&2
-		echo "  Without a measurement there is nothing to match to. Use MATCH=1 to grade" >&2
-		echo "  against look.json's reference, or MATCH=0 for its gamma raw." >&2
-		emit_code REFUSE_BATCH_NO_PROBE
-		emit refused code REFUSE_BATCH_NO_PROBE clips "${#CLIPS[@]}"
-		exit 1
-	fi
-	say "batch exposure reference: YAVG=$Y_REF (look.json's is not used under MATCH=batch)"
-fi
-
 say "grade run $(date '+%Y-%m-%d %H:%M:%S')  —  ${#CLIPS[@]} clip(s)"
-say "look: sat=$SAT warm=$WARM grain=$GRAIN_STRENGTH stab=$STAB exposure-match=$MATCH"
+say "look: gamma=$TONE_GAMMA sat=$SAT warm=$WARM grain=$GRAIN_STRENGTH stab=$STAB exposure-match=$MATCH"
 say "film: convert=$CONVERT_NAME look=${LOOK_LUT:-none}@$LOOK_STRENGTH print=${PRINT_LUT:-none}@$PRINT_STRENGTH"
 # The flags themselves, which are exactly what the generator ran on, rather than a second spelling.
 [ -z "$CORRECT_PREFIX" ] || say "correction: $CORRECT_ARGS (${CORRECT_SIZE}-point cube)"
@@ -454,24 +395,21 @@ say "film: convert=$CONVERT_NAME look=${LOOK_LUT:-none}@$LOOK_STRENGTH print=${P
 [ -n "$FRAME" ] || report_environment "$ROOT"
 # The EFFECTIVE values, after defaults and look.json, which is what a report read weeks later needs:
 # the environment that launched the run is gone by then.
-report_line "knobs:   deliverables=$(IFS=,; printf '%s' "${D_NAME[*]}") width=$WIDTH height=$HEIGHT crop_offset=${CROP_OFFSET_OK:--} match=$MATCH reference_yavg=$Y_REF stab=$STAB smoothing=$SMOOTHING grain=$GRAIN_STRENGTH fps_out=${FPS_OUT:--} proof=${PROOF:--} frame=${FRAME:--} frame_height=$FRAME_HEIGHT frame_stage=$FRAME_STAGE look_lut=${LOOK_LUT:-none}@$LOOK_STRENGTH print_lut=${PRINT_LUT:-none}@$PRINT_STRENGTH halation=${HAL_STRENGTH}/${HAL_THRESHOLD}/${HAL_RADIUS}/${HAL_TINT} grain_weights=${GRAIN_SHADOWS}/${GRAIN_HIGHLIGHTS} audio_highpass=${AUDIO_HIGHPASS_HZ} bits=$DELIVERY_BITS correct_size=$CORRECT_SIZE convert=$CONVERT_NAME reference_stops=$REF_STOPS denoise=$DENOISE_STRENGTH sharpen=$SHARPEN gauge=$GAUGE dry=$DRY json=$JSON"
+report_line "knobs:   deliverables=$(IFS=,; printf '%s' "${D_NAME[*]}") width=$WIDTH height=$HEIGHT crop_offset=${CROP_OFFSET_OK:--} match=$MATCH stab=$STAB smoothing=$SMOOTHING grain=$GRAIN_STRENGTH fps_out=${FPS_OUT:--} proof=${PROOF:--} frame=${FRAME:--} frame_height=$FRAME_HEIGHT frame_stage=$FRAME_STAGE look_lut=${LOOK_LUT:-none}@$LOOK_STRENGTH print_lut=${PRINT_LUT:-none}@$PRINT_STRENGTH halation=${HAL_STRENGTH}/${HAL_THRESHOLD}/${HAL_RADIUS}/${HAL_TINT} grain_weights=${GRAIN_SHADOWS}/${GRAIN_HIGHLIGHTS} audio_highpass=${AUDIO_HIGHPASS_HZ} bits=$DELIVERY_BITS correct_size=$CORRECT_SIZE convert=$CONVERT_NAME reference_stops=$REF_STOPS denoise=$DENOISE_STRENGTH sharpen=$SHARPEN gauge=$GAUGE dry=$DRY json=$JSON"
 report_line "work:    $WORK"
 report_line "preflight took $(fmt_ms "$T_PREFLIGHT")"
 say ""
 emit run_start clips "${#CLIPS[@]}" saturation "$SAT" warmth "$WARM" \
 	grain "$GRAIN_STRENGTH" stabilisation "$STAB" exposure_match "$MATCH" \
-	exposure_reference "$Y_REF" deliverables "$(IFS=,; printf '%s' "${D_NAME[*]}")" \
+	exposure_reference "$REF_STOPS" deliverables "$(IFS=,; printf '%s' "${D_NAME[*]}")" \
 	proof "${PROOF:-0}" dry "$DRY" report "$REPORT" out_dir "$OUT_DIR"
 
 OK=0; SKIPPED=0; FAILED=0
-# A position counter beside the loop: under MATCH=batch the probe already ran, and each clip's
-# result is found in BATCH_YAVGS by its index in CLIPS.
+# A position counter beside the loop: CLIP_SIZES was measured up front, aligned with CLIPS, and is
+# read by index. It advances BEFORE any `continue`, or a skipped clip would hand the next one the
+# size of the clip before it — a wrong crop on a file that looks finished.
 CLIP_I=0
 for SRC in "${CLIPS[@]}"; do
-	# Taken and advanced BEFORE any `continue`, because BATCH_YAVGS is aligned with CLIPS — every
-	# clip, including the ones about to be skipped. Advancing it further down would silently hand
-	# clip n+1 the measurement of clip n as soon as anything ahead of it skipped.
-	BI="$CLIP_I"; CLIP_I=$(( CLIP_I + 1 ))
 	CLIP_T0=$(now_ms)
 
 	# The clip name becomes a path component AND reaches the filter graph, through the per-clip
@@ -480,7 +418,8 @@ for SRC in "${CLIPS[@]}"; do
 
 	# Measured up front, with the crop refusal. Every crop and the halation radius come from these
 	# two numbers, so a clip without them is skipped rather than guessed at.
-	SRC_SIZE="${CLIP_SIZES[$BI]}"
+	SRC_SIZE="${CLIP_SIZES[$CLIP_I]}"
+	CLIP_I=$(( CLIP_I + 1 ))
 	if [ "$SRC_SIZE" = "-" ]; then
 		say "SKIP  $CLIP — could not measure a decoded frame. Check the file plays, then retry."
 		emit_code REFUSE_UNMEASURED
@@ -492,40 +431,19 @@ for SRC in "${CLIPS[@]}"; do
 	[ -z "$HAL_DIR" ] || HALATION_PREFIX="$(halation_prefix "$HAL_DIR" \
 		"$(halation_sigma "$SRC_W" "$SRC_H" "$HAL_RADIUS")" "$HAL_STRENGTH" "$HAL_TINT")"
 
-	# --- exposure match: one cheap probe, not a full pass --------------------------------
-	# The solve lives in scripts/solve-gamma.py, not in a python3 -c string here: a degenerate
-	# probe used to raise inside it and take the whole batch down at clip n, and a program built by
-	# interpolation cannot be tested. Arguments go through argv.
-	GAMMA="$G_GAMMA_REF"; YAVG="-"
-	# Under a film conversion: the clip's metered exposure and white balance, in linear, before the
-	# cube, and no gamma solve. The per-clip correction cube is made further down, after the dry-run
-	# exit, like the tone cube.
+	# --- exposure metering: one decoded frame, measured in linear ------------------------
+	# The maths lives in scripts/solve-exposure.py rather than in a python3 -c string here: a
+	# program built by interpolation cannot be tested, and a degenerate frame must answer "no
+	# correction" instead of taking the batch down at clip n. Arguments go through argv.
+	#
+	# The per-clip correction cube it feeds is built below, after the dry-run exit, like the tone
+	# cube: a plan renders nothing.
 	METERED="0 0 0"
-	if [ "$FILM_CONVERT" = 1 ] && [ "$MATCH" != "0" ]; then
+	if [ "$MATCH" != "0" ]; then
 		_t=$(now_ms)
-		METERED="$(probe_film_exposure "$SRC" "$REF_STOPS")"
+		METERED="$(probe_scene_exposure "$SRC" "$REF_STOPS")"
 		_t=$(( $(now_ms) - _t )); T_PROBE=$(( T_PROBE + _t ))
 		report_line "      exposure meter took $(fmt_ms "$_t")"
-	elif [ "$MATCH" != "0" ]; then
-		if [ -n "${YAVG_IN:-}" ]; then
-			# ALREADY MEASURED. The probe reads the clip's post-CST mean, which does not change
-			# when a look does — so an interface adjusting a curve re-measures the same number on
-			# every render. It costs about a second of a four-second preview. Passing it back skips
-			# that, and the render is identical either way, which a test asserts.
-			YAVG="$(require_number YAVG_IN "$YAVG_IN")"
-		elif [ "$MATCH" = "batch" ]; then
-			# Measured in the pre-pass that produced Y_REF; "-" means that probe came back empty.
-			YAVG="${BATCH_YAVGS[$BI]}"
-		else
-			_t=$(now_ms)
-			YAVG="$(probe_yavg "$SRC" "$CST")"
-			[ -n "$YAVG" ] || YAVG="-"
-			_t=$(( $(now_ms) - _t )); T_PROBE=$(( T_PROBE + _t ))
-			report_line "      exposure probe took $(fmt_ms "$_t")"
-		fi
-		if [ "$YAVG" != "-" ]; then
-			GAMMA=$("$SCRIPT_DIR/solve-gamma.py" "$YAVG" "$Y_REF" "$G_GAMMA_REF")
-		fi
 	fi
 
 	TONE="$CACHE/${CLIP}_tone.cube"
@@ -577,24 +495,11 @@ for SRC in "${CLIPS[@]}"; do
 			SKIPPED=$((SKIPPED+1)); continue
 		fi
 	fi
-	# NUMERICALLY, not as strings. solve-gamma.py prints 2.020 where look.json says 2.02, so a
-	# clip the solve left exactly where it started was reported as "(matched)" — a claim that the
-	# grade moved when it did not. Harmless under MATCH=1, where landing precisely on the reference
-	# is a coincidence; under MATCH=batch the median clip lands there BY CONSTRUCTION, so the field
-	# would have been wrong for one clip in every run.
-	MATCHED="$(awk -v a="$GAMMA" -v b="$G_GAMMA_REF" 'BEGIN { print (a == b) ? 0 : 1 }')"
 	read -r METER_STOPS METER_TEMP METER_TINT <<< "$METERED"
-	if [ "$FILM_CONVERT" = 1 ]; then
-		say "$CLIP  metered exposure=${METER_STOPS} temp=${METER_TEMP} tint=${METER_TINT}"
-	else
-		say "$CLIP  post-CST YAVG=${YAVG}  gamma=${GAMMA}$([ "$MATCHED" = "1" ] && echo " (matched)")"
-	fi
-	# matched is 1/0 rather than true/false: emit() writes a bare number or a quoted string, and a
-	# JSON boolean would need a third case for one field.
+	say "$CLIP  metered exposure=${METER_STOPS} temp=${METER_TEMP} tint=${METER_TINT}"
 	# width and height are the DECODED frame, which is how the app learns a clip's orientation
 	# without a second guard of its own (ClipProbe reads the container, which lies about rotation).
-	emit clip_planned clip "$CLIP" source "$SRC" yavg "$YAVG" gamma "$GAMMA" \
-		matched "$MATCHED" fps "$FPS" width "$SRC_W" height "$SRC_H" \
+	emit clip_planned clip "$CLIP" source "$SRC" fps "$FPS" width "$SRC_W" height "$SRC_H" \
 		metered_exposure "$METER_STOPS" metered_temp "$METER_TEMP" metered_tint "$METER_TINT"
 	# Frame count and duration are what tell a slow run on a long clip from a slow machine. Not for
 	# FRAME: the app runs that once per preview, where two ffprobes (~120ms) buy nothing it uses.
@@ -607,13 +512,13 @@ for SRC in "${CLIPS[@]}"; do
 	# nothing", and this was writing a 4096-entry cube per clip on a run that renders nothing. The
 	# probe and the solve still happen above, because the solved gamma IS the plan.
 	# A neutral curve is no cube and no luma branch; see grade_chain.
-	TONE_STATE="$(tone_state "$GAMMA")" || exit 1
+	TONE_STATE="$(tone_state "$TONE_GAMMA")" || exit 1
 	if [ "$TONE_STATE" = neutral ]; then
 		TONE=""
 	else
 		_t=$(now_ms)
 		# shellcheck disable=SC2086  # deliberate split: a flag list of validated values
-		"$SCRIPT_DIR/make-tone-lut.py" "$TONE" --gamma "$GAMMA" $TONE_SHAPE_ARGS >/dev/null
+		"$SCRIPT_DIR/make-tone-lut.py" "$TONE" --gamma "$TONE_GAMMA" $TONE_SHAPE_ARGS >/dev/null
 		_t=$(( $(now_ms) - _t )); T_TONE=$(( T_TONE + _t ))
 		report_line "      tone cube took $(fmt_ms "$_t")"
 	fi

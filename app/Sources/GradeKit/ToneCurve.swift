@@ -3,9 +3,8 @@ import Foundation
 /// The tone curve, as the engine's generator defines it.
 ///
 /// PORTED, AND HELD TO THE ORIGINAL. The app draws and previews with `generated(tone:)` and
-/// `solvedGamma(clipYAVG:referenceYAVG:referenceGamma:peak:)`, which are transcriptions of
-/// `make-tone-lut.py` and `solve-gamma.py`. The two functions that subprocess those scripts
-/// instead — `generate(using:tone:)` and `solvedGamma(using:…)` — are not called by the app at
+/// `generated(tone:)`, a transcription of `make-tone-lut.py`. The function that subprocesses the
+/// script instead — `generate(using:tone:)` — is not called by the app at
 /// all: they are the oracles `ToneCurvePortTests` compares the transcriptions against, value for
 /// value, so the curve the interface draws cannot drift from the curve the render applies without
 /// a test naming which one moved. Subprocessing on every control change was the first design, and
@@ -36,37 +35,6 @@ public struct ToneCurve: Equatable {
             case .noTable(let s): return "the generator wrote no table: \(s)"
             }
         }
-    }
-
-    /// The gamma the engine will actually apply to this clip.
-    ///
-    /// THE SLIDER IS NOT THE CURVE. With exposure matching on — which is the engine's default and
-    /// what every render in this app uses — `tone.gamma` is the REFERENCE gamma, and the engine
-    /// solves a per-clip gamma from it so that every clip lands where the look was tuned. Drawing
-    /// or previewing the slider value directly shows a curve nothing renders: on this footage the
-    /// solve moves 2.02 by enough to be obvious in the shadows. This runs the engine's own solver;
-    /// the in-process port below is what the interface calls, and this is what it is held to.
-    public static func solvedGamma(
-        using solver: URL, clipYAVG: Double, referenceYAVG: Double,
-        referenceGamma: Double
-    ) -> Double {
-        let process = Process()
-        process.executableURL = solver
-        process.arguments = [String(clipYAVG), String(referenceYAVG), String(referenceGamma)]
-        let out = Pipe()
-        process.standardOutput = out
-        process.standardError = Pipe()
-        // The reference gamma is what the engine itself falls back to when the probe says nothing
-        // usable.
-        do { try process.run() } catch { return referenceGamma }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0,
-            let value = Double(
-                String(decoding: data, as: UTF8.self)
-                    .trimmingCharacters(in: .whitespacesAndNewlines))
-        else { return referenceGamma }
-        return value
     }
 
     /// The curve, built here, so a slider is dragged against a picture rather than against a
@@ -104,23 +72,6 @@ public struct ToneCurve: Equatable {
             samples[i] = min(1, max(0, v))
         }
         return ToneCurve(samples: samples)
-    }
-
-    /// The gamma the engine will apply to this clip, solved here for the same reason.
-    ///
-    /// Ten lines of arithmetic that used to be a process launch on the drag path. The clamp and
-    /// the two domain guards are the generator's, and `ToneCurvePortTests` holds the two against
-    /// each other across the range including both guards.
-    public static func solvedGamma(
-        clipYAVG: Double, referenceYAVG: Double,
-        referenceGamma: Double, peak: Double = 1023
-    ) -> Double {
-        let y = clipYAVG / peak
-        let r = referenceYAVG / peak
-        // Outside the open unit interval there is no solve: log(0) raises and y == 1 makes the
-        // denominator zero. Both mean "this probe tells us nothing", not "this clip is broken".
-        guard y > 0, y < 1, r > 0, r < 1 else { return referenceGamma }
-        return min(3.2, max(1.2, referenceGamma * log(r) / log(y)))
     }
 
     /// Runs the engine's generator and parses what it writes: the oracle `generated(tone:)` is held

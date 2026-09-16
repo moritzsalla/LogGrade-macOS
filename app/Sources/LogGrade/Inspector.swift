@@ -13,8 +13,6 @@ struct InspectorView: View {
     /// landed on inert space.
     @FocusState private var presetNameFocused: Bool
 
-    private static let appliedGammaTolerance = 0.005
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -48,30 +46,38 @@ struct InspectorView: View {
     /// on the way to the picture, and someone will ask why nothing here is adjustable.
     @ViewBuilder private var convertNote: some View {
         HStack(spacing: Space.xs) {
-            if model.look.isFilmConversion {
-                Text("Rendered through film: \(model.look.convertCube).")
-                    .font(Type.caption)
-                    .foregroundColor(Palette.inkTertiary)
-                HelpButton(
-                    text: "This preset replaces Apple's conversion with a film stock simulated "
-                        + "from its datasheets (spektrafilm), rendered straight from the log "
-                        + "picture so the highlights keep their latitude. The stock is the tone "
-                        + "and colour, so leave the film look and tone neutral. Each clip's "
-                        + "exposure and white balance are metered before it; Correct adds to "
-                        + "that.")
-            } else {
-                Text("Converted from Apple Log to Rec.709 first, always.")
-                    .font(Type.caption)
-                    .foregroundColor(Palette.inkTertiary)
-                HelpButton(
-                    text: "Using Apple's own conversion. It is always applied and cannot be "
-                        + "adjusted: its colour is more accurate than anything this app could do "
-                        + "instead, and the cube carries a display rendering Apple has not "
-                        + "published. The film presets replace it.")
-            }
+            Text(conversionNote)
+                .font(Type.caption)
+                .foregroundColor(Palette.inkTertiary)
+            HelpButton(text: conversionHelp)
         }
         .padding(.leading, Self.inset)
         .padding(.bottom, Space.l)
+    }
+
+    private var conversionNote: String {
+        switch model.look.convertCube {
+        case Look.neutralConversion: return "Rendered from Apple Log, holding the highlights."
+        default: return "Rendered through film: \(model.look.convertCube)."
+        }
+    }
+
+    private var conversionHelp: String {
+        let metered =
+            "\n\nEach clip's exposure and white balance are metered from the log picture before "
+            + "this, so a shoot lands together; Correct adds to what it measured."
+        switch model.look.convertCube {
+        case Look.neutralConversion:
+            return "This app's own rendering, built from Apple's published formula: it takes the "
+                + "log picture to a finished one in a single step, so nothing downstream works on "
+                + "highlights that have already been squeezed. It is the starting point — the "
+                + "stages below adjust it, and a film preset replaces it." + metered
+        default:
+            return "This preset replaces the conversion with a film stock simulated from its "
+                + "datasheets (spektrafilm), rendered straight from the log picture so the "
+                + "highlights keep their latitude. The stock is the tone and colour, so leave the "
+                + "film look and tone neutral." + metered
+        }
     }
 
     private var correctStage: some View {
@@ -230,7 +236,6 @@ struct InspectorView: View {
             control(
                 "Midtone", $model.look.tone.gamma, 1...2.6,
                 default: model.defaultLook.tone.gamma)
-            appliedGammaNote
             control(
                 "Contrast", $model.look.tone.contrast, 0.8...1.8,
                 default: model.defaultLook.tone.contrast)
@@ -311,23 +316,6 @@ struct InspectorView: View {
                     set: { model.look.correct.setValue(which, channel, $0) }),
                 range, format: which == .offset ? "%+.3f" : "%.3f",
                 default: which.neutral)
-        }
-    }
-
-    /// THE SLIDER IS NOT THE NUMBER THAT RENDERS, and the interface has to say so rather than
-    /// print a value nothing applies. Exposure matching solves a gamma per clip from this one, so
-    /// that every clip in a shoot gets the same look instead of the same curve.
-    @ViewBuilder private var appliedGammaNote: some View {
-        if !model.bypassed.contains(.tone), let applied = model.appliedGamma,
-            abs(applied - model.look.tone.gamma) > Self.appliedGammaTolerance
-        {
-            Text(
-                String(
-                    format: "This clip renders at %.3f. The slider sets the midtone for the "
-                        + "shoot; each clip is solved from its own brightness so they match.",
-                    applied)
-            )
-            .modifier(Note())
         }
     }
 

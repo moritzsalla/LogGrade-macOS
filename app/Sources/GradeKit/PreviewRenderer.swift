@@ -22,13 +22,8 @@ public final class PreviewRenderer {
         public let url: URL
         public let clip: String
         public let seconds: Double
-        /// The clip's post-CST luma mean, as the engine measured it, and the gamma it solved from
-        /// that. The app needs both: the curve it draws and the curve it previews live have to be
-        /// the SOLVED one, or they describe a render that never happens.
-        public let yavg: Double?
-        public let gamma: Double?
-        /// Under a film conversion, the exposure and white balance the engine metered for this clip
-        /// and added to the look's correction. Zero under Apple's conversion or without matching.
+        /// The exposure and white balance the engine metered for this clip and added to the
+        /// look's correction. Zero when metering was off.
         public let metered: Metered
         /// The decoded frame, which is how the app learns a clip's orientation.
         public let sourceSize: FrameSize?
@@ -55,16 +50,6 @@ public final class PreviewRenderer {
         }
     }
 
-    /// The clip's post-CST mean, measured once by the engine and remembered here. It does not
-    /// change when a look does, and re-measuring it costs about a second of every preview.
-    private var measuredExposure: [String: Double] = [:]
-
-    /// What the engine last measured for a clip, so the interface can solve the same gamma the
-    /// next render will without paying for a render to find out.
-    public func measuredYAVG(for clip: URL) -> Double? {
-        measuredExposure[clip.deletingPathExtension().lastPathComponent]
-    }
-
     /// Which frame the engine should produce.
     public enum Stage: String {
         /// Everything a control moves, through the real chain. What gets judged.
@@ -78,11 +63,9 @@ public final class PreviewRenderer {
     /// which queue it wants to wait on, and the interface cancels a superseded render rather than
     /// pipelining.
     ///
-    /// `match` is the engine's exposure matching. It defaults on, because every render this app
-    /// performs has it on. It is turned OFF for exactly one caller: the base frame the live tier
-    /// grades from, which wants the tone stage to do nothing. With matching on, a gamma of 1 is
-    /// not passed through — it is solved, and `solve-gamma.py` clamps the result to at least 1.2,
-    /// so the "neutral" base would come back with a curve already baked into it.
+    /// `match` is the engine's exposure metering. It defaults on, because every render this app
+    /// performs has it on; it is off for the base frame the live tier grades, which must be the
+    /// clip as shot.
     public func render(
         clip: URL, seconds: Double, look: Look, height: Int = 1440,
         match: Bool = true, stage: Stage = .graded,
@@ -93,7 +76,6 @@ public final class PreviewRenderer {
             at: workDirectory, withIntermediateDirectories: true)
         try look.write(to: lookFile)
 
-        let stem = clip.deletingPathExtension().lastPathComponent
         var environment = [
             "FRAME": String(seconds),
             "FRAME_HEIGHT": String(height),
@@ -102,18 +84,11 @@ public final class PreviewRenderer {
             "FRAME_STAGE": stage.rawValue,
             "MATCH": match ? "1" : "0",
         ]
-        if let known = measuredExposure[stem] {
-            environment["YAVG_IN"] = String(known)
-        }
         let outcome = try EngineRun(engine: engine).run(
             arguments: [clip.path],
             environment: environment,
             onStart: onStart)
         let planned = outcome.events.first(where: { $0.name == "clip_planned" })
-        // Remember what the engine measured, so the next preview of this clip skips the probe.
-        if let yavg = planned?.double("yavg") {
-            measuredExposure[stem] = yavg
-        }
         guard outcome.succeeded else {
             throw Failure.engineRefused(outcome.codes, outcome.stderrText)
         }
@@ -128,8 +103,6 @@ public final class PreviewRenderer {
             url: URL(fileURLWithPath: path),
             clip: event.clip ?? clip.deletingPathExtension().lastPathComponent,
             seconds: seconds,
-            yavg: planned?.double("yavg"),
-            gamma: planned?.double("gamma"),
             metered: Metered(
                 exposure: planned?.double("metered_exposure") ?? 0,
                 temp: planned?.double("metered_temp") ?? 0,

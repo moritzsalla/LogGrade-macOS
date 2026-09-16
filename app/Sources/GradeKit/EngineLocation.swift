@@ -8,9 +8,8 @@ import Foundation
 /// of. So the app resolves each one to an absolute path and hands them over explicitly, and it
 /// refuses to start a render it knows will die with an opaque non-zero exit.
 ///
-/// The engine also has files that are deliberately absent on a fresh clone: Apple's conversion
-/// cube cannot be redistributed. `grade.sh` has no check for it and fails inside ffmpeg with a raw
-/// filter error naming a path nobody chose, so the preflight checks it here instead.
+/// It also checks the scripts and the cube a render needs, because a missing one fails inside
+/// ffmpeg with a raw filter error naming a path nobody chose.
 public struct EngineLocation {
     /// The repo root: the directory holding `scripts/`, `luts/` and `look.json`.
     public let root: URL
@@ -26,24 +25,22 @@ public struct EngineLocation {
     public var halationGenerator: URL {
         root.appendingPathComponent("scripts/make-halation-luts.py")
     }
-    public var gammaSolver: URL { root.appendingPathComponent("scripts/solve-gamma.py") }
-    public var appleCube: URL {
-        root.appendingPathComponent("luts/apple/AppleLogToRec709-v1.0.cube")
-    }
     public var lookCubes: URL { root.appendingPathComponent("luts/looks") }
     public var printCubes: URL { root.appendingPathComponent("luts/print") }
     public var filmCubes: URL { root.appendingPathComponent("luts/film") }
+    public var renderingCubes: URL { root.appendingPathComponent("luts/rendering") }
     public var presetFolder: URL { root.appendingPathComponent("presets") }
 
-    /// The cube `convert.cube` names: Apple's for "apple", otherwise a film cube, or nil when the
-    /// file is not there. Resolved as `resolve_conversion` in lib.sh resolves it.
+    /// The cube `convert.cube` names: the renderings, then the film stocks, or nil when the file
+    /// is not there. The same order `resolve_conversion` in lib.sh searches, and the reason it is
+    /// an order rather than one folder is that both hold cubes that go in the same slot.
     public func conversionCube(named stem: String, fileManager: FileManager = .default) -> URL? {
-        if stem == Look.appleConversion {
-            return fileManager.fileExists(atPath: appleCube.path) ? appleCube : nil
-        }
         guard !stem.isEmpty, !stem.contains("/"), !stem.hasPrefix(".") else { return nil }
-        let url = filmCubes.appendingPathComponent("\(stem).cube")
-        return fileManager.fileExists(atPath: url.path) ? url : nil
+        for folder in [renderingCubes, filmCubes] {
+            let url = folder.appendingPathComponent("\(stem).cube")
+            if fileManager.fileExists(atPath: url.path) { return url }
+        }
+        return nil
     }
 
     /// The presets the engine ships, `presets/*.json`, each a complete look with a `name`, in file
@@ -65,7 +62,6 @@ public struct EngineLocation {
         case notExecutable(URL)
         case missingTool(String)
         case pythonDoesNotRun(URL)
-        case appleCubeAbsent(URL)
 
         public var description: String {
             switch self {
@@ -79,12 +75,6 @@ public struct EngineLocation {
                 return """
                     python3 at \(u.path) does not run. On a Mac without the command line developer \
                     tools it is only a placeholder. Install them with: xcode-select --install
-                    """
-            case .appleCubeAbsent(let u):
-                return """
-                    Apple's conversion LUT is missing: \(u.path)
-                    It is deliberately not committed — Apple's licence does not permit \
-                    redistributing it. See luts/apple/SOURCE.txt.
                     """
             }
         }
@@ -175,7 +165,7 @@ public struct EngineLocation {
     /// Everything wrong with this engine, in the order a person would fix it. Empty means it runs.
     public func preflight(fileManager: FileManager = .default) -> [Problem] {
         var problems: [Problem] = []
-        for url in [gradeScript, toneGenerator, correctGenerator, halationGenerator, gammaSolver] {
+        for url in [gradeScript, toneGenerator, correctGenerator, halationGenerator] {
             if !fileManager.fileExists(atPath: url.path) {
                 problems.append(.missingFile(url))
             } else if !fileManager.isExecutableFile(atPath: url.path) {
@@ -185,8 +175,12 @@ public struct EngineLocation {
         for url in [lookFile, lookCubes] where !fileManager.fileExists(atPath: url.path) {
             problems.append(.missingFile(url))
         }
-        if !fileManager.fileExists(atPath: appleCube.path) {
-            problems.append(.appleCubeAbsent(appleCube))
+        // ONLY THE CONVERSION THE LOOK ASKS FOR: every cube a render can reach is committed now
+        // that Apple's is gone, so a missing one is a damaged checkout, not something to download.
+        if let stem = try? Look(data: Data(contentsOf: lookFile)).convertCube,
+            conversionCube(named: stem, fileManager: fileManager) == nil
+        {
+            problems.append(.missingFile(renderingCubes.appendingPathComponent("\(stem).cube")))
         }
         for tool in Self.requiredTools {
             guard let url = resolveTool(tool, fileManager: fileManager) else {

@@ -96,12 +96,6 @@ final class GradeModel: ObservableObject {
     /// Each clip's decoded frame, by stem, as the engine reported it. What decides which shapes
     /// crop a clip and along which axis; see `cropGeometry`.
     @Published private(set) var frameSizes: [String: FrameSize] = [:]
-    /// The gamma the engine will apply to this clip. The midtone slider holds the REFERENCE
-    /// gamma, and the two are different numbers on every clip that was not shot at the exposure
-    /// the look was tuned at — so the interface shows both rather than letting the readout claim a
-    /// value nothing applies.
-    @Published var appliedGamma: Double?
-
     // TOUCHED ONLY ON `liveQueue`, from here to `convertedFrom`. They were built on the main
     // thread, and the correction cube alone costs 10 ms on the Intel Mac — every tick of an
     // Exposure drag, which spent the frame the slider's thumb needed to redraw. The queue is not
@@ -263,7 +257,6 @@ final class GradeModel: ObservableObject {
         guard !gradeInFlight, let wanted = pendingLook, let source = sourceImage else { return }
         pendingLook = nil
         gradeInFlight = true
-        let measuredYAVG = matchedYAVG
         let metered = matchedMetering
 
         // OFF THE MAIN THREAD, all of it. The main thread's job during a drag is to redraw the
@@ -271,8 +264,7 @@ final class GradeModel: ObservableObject {
         // slow rather than the picture being late.
         liveQueue.async { [weak self] in
             guard let self else { return }
-            let outcome = self.grade(
-                wanted, source: source, measuredYAVG: measuredYAVG, metered: metered)
+            let outcome = self.grade(wanted, source: source, metered: metered)
             DispatchQueue.main.async {
                 self.gradeInFlight = false
                 switch outcome {
@@ -280,7 +272,10 @@ final class GradeModel: ObservableObject {
                     self.preview.isLive = false
                     self.preview.say(reason, failure: true)
                 case .graded(let image, let scopes, let tone, let curve):
-                    self.publishCurve(curve, for: tone)
+                    if tone != self.publishedTone {
+                        self.preview.curve = curve
+                        self.publishedTone = tone
+                    }
                     self.preview.image = NSImage(
                         cgImage: image,
                         size: NSSize(
@@ -306,19 +301,14 @@ final class GradeModel: ObservableObject {
 
     /// One live frame. Runs on `liveQueue`, where the caches it reads live.
     private func grade(
-        _ requested: Look, source: CGImage, measuredYAVG: Double?,
-        metered: PreviewRenderer.Metered?
+        _ requested: Look, source: CGImage, metered: PreviewRenderer.Metered?
     ) -> LiveOutcome {
-        // The engine adds a film conversion's metered exposure and white balance to the look's
-        // correction before building the cube, so the live picture does the same.
+        // The engine adds what it metered to the look's correction before building the cube, so
+        // the live picture does the same.
         var wanted = requested
-        if wanted.isFilmConversion, let metered {
-            wanted.correct = metered.applied(to: wanted.correct)
-        }
+        if let metered { wanted.correct = metered.applied(to: wanted.correct) }
         guard let conversion = conversionCube(for: wanted.convertCube) else {
-            return wanted.isFilmConversion
-                ? .refused("The film conversion “\(wanted.convertCube)” couldn’t be read.")
-                : .failed
+            return .refused("The conversion “\(wanted.convertCube)” couldn’t be read.")
         }
         if correctionFor != wanted.correct {
             correctionCube =
@@ -360,7 +350,7 @@ final class GradeModel: ObservableObject {
             return .refused("Those hue curves aren’t values the engine accepts.")
         }
 
-        let tone = Self.appliedTone(wanted, measuredYAVG: measuredYAVG)
+        let tone = wanted.tone
         if gradeCurveFor != tone {
             gradeCurve = ToneCurve.generated(tone: tone)
             gradeCurveFor = tone
@@ -401,8 +391,8 @@ final class GradeModel: ObservableObject {
     /// ON SELECTION, not after the first exact render. The whole claim of this tier is that you
     /// pick a clip, grab a control and see the picture move; waiting for a three-second render
     /// before any of that works is the lag it exists to remove. The frame has no chain on it, so
-    /// it is quick, and `match: true` costs one probe — which is what the solved gamma needs, so
-    /// the curve is right on the first drag rather than after the first render.
+    /// it is quick, and `match: true` costs one meter reading, so the first drag already shows
+    /// the exposure the render will apply.
     ///
     /// On the same serial queue as every other render, deliberately. Both write `preview-look.json`
     /// and the per-clip tone cube into one work directory, and two ffmpeg processes racing over
@@ -436,15 +426,9 @@ final class GradeModel: ObservableObject {
             // sliders respond, right where you're looking — and a toast in the top-right corner
             // only sat on top of them.
 
-            // The probe this render paid for. It is what the gamma solve needs, and recording it
-            // here means the curve is the rendered one from the first drag rather than from the
-            // first render.
+            // What this render metered, so the first drag already grades with it.
             if let size = frame.sourceSize { self.frameSizes[clip.stem] = size }
             self.measuredMetering[clip.url] = frame.metered
-            if let yavg = frame.yavg {
-                self.measuredYAVG[clip.url] = yavg
-                self.refreshCurve()
-            }
         }
     }
 
@@ -524,66 +508,29 @@ final class GradeModel: ObservableObject {
     let changes = Changes()
     private var relayed: Set<AnyCancellable> = []
 
-    /// The curve the render will apply to this clip, built here.
+    /// The curve the render will apply, built here.
     ///
-    /// Synchronous, and cheap enough to call on every control change: the curve is 4096 entries of
-    /// arithmetic and the solve is ten lines. Both were subprocesses, which put the graph and the
-    /// live picture a tenth of a second behind the pointer; `ToneCurvePortTests` holds each to the
-    /// generator it replaced, entry for entry.
-    ///
-    /// THE SLIDER IS NOT THE CURVE. With exposure matching on, which is every render this app
-    /// performs, `tone.gamma` is the REFERENCE gamma and the engine solves a per-clip gamma from
-    /// it so that every clip lands where the look was tuned. Drawing the slider value gives a
-    /// graph of a curve nothing applies.
+    /// Synchronous, and cheap enough to call on every control change: 4096 entries of arithmetic.
+    /// It was a subprocess, which put the graph and the live picture a tenth of a second behind the
+    /// pointer; `ToneCurvePortTests` holds it to the generator it replaced, entry for entry.
     func refreshCurve() {
-        let tone = Self.appliedTone(effectiveLook, measuredYAVG: matchedYAVG)
+        let tone = effectiveLook.tone
         guard tone != publishedTone else { return }
-        publishCurve(ToneCurve.generated(tone: tone), for: tone)
-    }
-
-    /// The selected clip's measured mean, when the render will match exposure from it.
-    private var matchedYAVG: Double? {
-        guard Look.matchesExposure(bypassing: bypassed), let clip = selectedClip?.url else {
-            return nil
-        }
-        return measuredYAVG[clip]
-    }
-
-    /// What the engine metered for the selected clip, when the render will meter it.
-    private var matchedMetering: PreviewRenderer.Metered? {
-        guard Look.matchesExposure(bypassing: bypassed), let clip = selectedClip?.url else {
-            return nil
-        }
-        return measuredMetering[clip]
-    }
-
-    /// Under a film conversion the engine solves no gamma: exposure is metered before the cube.
-    static func appliedTone(_ look: Look, measuredYAVG: Double?) -> Look.Tone {
-        var tone = look.tone
-        if let measuredYAVG, !look.isFilmConversion {
-            tone.gamma = ToneCurve.solvedGamma(
-                clipYAVG: measuredYAVG,
-                referenceYAVG: look.matchReferenceYAVG,
-                referenceGamma: tone.gamma)
-        }
-        return tone
-    }
-
-    /// WRITTEN ONLY WHEN IT CHANGES. Both are @Published, and a redundant write is a rebuild of
-    /// every view observing them — during an Exposure drag, sixty times a second, for a curve that
-    /// did not move.
-    private func publishCurve(_ curve: ToneCurve, for tone: Look.Tone) {
-        if appliedGamma != tone.gamma { appliedGamma = tone.gamma }
-        guard tone != publishedTone else { return }
-        preview.curve = curve
+        preview.curve = ToneCurve.generated(tone: tone)
         publishedTone = tone
+    }
+
+    /// What the engine metered for the selected clip, when the render will meter it. Nil with the
+    /// correction bypassed, which is what switches metering off in the render too.
+    private var matchedMetering: PreviewRenderer.Metered? {
+        guard !bypassed.contains(.correct), let clip = selectedClip?.url else { return nil }
+        return measuredMetering[clip]
     }
 
     private var publishedTone: Look.Tone?
 
-    /// What the engine measured for each clip, mirrored here so the solve above needs no render
-    /// and no cross-thread read of the renderer's own cache.
-    private var measuredYAVG: [URL: Double] = [:]
+    /// What the engine metered for each clip, mirrored here so the live tier needs no render and
+    /// no cross-thread read of the renderer's own cache.
     private var measuredMetering: [URL: PreviewRenderer.Metered] = [:]
 
     // MARK: - presets and the project file
@@ -631,7 +578,6 @@ final class GradeModel: ObservableObject {
         let clip = sourceClip
         let seconds = sourceSeconds
         let base = effectiveLook
-        let measuredYAVG = matchedYAVG
         let metered = matchedMetering
         liveQueue.async { [weak self] in
             guard let self else { return }
@@ -650,7 +596,7 @@ final class GradeModel: ObservableObject {
             baseline.tone.contrast = 1
             guard
                 case .graded(_, let histogram?, _, _) = self.grade(
-                    baseline, source: source, measuredYAVG: measuredYAVG, metered: metered),
+                    baseline, source: source, metered: metered),
                 let solved = AutoTone.solve(histogram: histogram)
             else {
                 finish()
@@ -663,7 +609,7 @@ final class GradeModel: ObservableObject {
             candidate.tone.contrast = solved.contrast
             var final = solved
             if case .graded(_, let verify?, _, _) = self.grade(
-                candidate, source: source, measuredYAVG: measuredYAVG, metered: metered),
+                candidate, source: source, metered: metered),
                 let corrected = AutoTone.solve(
                     histogram: verify, baseExposure: solved.exposure,
                     baseContrast: solved.contrast)
@@ -743,7 +689,7 @@ final class GradeModel: ObservableObject {
     func convert(queue: RenderQueue) {
         guard let clips = clipEntries, let destination = outputDirectory else { return }
         let project = self.project
-        let match = Look.matchesExposure(bypassing: bypassed)
+        let match = !bypassed.contains(.correct)
         let finish = Look.finishes(bypassing: bypassed)
         // The look file is scratch and stays in the scratch directory; the RENDER goes where the
         // person said, or beside their footage.
@@ -899,7 +845,7 @@ final class GradeModel: ObservableObject {
     func renderPreview() {
         guard let clip = selectedClip, clip.isUsable else { return }
         let look = effectiveLook
-        let match = Look.matchesExposure(bypassing: bypassed)
+        let match = !bypassed.contains(.correct)
         let seconds = previewSeconds
 
         // A NEWER REQUEST CANCELS THE ONE IN FLIGHT. Moving three controls in a row used to mean
@@ -942,10 +888,6 @@ final class GradeModel: ObservableObject {
                     self.preview.isRendering = false
                     self.preview.isLive = false
                     self.preview.say(LivePreview.exactFrameNote)
-                    // The FIRST render of a clip is the one that measures its mean, so until it
-                    // lands there is no solved gamma and the graph beside the sliders is drawing
-                    // the reference curve. Record it and regenerate.
-                    if let yavg = frame.yavg { self.measuredYAVG[clip.url] = yavg }
                     self.measuredMetering[clip.url] = frame.metered
                     if let size = frame.sourceSize { self.frameSizes[clip.stem] = size }
                     self.refreshCurve()

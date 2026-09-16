@@ -39,7 +39,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GOLDEN="${GOLDEN:-$ROOT/tests/fixtures/render-golden.json}"
 KEEP="$ROOT/dist/golden"
-CUBE="$ROOT/luts/apple/AppleLogToRec709-v1.0.cube"
+CUBE="$ROOT/luts/rendering/neutral.cube"
 
 skip() { echo "SKIP: $*"; exit 3; }
 
@@ -61,7 +61,7 @@ ffmpeg_build() { ffmpeg -version | head -1; }
 # generated from look.json by a script already on the list; check.sh because it renders nothing.
 inputs() {
 	local f
-	for f in look.json scripts/* luts/apple/*.cube luts/looks/*.cube luts/print/*.cube; do
+	for f in look.json scripts/* luts/rendering/*.cube luts/looks/*.cube luts/print/*.cube; do
 		[ -f "$ROOT/$f" ] || continue
 		[ "$f" = scripts/check.sh ] && continue
 		printf '%s\n' "$f"
@@ -75,7 +75,7 @@ inputs_json() {
 	done < <(inputs) | jq -R -n '[inputs | split("\t") | {(.[0]): .[1]}] | add'
 }
 
-[ -f "$CUBE" ] || skip "no ${CUBE#"$ROOT"/} (see luts/apple/SOURCE.txt)"
+[ -f "$CUBE" ] || skip "no ${CUBE#"$ROOT"/}"
 
 if [ "$MODE" = compare ]; then
 	[ -f "$GOLDEN" ] || { echo "FAIL: no golden at $GOLDEN — record one with --regenerate \"<why>\"" >&2; exit 1; }

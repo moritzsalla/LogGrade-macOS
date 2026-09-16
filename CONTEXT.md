@@ -13,7 +13,7 @@ _Avoid_: shot, take, file
 
 **Source**: the untouched recording. Read-only. _Avoid_: original, raw, master
 
-**Baseline**: a clip after the CST and colour tags, nothing else. _Avoid_: CST output, neutral
+**Baseline**: a clip after the conversion and colour tags, nothing else. _Avoid_: neutral
 
 **Master**: a clip's graded ProRes, the only file a re-export starts from. _Avoid_: final, graded master
 
@@ -30,22 +30,23 @@ _Avoid_: format, cut, version
 _Avoid_: draft, test render
 
 **Preview**: the still the app shows while a control moves. It covers the grade only (correction,
-halation, CST, look, print, hue curves, tone, trims), not grain, sharpening, denoise, stabilisation or dither.
+halation, conversion, look, print, hue curves, tone, trims), not grain, sharpening, denoise, stabilisation or dither.
 A proof answers "is this deliverable"; a preview answers "is this the grade".
 
 ## The grade
 
-**CST**: Apple's Log→Rec.709 conversion, the transform itself. _Avoid_: "the Apple LUT" (there are two)
-
-**Conversion**: what `convert.cube` names: the CST, or a film cube from `luts/film/` that renders a
-stock's negative and scan scene-referred, in place of the CST, look, print and tone together.
+**Conversion**: what `convert.cube` names — the app's own rendering of Apple Log
+(`luts/rendering/neutral.cube`), or a film cube from `luts/film/` that renders a stock's negative and
+scan in its place. Either takes the log picture to the display in one scene-referred step. Apple's
+own cube was the third option until it was dropped. _Avoid_: CST, "the Apple LUT"
 
 **Film preset**: a complete look file in `presets/` built on a film conversion. _Avoid_: film look
 (that is the Look stage)
 
 **Look**: the film-emulation LUT: colour character, almost no contrast. _Avoid_: preset, style, grade
 
-**Halation**: the warm glow past bright edges, added in linear light before the CST. _Avoid_: bloom
+**Halation**: the warm glow past bright edges, added in linear light before the conversion.
+_Avoid_: bloom
 
 **Print**: the print-film LUT (Kodak 2383 and kin), after the look and before the tone, with a
 strength. _Avoid_: second look, output LUT
@@ -55,8 +56,9 @@ and before the tone (`make-hue-lut.py`). Distinct from the trims' global saturat
 
 **Tone**: the generated luma curve that gives density. _Avoid_: S-curve, tone map, grade
 
-**Correction**: the input stage: exposure, white balance and wheels, applied in Apple Log before the
-CST. Left out of the graph when neutral. _Avoid_: colour correction, input LUT
+**Correction**: the input stage: exposure, white balance and wheels, applied in Apple Log before
+the conversion, and what each clip's metering is added to. Left out of the graph when neutral.
+_Avoid_: colour correction, input LUT
 
 **Grade**: correction + halation + look + print + hue curves + tone + trims: the whole creative transform.
 _Avoid_: look, edit
@@ -64,8 +66,8 @@ _Avoid_: look, edit
 **Colour correction**: moving colour toward its measured spec. Not the correction stage.
 
 **Filmic route**: the abandoned log → linear → filmic tone map → Rec.709 approach
-(`make-filmic-lut.py`). It lost on colour to Apple's CST, having no gamut handling; the film
-conversions carry one. "Tone map" belongs to it.
+(`make-filmic-lut.py`). It lost on colour to Apple's cube, having no gamut handling; the renderings
+that replaced that cube carry one. "Tone map" belongs to it.
 
 ## Measurement
 

@@ -14,5 +14,5 @@ and identical packet-stream hashes, with no `-bitexact`. This ffmpeg build stamp
 the container. If a future build does, compare `ffmpeg -i out.mp4 -map 0 -c copy -f md5 -` instead
 of the files.
 
-Apple's two conversion cubes are gitignored here for the same licensing reason as there
-(`luts/apple/SOURCE.txt`).
+Apple's conversion cubes were gitignored here for a licensing reason, as they are there. This
+repo no longer uses them: it renders Apple Log itself (`scripts/make-rendering-lut.py`).

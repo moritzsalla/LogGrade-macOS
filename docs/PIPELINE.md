@@ -6,9 +6,10 @@ ADR 0003.
 
 ## Stages
 
-- **Baseline:** Apple's 65³ `AppleLogToRec709` cube (`interp=tetrahedral`) plus colour tags, and
-  nothing else. No sharpening or denoise before the grade: log looks soft only because it is flat,
-  and early sharpening bakes in halos.
+- **Baseline:** the conversion `convert.cube` names (65³, `interp=tetrahedral`) plus colour tags,
+  and nothing else. No sharpening before the grade: log looks soft only because it is flat, and
+  early sharpening bakes in halos. The log denoise is the one exception, and it runs before the
+  conversion, where the noise is still the sensor's.
 - **Master:** the graded ProRes. Re-export from it, never from a delivered MP4.
 - **Final:** Lanczos downscale, then sharpen (mild, luma only), then grain (a half-resolution plate,
   after the sharpener). Grain before the sharpener gets rung by it.
@@ -58,18 +59,43 @@ overshoots. The curve is applied to luma and the original chroma is kept, via `m
 - `format=yuv444p10le` on both `mergeplanes` branches is required. Without it the error is a bare
   `Invalid argument`.
 
+## Where the picture is lost
+
+One frame of IMG_0625 through the shipped rendering, each stage measured on its own as PSNR in dB
+against the same frame carried in 16 bits. Higher is better; the delivery step dominates everything
+upstream of it.
+
+| Stage | dB | What it means |
+|---|---|---|
+| 4:2:0 against 4:4:4, 8-bit | 42.3 vs 48.9 | chroma subsampling is the largest single loss, and no delivery format avoids it |
+| H.264 CRF 18, 8-bit | 38.2 | the shipped encode, subsampling included |
+| HEVC CRF 18, 10-bit | 40.7 | `DELIVERY_BITS=10`, +2.5 dB for a similar bitrate |
+| 1080p against the 4K master | 38.0 vs 40.1 | `HEIGHT=3840` delivers the full frame, at 2.4x the file |
+| the 65-point cube against the rendering it samples | mean 0.16, worst 8.5 code values | the conversion itself is no longer a bottleneck |
+
+Rejected on these numbers: subsampling chroma in 16 bits before the dither rather than after it
+(0.02 dB on the real chain, against 1.35 dB on a synthetic 8-bit input — the gain was the test's,
+not the chain's).
+
 ## Tried and rejected
 
-- **Colour correction toward spec.** Apple's CST already lands the colour: traffic blue measured
-  B/G 1.99 against a 1.98 spec with nothing applied. Every correction tried moved a reference off
-  spec. The flatness was tone, not colour. This was measured on one shoot's signage, and the
-  partner's scans are the reference now.
+- **Colour correction toward spec.** Apple's cube landed the colour on its own: traffic blue
+  measured B/G 1.99 against a 1.98 spec with nothing applied, and every correction tried moved a
+  reference off spec. The flatness was tone, not colour. Measured on one shoot's signage.
 - **The filmic route** (`make-filmic-lut.py`, log → linear → filmic → Rec.709). It gave a better
   tone range, but lost on colour. A per-channel curve cannot do a BT.2020 gamut matrix, so it
   desaturated, and the compensating saturation overshot blue to 2.45.
-- **Grading after Apple's CST for a film look.** The CST lands log 0.75–1.0 on output 0.89–1.0, so
-  a look after it works on highlights already squeezed; a scene-referred rendering of the same
-  frame measured 38% more sky contrast at matched colour. The film presets replace the CST instead.
+- **Apple's `AppleLogToRec709` cube, and grading after it.** It lands log 0.75–1.0 on output
+  0.89–1.0, so anything after it works on highlights already squeezed; a scene-referred rendering
+  of the same frame measured 38% more sky contrast at matched colour. Its licence also forbade
+  redistribution, so every install had to fetch it by hand. Dropped: `luts/rendering/neutral.cube`
+  renders the log picture instead (`scripts/make-rendering-lut.py`), and the film cubes do the same
+  through a stock.
+- **A hard gamut fit** (scale chroma back only once a colour crosses the Rec.709 boundary). It
+  leaves a kink exactly where it engages: along a ramp into saturated green the rendering stepped
+  10.5× its own average there, and a 65-point cube cannot carry that shape — tetrahedral
+  interpolation read up to 23 code values from the exact rendering, against 8.5 once the fit eased
+  smoothly toward the boundary instead.
 - **Kodak 2383/2393 print on Vision3 for the large-format look.** Authentic, but the sky went cream
   and reds muted. The preset scans the negative instead (`luts/film/CHANGELOG.txt`).
 - **A two-point scanner balance** (mid grey and +2 stops) left a stock's fogged toe magenta. The

@@ -128,9 +128,9 @@ func strip(graded: Bool, height: Int) -> [(CGFloat, CGFloat, CGFloat)] {
         // REFUSED RATHER THAN SKIPPED. Leaving the conversion out used to be silent, which drew
         // the log ramp beside a tone-curved log ramp and called that the grade. The cube is not
         // in git (Apple's licence), so a fresh clone reaches this.
-        let cst = root.appendingPathComponent("luts/apple/AppleLogToRec709-v1.0.cube").path
+        let cst = root.appendingPathComponent("luts/rendering/neutral.cube").path
         guard FileManager.default.fileExists(atPath: cst) else {
-            fail("Apple's conversion LUT is missing (\(cst)); see luts/apple/SOURCE.txt")
+            fail("the rendering cube is missing (\(cst))")
         }
         graph = "[0:v]\(gradedChain(cst: cst))[o]"
     }

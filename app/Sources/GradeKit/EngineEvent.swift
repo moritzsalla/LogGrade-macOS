@@ -116,8 +116,6 @@ public enum EngineCode: Equatable {
     case unknownDeliverable
     case noDeliverables
     case unknownMatchMode
-    case batchWithoutMeasurement
-    case batchUnderFilmConversion
     case notFound
     case noArguments
     case proofAndFrameTogether
@@ -144,8 +142,6 @@ public enum EngineCode: Equatable {
         "REFUSE_DELIVERABLE": .unknownDeliverable,
         "REFUSE_NO_DELIVERABLES": .noDeliverables,
         "REFUSE_MATCH_MODE": .unknownMatchMode,
-        "REFUSE_BATCH_NO_PROBE": .batchWithoutMeasurement,
-        "REFUSE_BATCH_FILM": .batchUnderFilmConversion,
         "REFUSE_NOT_FOUND": .notFound,
         "REFUSE_NO_ARGS": .noArguments,
         "REFUSE_PROOF_AND_FRAME": .proofAndFrameTogether,
@@ -187,11 +183,7 @@ public enum EngineCode: Equatable {
         case .noDeliverables:
             return "nothing selected to deliver"
         case .unknownMatchMode:
-            return "the exposure match is off, look.json's reference, or the batch's own median"
-        case .batchWithoutMeasurement:
-            return "no clip in this run could be measured, so there is nothing to match to"
-        case .batchUnderFilmConversion:
-            return "a film preset meters each clip on its own — use the exposure match or none"
+            return "exposure metering is either on or off"
         case .notFound: return "that file is not there"
         case .noArguments: return "no clips given"
         case .proofAndFrameTogether:

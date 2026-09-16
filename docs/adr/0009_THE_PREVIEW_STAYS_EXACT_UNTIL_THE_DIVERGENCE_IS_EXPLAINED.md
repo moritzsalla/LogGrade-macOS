@@ -26,8 +26,9 @@ exact-equivalence test, not a tolerance:
 - **`CorrectionCube`** replaces a 419ms `make-correct-lut.py` call (1.4ms). All 107,811 numbers
   agree to the last `Float` unit.
 - **`ToneCurve.generated`** replaces `make-tone-lut.py` (~100ms → 0.12ms), across all 4096 entries.
-- **`ToneCurve.solvedGamma`** replaces `solve-gamma.py`. Without the solve, the preview's curve is
-  more than four code values out. `LiveGradeTests` asserts both directions.
+- **The exposure meter** is the engine's: the app reads what `grade.sh` metered off the event
+  stream rather than measuring the frame twice, and adds it to the correction exactly as the render
+  does (`LiveChainTests`).
 
 The cubes stay data, read from the same files the render hands to `lut3d`. `Cube3D` does tetrahedral
 interpolation, and `Cube3DTests` measures it against ffmpeg on a deliberately non-smooth cube: on a

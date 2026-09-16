@@ -123,9 +123,10 @@ final class Cube3DTests: XCTestCase {
         let engine = try engineCheckout()
         // Apple's licence keeps this cube out of the repo, so a fresh clone does not have it.
         try XCTSkipUnless(
-            FileManager.default.fileExists(atPath: engine.appleCube.path),
-            "Apple's conversion cube is absent — see luts/apple/SOURCE.txt")
-        let conversion = try Cube3D(contentsOf: engine.appleCube)
+            FileManager.default.fileExists(atPath: engine.renderingCubes.path),
+            "the shipped rendering is absent")
+        let conversion = try Cube3D(
+            contentsOf: try XCTUnwrap(engine.conversionCube(named: Look.neutralConversion)))
         XCTAssertEqual(conversion.size, 65)
         XCTAssertEqual(conversion.samples.count, 65 * 65 * 65)
         // Black stays near black and white lands near white, which is the cheapest possible check

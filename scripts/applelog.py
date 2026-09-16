@@ -8,8 +8,8 @@ tests, not by a tolerance.
 
 The constants are from Apple's Log Profile white paper: a parabolic toe below a small threshold,
 which is what lets the format hold negative scene values, and a log curve above it.
-luts/apple/SOURCE.txt carries the provenance, and the correction to this repo's earlier claim that
-the function was proprietary.
+Apple's Log Profile white paper carries the provenance, and the correction to this repo's earlier
+claim that the function was proprietary.
 
 Measured: encode(decode(p)) round-trips to 8e-17 across 0..1, and decode(1.0) is 12.0000 — twelve
 times diffuse white, about 3.6 stops above it, which the Rec.709 conversion has to land on a display

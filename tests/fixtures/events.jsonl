@@ -1,6 +1,6 @@
 {"event":"disk","dir":"<WORK>/dist","available_gb":"<GB>","wanted_gb":10}
-{"event":"run_start","clips":2,"saturation":1.27,"warmth":0.005,"grain":8,"stabilisation":1,"exposure_match":0,"exposure_reference":609,"deliverables":"reels","proof":0,"dry":1,"report":"<REPORT>","out_dir":"<WORK>/dist/03-final"}
+{"event":"run_start","clips":2,"saturation":1.0,"warmth":0.0,"grain":3,"stabilisation":1,"exposure_match":0,"exposure_reference":-0.4,"deliverables":"reels","proof":0,"dry":1,"report":"<REPORT>","out_dir":"<WORK>/dist/03-final"}
 {"event":"clip_skipped","clip":"BROKEN","code":"REFUSE_UNMEASURED","source":"<WORK>/src/BROKEN.mov"}
 {"event":"stabilisation","clip":"TALL","state":"none","transform":"<WORK>/dist/stab/TALL.trf"}
-{"event":"clip_planned","clip":"TALL","source":"<WORK>/src/TALL.mov","yavg":"-","gamma":2.02,"matched":0,"fps":"24/1","width":72,"height":128,"metered_exposure":0,"metered_temp":0,"metered_tint":0}
+{"event":"clip_planned","clip":"TALL","source":"<WORK>/src/TALL.mov","fps":"24/1","width":72,"height":128,"metered_exposure":0,"metered_temp":0,"metered_tint":0}
 {"event":"run_done","rendered":0,"skipped":1,"failed":0,"report":"<REPORT>"}

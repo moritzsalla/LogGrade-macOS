@@ -21,43 +21,29 @@ set -euo pipefail
 LIB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOOK_FILE="${LOOK_FILE:-$LIB_ROOT/look.json}"
 
-# Apple's Log -> Rec.709 conversion. It is NOT in this repo — Apple's licence does not permit
-# redistributing it (luts/apple/SOURCE.txt) — so a fresh clone has no such file.
-#
-# Every stage that needs it checks for it up front, because the ways a missing cube surfaces
-# otherwise are not all loud. The exposure probe runs it inside a pipeline ending in `|| true`, so
-# a missing cube there comes back as an empty measurement and every clip silently gets the
-# reference gamma: a plan that looks complete and matched nothing.
-APPLE_CST="$LIB_ROOT/luts/apple/AppleLogToRec709-v1.0.cube"
-require_apple_cst() {
-	[ -f "$APPLE_CST" ] && return 0
-	echo "Apple's Log->Rec709 LUT is missing:" >&2
-	echo "  $APPLE_CST" >&2
-	echo "It is deliberately not committed — Apple's licence does not permit redistributing it." >&2
-	echo "Download it (free Apple ID, ~2 min) per luts/apple/SOURCE.txt, then re-run." >&2
-	return 1
-}
+# THE CONVERSION out of Apple Log, as look.json's convert.cube names it: a cube in luts/rendering/
+# (this app's own, scripts/make-rendering-lut.py) or in luts/film/ (a stock, luts/film/CHANGELOG.txt).
+# Either renders the log picture in ONE scene-referred step, so nothing downstream works on
+# highlights a conversion has already squeezed. Apple's own cube was the third option and is gone:
+# it spent log 0.75-1.0 on output 0.89-1.0 before any grade saw it, and its licence forbade
+# redistributing it, so every install had to download it by hand. An unknown name stops the run.
+CONVERSION_DIRS="rendering film"
 
-# The conversion out of Apple Log, as look.json's convert.cube names it: "apple" is Apple's cube
-# above, any other name a film cube in luts/film/. A film cube is the conversion AND the stock's
-# tone and colour in one scene-referred step (luts/film/CHANGELOG.txt), so it replaces Apple's cube
-# rather than following it: graded after Apple's cube, a look works on highlights that cube has
-# already squeezed into the top tenth of the range. An unknown name stops the run.
-resolve_conversion() {  # resolve_conversion <apple|film-stem>  -> a path, or refuses
+resolve_conversion() {  # resolve_conversion <cube-stem>  -> a path, or refuses
+	local dir
 	case "$1" in
-		apple)
-			require_apple_cst || return 1
-			printf '%s\n' "$APPLE_CST";;
 		*/*|.*|'')
-			echo "convert.cube must be 'apple' or a cube name in luts/film/: got '$1'" >&2
+			echo "convert.cube must be a cube name in luts/rendering/ or luts/film/: got '$1'" >&2
 			return 1;;
-		*)
-			[ -f "$LIB_ROOT/luts/film/$1.cube" ] || {
-				echo "convert.cube: no luts/film/$1.cube" >&2
-				return 1
-			}
-			printf '%s\n' "$LIB_ROOT/luts/film/$1.cube";;
 	esac
+	for dir in $CONVERSION_DIRS; do
+		if [ -f "$LIB_ROOT/luts/$dir/$1.cube" ]; then
+			printf '%s\n' "$LIB_ROOT/luts/$dir/$1.cube"
+			return 0
+		fi
+	done
+	echo "convert.cube: no $1.cube in luts/rendering/ or luts/film/" >&2
+	return 1
 }
 
 # Denoise in Apple Log, before the correction and the conversion, where the noise is still the
@@ -74,10 +60,10 @@ denoise_prefix() {  # denoise_prefix <strength>  -> a prefix with its trailing c
 	}'
 }
 
-# Exposure and white balance for a clip under a film conversion, metered in scene-linear light
+# Exposure and white balance for a clip under a scene-referred conversion, metered in linear light
 # (scripts/solve-exposure.py) from one decoded frame. Prints "<stops> <temp> <tint>"; an unreadable
 # frame is "0 0 0", which is no correction rather than a failed batch.
-probe_film_exposure() {  # probe_film_exposure <src> <reference-stops>
+probe_scene_exposure() {  # probe_scene_exposure <src> <reference-stops>
 	ffmpeg -v error -ss 1 -i "$1" -frames:v 1 -vf "scale=160:160:flags=area,format=gbrpf32le" \
 		-f rawvideo - 2>/dev/null | "$LIB_ROOT/scripts/solve-exposure.py" 160 160 "$2"
 }
@@ -601,7 +587,7 @@ tone_shape_args() {  # tone_shape_args  -> "--pivot P --contrast C --toe T --sho
 }
 
 # The input correction. The size is a render setting rather than a look value, so it is not here.
-# The optional three are a clip's metered exposure, temp and tint (probe_film_exposure), ADDED to
+# The optional three are a clip's metered exposure, temp and tint (probe_scene_exposure), ADDED to
 # look.json's, so a hand correction still moves a metered clip the way it moves any other.
 correction_args() {  # correction_args [stops temp tint]  -> "--exposure E ... --lum-mix L"
 	local exposure temp tint slope offset power lum_mix
@@ -837,17 +823,6 @@ crop_description() {  # crop_description "crop=W:H:X:Y,"  -> text
 # per-clip match and the batch reference. Two copies of this string is how the INFO-level bug would
 # come back in one of them.
 #
-# `-ss 1` and `scale=320:-1` came over from the precursor as they were and have not been re-measured
-# here. The seek has one consequence worth knowing: a clip shorter than a second measures nothing,
-# so it silently gets the reference gamma — which is why the suite's probe fixtures are two seconds
-# long. Nothing records why 320. Every matched clip's gamma is solved from this number, so a change
-# to either is a change to the grade.
-probe_yavg() {  # probe_yavg <src> <cst-cube>  -> the mean, or empty
-	ffmpeg -v error -ss 1 -i "$1" -frames:v 1 \
-		-vf "lut3d=file='${2}':interp=tetrahedral,scale=320:-1,signalstats,metadata=print:file=-" \
-		-f null - 2>/dev/null | grep -m1 -oE 'YAVG=[0-9.]+' | cut -d= -f2 || true
-}
-
 # --- deliverables -------------------------------------------------------------------------
 # A deliverable was two names with their sizes written into a `case` branch, so "any other shape"
 # meant editing the pipeline. It is DATA now: an aspect, an optional crop offset, and a name that

@@ -98,7 +98,7 @@ def main(argv):
 	data.frombytes(sys.stdin.buffer.read())
 	plane = w * h
 	if len(data) < 3 * plane:
-		# An unreadable frame is no correction, the same answer solve-gamma.py gives a bad probe.
+		# An unreadable frame is no correction rather than a failed batch.
 		print("0 0 0")
 		return 0
 	g, b, r = data[0:plane], data[plane:2 * plane], data[2 * plane:3 * plane]

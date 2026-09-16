@@ -138,6 +138,7 @@ final class LookTests: XCTestCase {
         XCTAssertTrue(off.correct.isNeutral)
         XCTAssertTrue(off.halation.isNeutral)
         XCTAssertEqual(off.lookLUT, "none")
+        XCTAssertEqual(off.convertCube, Look.neutralConversion, "the film stock stayed in")
         XCTAssertEqual(off.printLUT, "none")
         XCTAssertEqual(off.colour, Look.Colour(saturation: 1, warmth: 0))
         XCTAssertEqual(off.grainStrength, 0)
@@ -146,9 +147,6 @@ final class LookTests: XCTestCase {
             XCTAssertEqual(
                 curve.value(at: x), x, accuracy: 1e-3, "tone off is not identity at \(x)")
         }
-        XCTAssertFalse(
-            Look.matchesExposure(bypassing: [.tone]),
-            "matching would re-solve the identity gamma into a curve")
         XCTAssertFalse(
             Look.finishes(bypassing: [.delivery]),
             "the sharpener and denoise are not look values, so zero grain alone still finishes")
@@ -217,14 +215,15 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(written?["version"] as? Int, 4)
     }
 
-    /// A project saved before the conversion and finish existed rendered through Apple's cube with
-    /// the finish the engine then hardcoded, and opens meaning exactly that.
-    func testAProjectFromBeforeTheConversionOpensOnApplesCube() throws {
+    /// A project saved before the conversion and finish existed rendered through Apple's cube,
+    /// which is gone: it opens on this app's own rendering, with the finish the engine hardcoded.
+    func testAProjectFromBeforeTheConversionOpensOnTheAppsRendering() throws {
         var preset =
             try JSONSerialization.jsonObject(with: try aLook().serialised())
             as? [String: Any] ?? [:]
         preset.removeValue(forKey: "convert")
         preset.removeValue(forKey: "finish")
+        // What such a file carried instead: the post-Apple-cube mean, and no metering reference.
         preset["match"] = ["reference_yavg": 609]
         func project(version: Int) throws -> Data {
             try JSONSerialization.data(withJSONObject: [
@@ -233,8 +232,8 @@ final class ProjectTests: XCTestCase {
             ])
         }
         let look = try XCTUnwrap(try Project(data: try project(version: 2)).presets.first?.look)
-        XCTAssertEqual(look.convertCube, Look.appleConversion)
-        XCTAssertFalse(look.isFilmConversion)
+        XCTAssertEqual(look.convertCube, Look.neutralConversion)
+        XCTAssertEqual(look.matchReferenceStops, Look.defaultReferenceStops)
         XCTAssertEqual(look.finish, Look.Finish(denoise: 0, sharpen: 0.6, gauge: "none"))
         XCTAssertThrowsError(
             try Project(data: try project(version: 3)),
@@ -307,10 +306,10 @@ final class LookEngineIntegrationTests: XCTestCase {
         }
         try XCTSkipIf(!engine.preflight().isEmpty, "engine preflight not clean")
 
-        // A gamma nothing in the repo contains, so a pass can only come from the engine reading
-        // the file this test wrote.
+        // A saturation nothing in the repo contains, so a pass can only come from the engine
+        // reading the file this test wrote and reporting it back.
         var look = try Look(data: try Data(contentsOf: engine.lookFile))
-        look.tone.gamma = 1.61
+        look.colour.saturation = 1.61
         let lookFile = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("\(UUID().uuidString)-look.json")
         try look.write(to: lookFile)
@@ -329,11 +328,11 @@ final class LookEngineIntegrationTests: XCTestCase {
                 "DRY": "1", "MATCH": "0", "STAB": "0",
             ])
         XCTAssertTrue(outcome.succeeded, "engine said: \(outcome.stderrText)")
-        let planned = try XCTUnwrap(
-            outcome.events.first { $0.name == "clip_planned" },
-            "no plan in: \(outcome.events.map(\.name))")
+        let start = try XCTUnwrap(
+            outcome.events.first { $0.name == "run_start" },
+            "no run in: \(outcome.events.map(\.name))")
         XCTAssertEqual(
-            planned.double("gamma"), 1.61,
+            start.double("saturation"), 1.61,
             "the engine did not read the look the app wrote")
         XCTAssertTrue(
             outcome.malformed.isEmpty,

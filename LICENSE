@@ -16,9 +16,6 @@ Two things this licence does NOT cover:
     https://github.com/YahiaAngelo/Film-Luts and are MIT licensed; their terms
     are in luts/looks/LICENSE_FILM_LUTS.txt and they continue to apply,
     including for commercial use. Nothing here narrows them.
-  * Apple's Log-to-Rec.709 conversion LUT is deliberately not in this repository
-    at all, because Apple's licence does not permit redistributing it. See
-    luts/apple/SOURCE.txt for how to obtain it.
 
 ----------------------------------------------------------------------------
 
