@@ -76,7 +76,7 @@
     "smoothing": 30
   },
   "match": {
-    "reference_stops": -0.4
+    "reference_stops": 0.0
   },
   "finish": {
     "denoise": 0,
