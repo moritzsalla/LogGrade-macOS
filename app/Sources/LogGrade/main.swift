@@ -201,7 +201,6 @@ struct RootView: View {
         .onTapGesture {
             guard entry.isUsable, let grade else { return }
             grade.selectedClip = entry
-            grade.renderPreview()
         }
         .overlay(Rectangle().fill(Palette.hairline).frame(height: 1), alignment: .bottom)
     }

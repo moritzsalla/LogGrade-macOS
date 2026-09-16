@@ -40,8 +40,8 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
    Measured on the Intel Mac: an AVFoundation 10-bit 4K frame decodes in 0.10-0.19 s (ProRes),
    0.9 s (HEVC, first read); a Core Image 65³ cube at 2560x1440 takes 80 ms.
    - **Import:** one ffprobe per clip, clips probed in parallel.
-   - **Preview:** AVFoundation decode and one shared GPU grade chain in GradeKit; the engine FRAME
-     render becomes a background confirmation.
+   - **Preview:** done on the CPU (decode, meter and grade in-process, no engine render; ADR 0009).
+     Left: the grade chain on the GPU, shared with Export.
    - **Export:** AVAssetReader, the same chain, the delivery stage, VideoToolbox H.264/HEVC through
      AVAssetWriter. ProRes, stabilisation and Super 8's gauge stay on grade.sh until at parity.
 2. **Portra 160, now, against public lab scans**; the partner's scans when they arrive. The user

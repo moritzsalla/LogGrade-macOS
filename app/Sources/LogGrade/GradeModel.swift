@@ -15,24 +15,23 @@ final class GradeModel: ObservableObject {
     /// what made a drag feel slow even though grading the frame took four milliseconds.
     let preview = LivePreview()
     // ONE PLACE, not every call site. A clip becomes the selected one from a drop, a click, the
-    // arrow keys and an opened project, and the live tier needs its source frame however it got
-    // there. Hanging it off the property means a new path cannot forget.
-    @Published var selectedClip: ClipList.Entry? { didSet { prepareLivePreview() } }
+    // arrow keys and an opened project, and each needs its picture however it got there. Hanging
+    // it off the property means a new path cannot forget.
+    @Published var selectedClip: ClipList.Entry? {
+        didSet {
+            renderPreview()
+            if isComparing {
+                preview.baseline = nil
+                prepareBaseline()
+            }
+        }
+    }
     let previewSeconds: Double = 1
     /// Held down rather than clicked. A colourist compares by holding a key and letting go, which
     /// is what the Bench did too; a long press on a label was undiscoverable and awkward.
     @Published var isComparing = false
-    /// The look the last ENGINE render used. Comparing it with the current one is how the panel
-    /// knows the exact frame is out of date. The live tier keeps the picture current in between,
-    /// so this is about which of the two you are looking at rather than about a stale picture.
-    @Published private(set) var renderedLook: Look?
 
-    var isStale: Bool {
-        guard let rendered = renderedLook, preview.image != nil else { return false }
-        return rendered != effectiveLook
-    }
-
-    /// Stages switched off in the inspector. Everything that renders — live, exact and export —
+    /// Stages switched off in the inspector. Everything that renders — the preview and the export —
     /// reads `effectiveLook`, so what you see with a stage off is what the shoot renders.
     ///
     /// NOT SAVED, deliberately: not in the preset, the project or the defaults. A bypass left on
@@ -59,7 +58,6 @@ final class GradeModel: ObservableObject {
 
     func setMatch(_ on: Bool) {
         adjust.match = on
-        liveUpdate()
         renderPreview()
     }
 
@@ -68,7 +66,6 @@ final class GradeModel: ObservableObject {
     func setEnabled(_ stage: Look.Stage, _ enabled: Bool) {
         if enabled { bypassed.remove(stage) } else { bypassed.insert(stage) }
         refreshCurve()
-        liveUpdate()
         renderPreview()
     }
 
@@ -97,28 +94,43 @@ final class GradeModel: ObservableObject {
         UserDefaults.standard.set(Array(openStages), forKey: DefaultsKey.openStages)
     }
 
-    // MARK: - the live tier
+    // MARK: - the preview
 
     /// The clip as the camera recorded it, decoded and resampled and nothing else. Every stage of
-    /// the grade is applied to this in-process while a control moves, so the picture follows the
-    /// pointer and the render on release confirms it.
+    /// the grade is applied to this in-process, for a drag and for the picture after it alike.
     ///
-    /// IT DOES NOT DEPEND ON THE LOOK, which is the point. The earlier tier graded a frame the
-    /// engine had already converted, so the correction stage — which runs BEFORE that conversion —
-    /// could not be shown at all, and any change to it meant rendering a new base. This one is the
-    /// clip, so it is fetched once per clip and per timecode and nothing else invalidates it.
+    /// IT DOES NOT DEPEND ON THE LOOK, which is the point. The correction stage runs before Apple's
+    /// conversion, so a preview built on a converted frame could not show it. This is the clip, so
+    /// it is fetched once per clip and per timecode and nothing else invalidates it.
+    ///
+    /// NO ENGINE RENDER BEHIND IT. Release, selection and a preset used to wait 2–4 s for
+    /// `grade.sh FRAME` at 1440 lines. `LiveChainTests` holds this grade to that render (ADR 0009),
+    /// so the preview is this grade and nothing replaces it.
     private var sourceImage: CGImage?
     private var sourceClip: URL?
     private var sourceSeconds: Double?
-    private var isFetchingSource = false
-    private static let sourceFrameHeight = 480
-    /// Each clip's decoded frame, by stem, as the engine reported it. What decides which shapes
-    /// crop a clip and along which axis; see `cropGeometry`.
+    /// The frame being decoded. One at a time: its landing re-checks the selection.
+    private var fetchingSource: (clip: URL, seconds: Double)?
+    /// 1080 lines: a landscape 4K clip grades in ~55 ms, ~125 ms with halation, on the Intel Mac
+    /// in release. At 1440 the same was ~100 ms and up to 0.35 s. Decoding costs 0.35–0.9 s at
+    /// any height, which is why decoded frames are kept.
+    private static let sourceFrameHeight = 1080
+    /// Recently viewed clips' frames, newest last, so switching back does not decode again.
+    /// ~16 MB each at 1920x1080 (16-bit RGBA).
+    private var recentSources: [DecodedSource] = []
+    private static let recentSourceLimit = 8
+    private struct DecodedSource {
+        let clip: URL
+        let seconds: Double
+        let image: CGImage
+    }
+    /// Each clip's decoded frame, by stem. What decides which shapes crop a clip and along which
+    /// axis; see `cropGeometry`.
     @Published private(set) var frameSizes: [String: FrameSize] = [:]
     // TOUCHED ONLY ON `liveQueue`, from here to `convertedFrom`. They were built on the main
     // thread, and the correction cube alone costs 10 ms on the Intel Mac — every tick of an
-    // Exposure drag, which spent the frame the slider's thumb needed to redraw. The queue is not
-    // what makes this serial: `gradeInFlight` allows one grade at a time, so no two jobs overlap.
+    // Exposure drag, which spent the frame the slider's thumb needed to redraw. `liveQueue` is
+    // serial, so no two grades touch them at once.
 
     /// Conversion cubes, read on first use and kept. There are a handful.
     private var filmCubeCache: [URL: Cube3D] = [:]
@@ -131,7 +143,7 @@ final class GradeModel: ObservableObject {
     private var hueFor: Look.Hue?
     private var gradeCurve: ToneCurve?
     private var gradeCurveFor: Look.Tone?
-    /// The engine's own default (`CORRECT_SIZE` in grade.sh), because the live picture has to be
+    /// The engine's own default (`CORRECT_SIZE` in grade.sh), because the preview has to be
     /// built from the cube the render builds. The error at 17, 33 and 65 is measured in
     /// `make-correct-lut.py`.
     private static let correctionCubeSize = 33
@@ -161,6 +173,15 @@ final class GradeModel: ObservableObject {
         }
     }
 
+    /// Everything a graded picture depends on. Two requests with the same key are the same pixels.
+    private struct FrameKey: Equatable {
+        let clip: URL
+        let seconds: Double
+        let look: Look
+        /// Nil when the grade is unmetered: matching off, or a meter that failed.
+        let metered: PreviewRenderer.Metered?
+    }
+
     /// The rendering or a film stock, cached: each is 65 points, and parsing one costs more than a
     /// frame does, so it is read once rather than on a drag. Keyed by the resolved file, which is
     /// unique across `luts/rendering/` and `luts/film/` where a stem need not be.
@@ -176,48 +197,69 @@ final class GradeModel: ObservableObject {
         return cube
     }
 
-    /// Called when the selection or the preview timecode changes. Fetches the frame the live tier
-    /// grades, so the controls work before anything has been rendered.
-    func prepareLivePreview() {
+    /// Makes the selected clip's source frame the one graded: from `recentSources` at once, or
+    /// decoded. The meter reading is started beside the decode, not after it.
+    private func prepareSource() {
         guard let clip = selectedClip, clip.isUsable else { return }
-        guard sourceClip != clip.url || sourceSeconds != previewSeconds else { return }
-        guard !isFetchingSource else { return }
-        isFetchingSource = true
         let seconds = previewSeconds
-        let look = self.look
-        queue.async { [weak self] in
-            self?.refreshSource(for: clip, seconds: seconds, look: look)
+        _ = metering(for: effectiveLook, clip: clip.url, match: matches)
+        guard !isLiveHere else { return }
+        if let index = recentSources.firstIndex(where: {
+            $0.clip == clip.url && $0.seconds == seconds
+        }) {
+            let recent = recentSources.remove(at: index)
+            recentSources.append(recent)
+            useSource(recent)
+            return
+        }
+        guard fetchingSource == nil else { return }
+        fetchingSource = (clip.url, seconds)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let decoded = Result {
+                try NativeSource.frame(of: clip.url, at: seconds, height: Self.sourceFrameHeight)
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.fetchingSource = nil
+                let selected = self.selectedClip?.url == clip.url
+                switch decoded {
+                case .success(let frame):
+                    self.frameSizes[clip.stem] = frame.sourceSize
+                    let recent = DecodedSource(clip: clip.url, seconds: seconds, image: frame.image)
+                    self.recentSources.append(recent)
+                    if self.recentSources.count > Self.recentSourceLimit {
+                        self.recentSources.removeFirst()
+                    }
+                    if selected { self.useSource(recent) }
+                case .failure(let error):
+                    // SAID, not only reset: controls that answer nothing with no reason given
+                    // read as the app being slow rather than as a clip it cannot read.
+                    if selected {
+                        self.preview.isRendering = false
+                        self.preview.isOutOfDate = self.preview.image != nil
+                        self.preview.say(
+                            "The preview couldn’t read this clip: \(error)", failure: true)
+                    }
+                }
+                // The selection moved on while this decoded.
+                if !selected { self.prepareSource() }
+            }
         }
     }
 
-    /// A control went under the pointer.
-    ///
-    /// The render in flight is for a look nobody wants any more — the person is already moving
-    /// away from it — so it is stopped here rather than left to finish and be discarded. Without
-    /// this, letting go and immediately grabbing again gives three dead seconds.
-    func beginDrag() {
-        stopRender()
-    }
-
-    private func stopRender() {
-        // Unless nothing is live yet for THIS clip at THIS timecode. `sourceImage` alone is not
-        // that question: right after a clip switch it still holds the previous clip's frame, so
-        // checking it cancelled the very render that would have fetched the new one, and grabbing
-        // a control every couple of seconds kept live from ever starting.
-        guard preview.isRendering, isLiveHere else { return }
-        previewGeneration += 1
-        if let running = previewProcess, running.isRunning { EngineRun.stop(running) }
-        preview.isRendering = false
+    private func useSource(_ source: DecodedSource) {
+        sourceImage = source.image
+        sourceClip = source.clip
+        sourceSeconds = source.seconds
+        startGradeIfIdle()
+        if isComparing { prepareBaseline() }
     }
 
     private var isLiveHere: Bool {
         sourceImage != nil && sourceClip == selectedClip?.url && sourceSeconds == previewSeconds
     }
 
-    /// The look the engine render in flight was asked for.
-    private var renderingLook: Look?
-
-    /// What the live tier is currently grading, and what it should be grading.
+    /// What is graded, and what should be.
     ///
     /// COALESCED, not queued. A drag emits control changes faster than a frame can be graded, and
     /// queueing them means every frame after the first answers a question the pointer has already
@@ -227,38 +269,55 @@ final class GradeModel: ObservableObject {
     /// the pointer, whatever the frame costs.
     private var gradeInFlight = false
     private var pendingLook: Look?
+    /// Which request is current. A grade that lands after a cached picture was shown is answering
+    /// a question nobody is still asking.
+    private var previewGeneration = 0
+    /// The look a release, a selection or a preset asked for. The picture of it is kept in
+    /// `finishedFrames`; the frames of a drag are not, or they would push out every clip's.
+    private var settleLook: Look?
+    private var displayed: FinishedFrame?
 
     /// Follows the controls.
     ///
     /// EVERY CHANGE, not only a drag. This used to require the pointer to be down, which meant
-    /// picking a preset skipped the live tier entirely and cost a three-second
-    /// engine render to see — the slowest thing in the app, for the control with the biggest
-    /// effect on the picture.
+    /// picking a preset showed nothing until a render finished.
     func liveUpdate() {
         guard selectedClip != nil else { return }
-        guard isLiveHere else {
-            if isFetchingSource { preview.say("Preparing preview…") }
-            return
-        }
-        // An exact render of an OLDER look would land after this live frame and replace it with
-        // the grade you just moved away from. Only when the look differs: a preset or a reset
-        // fires every slider's onChange after its own `renderPreview`, and that render is current.
-        let wanted = effectiveLook
-        if renderingLook != wanted { stopRender() }
-        pendingLook = wanted
+        pendingLook = effectiveLook
         startGradeIfIdle()
     }
 
     private func startGradeIfIdle() {
-        guard !gradeInFlight, let wanted = pendingLook, let source = sourceImage else { return }
+        guard !gradeInFlight, let wanted = pendingLook, let clip = selectedClip?.url else { return }
+        guard isLiveHere, let source = sourceImage, let seconds = sourceSeconds else {
+            if fetchingSource != nil { waiting() }
+            return
+        }
+        let metered: PreviewRenderer.Metered?
+        let unmetered: Bool
+        switch metering(for: wanted, clip: clip, match: matches) {
+        case .off:
+            (metered, unmetered) = (nil, false)
+        case .reading(let reading):
+            (metered, unmetered) = (reading, false)
+        case .failed:
+            (metered, unmetered) = (nil, true)
+        case .pending:
+            // NOT GRADED UNMETERED IN THE MEANTIME: that picture is not the one the export makes.
+            return waiting()
+        }
         pendingLook = nil
+        let key = FrameKey(clip: clip, seconds: seconds, look: wanted, metered: metered)
+        // A release after a drag, or every slider's onChange after a preset: already on screen.
+        if key == displayed?.key {
+            keepIfSettled()
+            return
+        }
         gradeInFlight = true
-        let metered = matchedMetering
-        // THE CLIP THE FRAME CAME FROM, not the selection: the selection can move on while a grade
-        // of the previous clip's frame is still queued.
-        let sourceLongEdge = sourceClip.flatMap {
-            frameSizes[$0.deletingPathExtension().lastPathComponent]
-        }.map { max($0.width, $0.height) }
+        let generation = previewGeneration
+        // Read now, on the main thread: the selection can move on while this grade is queued.
+        let sourceLongEdge = frameSizes[clip.deletingPathExtension().lastPathComponent]
+            .map { max($0.width, $0.height) }
 
         // OFF THE MAIN THREAD, all of it. The main thread's job during a drag is to redraw the
         // slider; any work here is a frame the thumb doesn't get, which reads as the control being
@@ -267,27 +326,37 @@ final class GradeModel: ObservableObject {
             guard let self else { return }
             let outcome = self.grade(
                 wanted, source: source, metered: metered, sourceLongEdge: sourceLongEdge)
+            let finished = outcome.frame.map { image in
+                FinishedFrame(
+                    key: key,
+                    image: NSImage(
+                        cgImage: LiveChain.forDisplay(image),
+                        size: NSSize(width: image.width, height: image.height)),
+                    scopes: Scopes.measure(image))
+            }
             DispatchQueue.main.async {
                 self.gradeInFlight = false
-                switch outcome {
-                case .refused(let reason):
-                    self.preview.isLive = false
-                    self.preview.say(reason, failure: true)
-                case .graded(let image, let scopes, let tone, let curve):
-                    if tone != self.publishedTone {
-                        self.preview.curve = curve
-                        self.publishedTone = tone
+                if generation == self.previewGeneration, self.selectedClip?.url == clip {
+                    switch outcome {
+                    case .refused(let reason):
+                        self.preview.isRendering = false
+                        self.preview.isOutOfDate = self.preview.image != nil
+                        self.preview.say(reason, failure: true)
+                    case .graded(_, let tone, let curve):
+                        if tone != self.publishedTone {
+                            self.preview.curve = curve
+                            self.publishedTone = tone
+                        }
+                        if let finished { self.show(finished) }
+                        if unmetered {
+                            self.preview.say(
+                                "This clip couldn’t be metered, so the preview shows it unmetered.",
+                                failure: true)
+                        }
+                        self.keepIfSettled()
+                    case .failed:
+                        self.preview.isRendering = false
                     }
-                    self.preview.image = NSImage(
-                        cgImage: LiveChain.forDisplay(image),
-                        size: NSSize(
-                            width: image.width,
-                            height: image.height))
-                    self.preview.scopes = scopes
-                    self.preview.isLive = true
-                    self.preview.say("Live preview. Release to render the exact frame.")
-                case .failed:
-                    break
                 }
                 // Whatever arrived while that ran.
                 self.startGradeIfIdle()
@@ -295,19 +364,50 @@ final class GradeModel: ObservableObject {
         }
     }
 
-    private enum LiveOutcome {
-        case graded(CGImage, Scopes?, Look.Tone, ToneCurve)
-        case refused(String)
-        case failed
+    /// The picture is not yet the one asked for, and the reason is not a failure.
+    private func waiting() {
+        preview.isRendering = true
+        preview.isOutOfDate = preview.image != nil
+        preview.say("Preparing preview…")
     }
 
-    /// One live frame. Runs on `liveQueue`, where the caches it reads live.
+    private func show(_ frame: FinishedFrame) {
+        displayed = frame
+        preview.image = frame.image
+        preview.scopes = frame.scopes
+        preview.isRendering = false
+        preview.isOutOfDate = false
+        preview.say("")
+    }
+
+    private func keepIfSettled() {
+        guard let settle = settleLook, let frame = displayed, frame.key.look == settle,
+            frame.key.clip == selectedClip?.url
+        else { return }
+        settleLook = nil
+        guard !finishedFrames.contains(where: { $0.key == frame.key }) else { return }
+        finishedFrames.append(frame)
+        if finishedFrames.count > Self.finishedFrameLimit { finishedFrames.removeFirst() }
+    }
+
+    private enum LiveOutcome {
+        case graded(CGImage, Look.Tone, ToneCurve)
+        case refused(String)
+        case failed
+
+        var frame: CGImage? {
+            if case .graded(let image, _, _) = self { return image }
+            return nil
+        }
+    }
+
+    /// One graded frame. Runs on `liveQueue`, where the caches it reads live.
     private func grade(
         _ requested: Look, source: CGImage, metered: PreviewRenderer.Metered?,
-        sourceLongEdge: Int? = nil
+        sourceLongEdge: Int?
     ) -> LiveOutcome {
         // The engine adds what it metered to the look's correction before building the cube, so
-        // the live picture does the same.
+        // the preview does the same.
         var wanted = requested
         if let metered { wanted.correct = metered.applied(to: wanted.correct) }
         guard let conversion = conversionCube(for: wanted.convertCube) else {
@@ -320,7 +420,7 @@ final class GradeModel: ObservableObject {
                 : CorrectionCube.cube(for: wanted.correct, size: Self.correctionCubeSize)
             correctionFor = wanted.correct
         }
-        // A correction the engine would refuse gets no live picture, rather than a picture of
+        // A correction the engine would refuse gets no picture, rather than a picture of
         // something it will not render.
         if !wanted.correct.isNeutral && correctionCube == nil {
             return .refused("That correction isn’t a value the engine accepts.")
@@ -371,114 +471,65 @@ final class GradeModel: ObservableObject {
         guard let graded = converted.flatMap({ LiveChain.graded($0, with: grade) }) else {
             return .failed
         }
-        return .graded(graded, Scopes.measure(graded), tone, curve)
+        return .graded(graded, tone, curve)
     }
 
-    /// Fetches the source frame for a clip, and the clip's exposure with it.
-    ///
-    /// ON SELECTION, not after the first exact render. The whole claim of this tier is that you
-    /// pick a clip, grab a control and see the picture move; waiting for a three-second render
-    /// before any of that works is the lag it exists to remove. The frame has no chain on it, so
-    /// it is quick, and `match: true` costs one meter reading, so the first drag already shows
-    /// the exposure the render will apply.
-    ///
-    /// On the same serial queue as every other render, deliberately. Both write `preview-look.json`
-    /// and the per-clip tone cube into one work directory, and two ffmpeg processes racing over
-    /// those is the class of bug this repo keeps finding.
-    ///
-    /// `look` is passed in rather than read here: this runs off the main thread, and reading a
-    /// published property from one races the main thread's writes to it.
-    ///
-    /// METERED HERE, not by the graded render, so the live grade is right the moment it lands and
-    /// the graded render that follows is handed the reading instead of measuring again.
-    ///
-    /// IN THIS PROCESS, NOT THROUGH grade.sh: the frame from AVFoundation (`NativeSource`, held to
-    /// the engine's source frame by `NativeSourceTests`) and the meter from the engine's own
-    /// function (`ExposureMeter`), side by side. It was a 2–3.5 s grade.sh call per selection.
-    @discardableResult
-    private func refreshSource(for clip: ClipList.Entry, seconds: Double, look: Look)
-        -> (size: FrameSize, metered: PreviewRenderer.Metered?)?
-    {
-        var decoded: Result<NativeSource.Frame, Error>?
-        var reading: PreviewRenderer.Metered?
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            decoded = Result {
-                try NativeSource.frame(of: clip.url, at: seconds, height: Self.sourceFrameHeight)
+    // MARK: - metering
+
+    /// A reading counts only against the reference it was solved for: `match.reference_stops`
+    /// differs between Neutral and the film looks, so a preset change can need a new one.
+    private struct MeterKey: Hashable {
+        let clip: URL
+        let referenceStops: Double
+    }
+    /// Three numbers each, so not bounded.
+    private var measuredMetering: [MeterKey: PreviewRenderer.Metered] = [:]
+    /// Not retried on every control change; a new session tries again.
+    private var failedMetering: Set<MeterKey> = []
+    private var meteringInFlight: Set<MeterKey> = []
+
+    private enum Metering {
+        case off
+        case reading(PreviewRenderer.Metered)
+        case failed
+        case pending
+    }
+
+    /// What the grade of `look` on `clip` adds for exposure and white balance, starting a reading
+    /// when there is none. Off when matching is, which is what switches metering off in the export.
+    private func metering(for look: Look, clip: URL, match: Bool) -> Metering {
+        guard match else { return .off }
+        let key = MeterKey(clip: clip, referenceStops: look.matchReferenceStops)
+        if let reading = measuredMetering[key] { return .reading(reading) }
+        if failedMetering.contains(key) { return .failed }
+        guard meteringInFlight.insert(key).inserted else { return .pending }
+        let meter = self.meter
+        // The engine's own function (`ExposureMeter`), ~0.5 s on ProRes; in parallel with a decode.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let reading = try? meter.measure(key.clip, referenceStops: key.referenceStops)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.meteringInFlight.remove(key)
+                // NIL, NOT ZERO, when the meter fails: a zero passed on as a reading would show
+                // the clip unmetered while calling it metered.
+                if let reading {
+                    self.measuredMetering[key] = reading
+                } else {
+                    self.failedMetering.insert(key)
+                }
+                self.startGradeIfIdle()
+                if self.isComparing { self.prepareBaseline() }
             }
-            group.leave()
         }
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            // NIL, NOT ZERO, when the meter fails: a zero handed on as a reading made the preview
-            // show the clip unmetered while the export metered it. Without one, the exact render
-            // meters for itself.
-            reading = try? self.meter.measure(clip.url, referenceStops: look.matchReferenceStops)
-            group.leave()
-        }
-        group.wait()
-        let frame: NativeSource.Frame
-        do {
-            frame = try decoded!.get()
-        } catch {
-            sourceFailed("The live preview couldn’t read this clip: \(error)")
-            return nil
-        }
-        let image = frame.image
-        DispatchQueue.main.async {
-            self.sourceImage = image
-            self.sourceClip = clip.url
-            self.sourceSeconds = seconds
-            self.isFetchingSource = false
-            // NOT A TOAST. The controls becoming live IS the notification — the picture and the
-            // sliders respond, right where you're looking — and a toast in the top-right corner
-            // only sat on top of them.
-
-            // What was metered, so the first drag already grades with it.
-            self.frameSizes[clip.stem] = frame.sourceSize
-            if let reading { self.measuredMetering[clip.url] = reading }
-            // THE PICTURE NOW, from the live tier, rather than after the graded render.
-            if self.selectedClip?.url == clip.url { self.liveUpdate() }
-        }
-        lastSource = (clip.url, seconds, look.matchReferenceStops, frame.sourceSize, reading)
-        return (frame.sourceSize, reading)
+        return .pending
     }
-
-    /// SAID, not only reset. Clearing the flag alone left the controls answering nothing with no
-    /// reason given, which reads as the app being slow rather than as a clip it cannot read.
-    private func sourceFailed(_ reason: String) {
-        DispatchQueue.main.async {
-            self.isFetchingSource = false
-            self.preview.say(reason, failure: true)
-        }
-    }
-
-    /// Which preview request is current. A render that finishes after a newer one was asked for
-    /// is answering a question nobody is still asking.
-    private var previewGeneration = 0
-    private var previewProcess: Process?
 
     let workDirectory: URL
 
     private let engine: EngineLocation
-    private let renderer: PreviewRenderer
-    /// Engine renders, which take seconds and must not overlap: they share a work directory and a
-    /// per-clip tone cube.
-    private let queue = DispatchQueue(label: "loggrade.engine")
-    /// The last source frame fetched, with its size and the meter reading taken against the
-    /// look's reference. READ AND WRITTEN ONLY ON `queue`: a selection queues its source fetch
-    /// before the graded render, so by the time the graded render runs this already holds it, and
-    /// fetching again fetched every clip's source twice.
-    private var lastSource:
-        (
-            clip: URL, seconds: Double, referenceStops: Double, size: FrameSize,
-            metered: PreviewRenderer.Metered?
-        )?
-    private lazy var meter = ExposureMeter(engine: engine)
-    /// The live grade, on its OWN queue. Sharing the engine's serial queue meant every live frame
-    /// waited behind the three-second render that the last control change had started — so letting
-    /// go of one slider froze the next one, which is the exact stutter this tier exists to remove.
+    private let meter: ExposureMeter
+    /// The grade, on its OWN serial queue, so the caches above are touched by one job at a time
+    /// and never by the main thread.
     private let liveQueue = DispatchQueue(label: "loggrade.live", qos: .userInteractive)
 
     init(engine: EngineLocation, look: Look) {
@@ -492,7 +543,7 @@ final class GradeModel: ObservableObject {
         let work = FileManager.default.temporaryDirectory
             .appendingPathComponent("loggrade-preview", isDirectory: true)
         self.workDirectory = work
-        self.renderer = PreviewRenderer(engine: engine, workDirectory: work)
+        self.meter = ExposureMeter(engine: engine)
         if let remembered = UserDefaults.standard.stringArray(forKey: DefaultsKey.openStages) {
             self.openStages = Set(remembered)
         }
@@ -501,7 +552,6 @@ final class GradeModel: ObservableObject {
         for changed in [
             $selectedClip.map { _ in () }.eraseToAnyPublisher(),
             $isComparing.map { _ in () }.eraseToAnyPublisher(),
-            $renderedLook.map { _ in () }.eraseToAnyPublisher(),
             // Adjust lives in the project, and a drag writes it every tick; the panels watching
             // `changes` never show it, so they see the project without it.
             $project.map(\.ignoringAdjustments).removeDuplicates().map { _ in () }
@@ -541,18 +591,7 @@ final class GradeModel: ObservableObject {
         publishedTone = tone
     }
 
-    /// What the engine metered for the selected clip, when the render will meter it. Nil when matching
-    /// is off, which is what switches metering off in the render too.
-    private var matchedMetering: PreviewRenderer.Metered? {
-        guard matches, let clip = selectedClip?.url else { return nil }
-        return measuredMetering[clip]
-    }
-
     private var publishedTone: Look.Tone?
-
-    /// What the engine metered for each clip, mirrored here so the live tier needs no render and
-    /// no cross-thread read of the renderer's own cache.
-    private var measuredMetering: [URL: PreviewRenderer.Metered] = [:]
 
     // MARK: - presets and the project file
 
@@ -570,9 +609,6 @@ final class GradeModel: ObservableObject {
             bypassed.remove(.grain)
         }
         refreshCurve()
-        // Live FIRST. A preset is the biggest change the interface can make, and waiting three
-        // seconds to see it was the slowest thing in the app.
-        liveUpdate()
         renderPreview()
     }
 
@@ -709,7 +745,6 @@ final class GradeModel: ObservableObject {
         let next = max(0, min(clips.count - 1, current + direction))
         guard next != current else { return }
         selectedClip = clips[next]
-        renderPreview()
     }
 
     func cancel(queue: RenderQueue) {
@@ -809,116 +844,81 @@ final class GradeModel: ObservableObject {
         project.unframed(for: clipNames, sizes: frameSizes)
     }
 
-    /// Exact renders already made, so switching back to a clip shows its picture at once. Keyed
-    /// by everything the engine was given, so a change to any of it renders again.
-    private struct ExactRender {
-        let clip: URL
-        let seconds: Double
-        let look: Look
-        let match: Bool
-        let image: NSImage?
+    /// Pictures already graded after a release, a selection or a preset, so switching back to a
+    /// clip shows it at once. Keyed by everything the grade depends on.
+    private struct FinishedFrame {
+        let key: FrameKey
+        let image: NSImage
         let scopes: Scopes?
     }
-    private var exactRenders: [ExactRender] = []
-    /// About 11 MB each at 2560 × 1440; enough for a shoot's worth of switching back and forth.
-    private static let exactRenderLimit = 24
+    private var finishedFrames: [FinishedFrame] = []
+    /// ~8 MB each at 1920x1080, a third of that for a portrait clip.
+    private static let finishedFrameLimit = 24
 
     // MARK: - compare
 
     /// The look as it ships for this clip: the active preset with no Adjust, metered as by
     /// default. What holding C compares against.
     private var baselineLook: Look { defaultLook }
-
-    /// C went down. The live grade of the baseline goes up at once from the source frame; the
-    /// exact render replaces it when it lands, and is cached like any other.
-    /// The baseline render queued and not yet landed, so a second press does not queue another.
-    private var baselineRenderPending: (clip: URL, seconds: Double, look: Look)?
+    /// The baseline being graded, so a second press does not grade it again.
+    private var baselineInFlight: FrameKey?
 
     func beginCompare() {
-        guard let clip = selectedClip, preview.image != nil else { return }
-        let look = baselineLook
-        let seconds = previewSeconds
+        guard selectedClip != nil, preview.image != nil else { return }
         isComparing = true
-        if let cached = exactRenders.last(where: {
-            $0.clip == clip.url && $0.seconds == seconds && $0.look == look && $0.match
-        }) {
+        preview.baseline = nil
+        prepareBaseline()
+    }
+
+    /// The baseline graded as the picture is, from the same source frame. Called again when a
+    /// source frame or a meter reading lands, whichever it was waiting for.
+    private func prepareBaseline() {
+        guard isComparing, preview.baseline == nil, let clip = selectedClip?.url else { return }
+        let look = baselineLook
+        let metered: PreviewRenderer.Metered?
+        switch metering(for: look, clip: clip, match: true) {
+        case .reading(let reading): metered = reading
+        case .off, .failed: metered = nil
+        case .pending: return
+        }
+        let key = FrameKey(clip: clip, seconds: previewSeconds, look: look, metered: metered)
+        if let cached = finishedFrames.last(where: { $0.key == key }) {
             preview.baseline = cached.image
             return
         }
-        preview.baseline = nil
-        let metered = measuredMetering[clip.url]
-        if let source = sourceImage, sourceClip == clip.url {
-            liveQueue.async { [weak self] in
-                guard let self else { return }
-                guard
-                    case .graded(let image, _, _, _) = self.grade(
-                        look, source: source, metered: metered)
-                else { return }
-                DispatchQueue.main.async {
-                    guard self.isComparing, self.selectedClip?.url == clip.url,
-                        self.preview.baseline == nil
-                    else { return }
-                    self.preview.baseline = NSImage(
-                        cgImage: LiveChain.forDisplay(image),
-                        size: NSSize(width: image.width, height: image.height))
-                }
-            }
-        }
-        if let pending = baselineRenderPending, pending.clip == clip.url,
-            pending.seconds == seconds, pending.look == look
-        {
-            return
-        }
-        baselineRenderPending = (clip.url, seconds, look)
-        let size = frameSizes[clip.stem]
-        // YIELDS TO THE PREVIEW. It is not cancellable like a preview render, so it does not start
-        // at all if a preview was asked for after it; the next press queues it again.
-        let generation = previewGeneration
-        queue.async { [weak self] in
+        guard isLiveHere, let source = sourceImage, baselineInFlight != key else { return }
+        baselineInFlight = key
+        let sourceLongEdge = frameSizes[clip.deletingPathExtension().lastPathComponent]
+            .map { max($0.width, $0.height) }
+        liveQueue.async { [weak self] in
             guard let self else { return }
-            guard generation == self.previewGeneration else {
-                DispatchQueue.main.async { self.baselineRenderPending = nil }
-                return
+            let outcome = self.grade(
+                look, source: source, metered: metered, sourceLongEdge: sourceLongEdge)
+            let finished = outcome.frame.map { image in
+                FinishedFrame(
+                    key: key,
+                    image: NSImage(
+                        cgImage: LiveChain.forDisplay(image),
+                        size: NSSize(width: image.width, height: image.height)),
+                    scopes: Scopes.measure(image))
             }
-            let hint =
-                self.lastSource.map {
-                    $0.clip == clip.url && $0.seconds == seconds
-                        && $0.referenceStops == look.matchReferenceStops
-                } == true ? self.lastSource?.metered ?? nil : nil
-            let pixels: CGImage
-            do {
-                let frame = try self.renderer.render(
-                    clip: clip.url, seconds: seconds, look: look, match: true,
-                    knownSize: size, knownMetering: hint)
-                guard
-                    let decoded = NSImage(contentsOf: frame.url)?
-                        .cgImage(forProposedRect: nil, context: nil, hints: nil)
-                else { throw PreviewRenderer.Failure.noFrameEvent([]) }
-                pixels = decoded
-            } catch {
-                DispatchQueue.main.async {
-                    self.baselineRenderPending = nil
-                    if self.isComparing {
+            DispatchQueue.main.async {
+                if self.baselineInFlight == key { self.baselineInFlight = nil }
+                guard let finished else {
+                    if case .refused(let reason) = outcome, self.isComparing {
                         self.preview.say(
-                            "The look as it ships couldn’t be rendered: \(error)", failure: true)
+                            "The look as it ships couldn’t be graded: \(reason)", failure: true)
+                    }
+                    return
+                }
+                if !self.finishedFrames.contains(where: { $0.key == key }) {
+                    self.finishedFrames.append(finished)
+                    if self.finishedFrames.count > Self.finishedFrameLimit {
+                        self.finishedFrames.removeFirst()
                     }
                 }
-                return
-            }
-            let image = NSImage(
-                cgImage: LiveChain.forDisplay(pixels),
-                size: NSSize(width: pixels.width, height: pixels.height))
-            DispatchQueue.main.async {
-                self.baselineRenderPending = nil
-                self.exactRenders.append(
-                    ExactRender(
-                        clip: clip.url, seconds: seconds, look: look, match: true,
-                        image: image, scopes: Scopes.measure(pixels)))
-                if self.exactRenders.count > Self.exactRenderLimit {
-                    self.exactRenders.removeFirst()
-                }
-                if self.isComparing, self.selectedClip?.url == clip.url {
-                    self.preview.baseline = image
+                if self.isComparing, self.selectedClip?.url == clip, self.preview.baseline == nil {
+                    self.preview.baseline = finished.image
                 }
             }
         }
@@ -928,110 +928,38 @@ final class GradeModel: ObservableObject {
         isComparing = false
     }
 
+    /// The picture a release, a selection, a preset or a reset settles on: the grade of
+    /// `effectiveLook`, the same as a drag's, kept so it comes back at once.
     func renderPreview() {
         guard let clip = selectedClip, clip.isUsable else { return }
         let look = effectiveLook
-        let match = matches
-        let seconds = previewSeconds
-
-        if let cached = exactRenders.last(where: {
-            $0.clip == clip.url && $0.seconds == seconds && $0.look == look && $0.match == match
-        }) {
+        let known: PreviewRenderer.Metered?? = {
+            guard matches else { return .some(nil) }
+            let key = MeterKey(clip: clip.url, referenceStops: look.matchReferenceStops)
+            if let reading = measuredMetering[key] { return .some(reading) }
+            return failedMetering.contains(key) ? .some(nil) : nil
+        }()
+        if let metered = known,
+            let cached = finishedFrames.last(where: {
+                $0.key
+                    == FrameKey(
+                        clip: clip.url, seconds: previewSeconds, look: look, metered: metered)
+            })
+        {
+            // An older grade still in flight must not land on top of this.
             previewGeneration += 1
-            if let running = previewProcess, running.isRunning { EngineRun.stop(running) }
-            renderingLook = nil
-            preview.image = cached.image
-            preview.scopes = cached.scopes
-            renderedLook = look
-            preview.isRendering = false
-            preview.isLive = false
-            preview.say("")
+            pendingLook = nil
+            settleLook = nil
+            show(cached)
             refreshCurve()
-            prepareLivePreview()
+            // For the drag that may follow.
+            prepareSource()
             return
         }
-        let knownSize = frameSizes[clip.stem]
-
-        // A NEWER REQUEST CANCELS THE ONE IN FLIGHT. Moving three controls in a row used to mean
-        // waiting for three renders in sequence, the first two answering questions nobody was
-        // still asking. The generation counter discards their results; stopping the process stops
-        // the work rather than merely ignoring it.
-        previewGeneration += 1
-        let generation = previewGeneration
-        if let running = previewProcess, running.isRunning {
-            EngineRun.stop(running)
-        }
-        renderingLook = look
-
-        // Decided on the main thread, where these are the only ones touched.
-        let needsSource = sourceClip != clip.url || sourceSeconds != seconds
-        if needsSource { isFetchingSource = true }
-
-        preview.isRendering = true
-        preview.say("Rendering…")
-        queue.async { [weak self] in
-            guard let self else { return }
-            // THE SOURCE FIRST, when this clip has none yet: it is the faster call, it puts a live
-            // picture up, and it measures what the graded render would otherwise measure again.
-            //
-            // A METER COUNTS ONLY AGAINST THE REFERENCE IT WAS TAKEN FOR. It is solved against the
-            // look's match.reference_stops, which differs between Neutral and the film looks, so
-            // a reading from before a look change is not handed on; the render meters again.
-            var source = self.lastSource
-            let fresh = {
-                source.map { $0.clip == clip.url && $0.seconds == seconds } ?? false
-            }
-            if needsSource && !fresh() {
-                _ = self.refreshSource(for: clip, seconds: seconds, look: look)
-                source = self.lastSource
-            }
-            let usable =
-                fresh() && source?.referenceStops == look.matchReferenceStops ? source : nil
-            let hintSize = usable?.size ?? knownSize
-            let hintMetering = usable?.metered ?? nil
-            guard generation == self.previewGeneration else { return }
-            do {
-                let frame = try self.renderer.render(
-                    clip: clip.url, seconds: seconds, look: look, match: match,
-                    knownSize: hintSize, knownMetering: hintMetering,
-                    onStart: { [weak self] process in self?.previewProcess = process })
-                guard generation == self.previewGeneration else { return }
-                let pixels = NSImage(contentsOf: frame.url)?
-                    .cgImage(forProposedRect: nil, context: nil, hints: nil)
-                let measured = pixels.map { Scopes.measure($0) }
-                let image = pixels.map {
-                    NSImage(
-                        cgImage: LiveChain.forDisplay($0),
-                        size: NSSize(width: $0.width, height: $0.height))
-                }
-                DispatchQueue.main.async {
-                    guard generation == self.previewGeneration else { return }
-                    self.preview.image = image
-                    self.preview.scopes = measured
-                    self.renderedLook = look
-                    self.preview.isRendering = false
-                    self.preview.isLive = false
-                    self.preview.say("")
-                    if match { self.measuredMetering[clip.url] = frame.metered }
-                    if let size = frame.sourceSize { self.frameSizes[clip.stem] = size }
-                    self.exactRenders.append(
-                        ExactRender(
-                            clip: clip.url, seconds: seconds, look: look, match: match,
-                            image: image, scopes: measured))
-                    if self.exactRenders.count > Self.exactRenderLimit {
-                        self.exactRenders.removeFirst()
-                    }
-                    self.refreshCurve()
-                }
-            } catch {
-                guard generation == self.previewGeneration else { return }
-                DispatchQueue.main.async {
-                    guard generation == self.previewGeneration else { return }
-                    self.preview.isRendering = false
-                    self.preview.say(String(describing: error), failure: true)
-                }
-            }
-        }
+        settleLook = look
+        pendingLook = look
+        prepareSource()
+        startGradeIfIdle()
     }
 }
 

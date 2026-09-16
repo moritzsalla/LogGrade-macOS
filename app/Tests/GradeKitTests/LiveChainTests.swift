@@ -94,22 +94,22 @@ final class LiveChainTests: XCTestCase {
     /// engine renders out of this file, which is about fifteen seconds of every run.
     private static var cachedSource: CGImage?
 
-    private func source(_ rig: Rig) throws -> CGImage {
-        if let cached = Self.cachedSource { return cached }
+    private func source(_ rig: Rig, height: Int = 480) throws -> CGImage {
+        if height == 480, let cached = Self.cachedSource { return cached }
         let image = try image(
             rig.renderer.render(
                 clip: rig.clip, seconds: 4, look: rig.look,
-                height: 480, match: false, stage: .source))
-        Self.cachedSource = image
+                height: height, match: false, stage: .source))
+        if height == 480 { Self.cachedSource = image }
         return image
     }
 
     /// Grades the source frame in-process and measures it against the engine's own render.
-    private func compare(_ rig: Rig, look: Look) throws -> (
+    private func compare(_ rig: Rig, look: Look, height: Int = 480) throws -> (
         mean: Double, p999: Double,
         worst: Double
     ) {
-        let exact = try rig.renderer.render(clip: rig.clip, seconds: 4, look: look, height: 480)
+        let exact = try rig.renderer.render(clip: rig.clip, seconds: 4, look: look, height: height)
         let exactImage = try image(exact)
         let tone = look.tone
         // The engine adds what it metered to the correction, as the app does.
@@ -122,13 +122,14 @@ final class LiveChainTests: XCTestCase {
             look.convertCube == rig.look.convertCube
             ? rig.conversion
             : try Cube3D(contentsOf: XCTUnwrap(rig.engine.conversionCube(named: look.convertCube)))
-        let sourceImage = try source(rig)
+        let sourceImage = try source(rig, height: height)
         let chain = LiveChain(
             stages: LiveChain.colourStages(
                 correction: correction,
                 halation: LiveHalation(
                     look.halation,
-                    frameLongEdge: max(sourceImage.width, sourceImage.height)),
+                    frameLongEdge: max(sourceImage.width, sourceImage.height),
+                    sourceLongEdge: exact.sourceSize.map { max($0.width, $0.height) }),
                 conversion: conversion,
                 hue: look.hue.isNeutral ? nil : HueCube.cube(for: look.hue, size: 33)),
             grade: LiveGrade(
@@ -203,5 +204,26 @@ final class LiveChainTests: XCTestCase {
                 "\(name): the worst pixel is \(worst), beyond the edge "
                     + "effect the percentile allows for")
         }
+    }
+
+    /// Halation where the preview is big enough to compute the glow reduced, as the app's 1080-line
+    /// preview of a landscape 4K clip does. The 480-line cases above never reduce, so without this
+    /// the path the app runs had no parity test.
+    ///
+    /// 1920 HIGH: the smallest frame of this portrait 2160x3840 clip that reduces by 2
+    /// (`frameLongEdge * 4 / sourceLongEdge`). Measured on IMG_0607, Super 8 at strength 0.8: mean
+    /// 0.97, 99.9th percentile 8, worst 48. With the sigma not divided by the reduction: mean 2.05,
+    /// percentile 64, worst 106, so the percentile is the bound that catches it. About 13 s in
+    /// release and 64 s in debug, the two 1920-line engine renders and the debug pixel loop.
+    func testReducedHalationMatchesTheRender() throws {
+        let rig = try rig()
+        var look = try XCTUnwrap(
+            rig.engine.shippedPresets().first { $0.look.convertCube == "super8_kodachrome64" }
+        ).look
+        look.halation.strength = 0.8
+        let (mean, p999, worst) = try compare(rig, look: look, height: 1920)
+        XCTAssertLessThan(mean, 3, "reduced halation: \(mean) code values off on average")
+        XCTAssertLessThan(p999, 16, "reduced halation: a thousandth is more than \(p999) out")
+        XCTAssertLessThan(worst, 90, "reduced halation: the worst pixel is \(worst) out")
     }
 }
