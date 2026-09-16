@@ -3,9 +3,8 @@ import SwiftUI
 
 /// Levels, parade and vectorscope, drawn from whatever frame the picture is showing.
 ///
-/// That is the live tier's approximation while a control moves and the engine's render once it
-/// lands, so the scopes follow the pointer as the picture does and settle on the exact frame with
-/// it. The vectorscope carries the three calibration colours as
+/// That is the in-process grade, so the scopes follow the pointer as the picture does. The
+/// vectorscope carries the three calibration colours as
 /// targets: a place to measure from, not a place to arrive — the shipped grade sits off spec on
 /// purpose, and seeing by how much is the point.
 struct ScopesView: View {

@@ -225,21 +225,17 @@ struct InspectorView: View {
                     }
                     .help(original == nil ? "" : "Double-click to reset")
                 Slider(value: binding, in: range) { editing in
-                    if editing {
-                        model.beginDrag()
-                    } else {
-                        model.refreshCurve()
-                        // On release: the exact render confirms the live one.
-                        model.renderPreview()
-                    }
+                    guard !editing else { return }
+                    model.refreshCurve()
+                    // On release, so the settled picture is kept for switching back.
+                    model.renderPreview()
                 }
                 .controlSize(.mini)
                 .tint(Palette.inkTertiary)
                 // DURING the drag, not only after it. A control that shows nothing until you let
                 // go is a control you cannot find a value with.
                 .onChange(of: value) { _ in model.liveUpdate() }
-                // A typed value is final, like a release, so it gets the exact render a release
-                // gets.
+                // A typed value is final, like a release.
                 ValueField(value: binding, format: format) {
                     model.refreshCurve()
                     model.renderPreview()

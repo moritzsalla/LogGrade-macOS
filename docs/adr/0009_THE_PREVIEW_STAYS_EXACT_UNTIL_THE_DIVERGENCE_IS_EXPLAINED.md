@@ -1,34 +1,42 @@
-# The whole chain runs in the app, and every control is live
+# The whole chain runs in the app, and the preview is that grade
 
 The title records an older decision; the README links this filename. What the app does today:
 
-`FRAME_STAGE=source` gives the decoded Apple Log frame with no chain applied, resampled exactly as a
-graded frame is. `GradeKit/LiveChain.swift` puts it through the correction, Apple's conversion and
-the film look, then hands it to `LiveGrade` for the tone curve and the trims. The source frame does
-not depend on the look, so it is fetched once per clip and timecode. Starting from an already
-converted frame made the correction stage impossible to preview, so don't go back to that.
+The preview is graded in-process, always: while a control moves, after a release, on selection, on a
+preset or a reset, and for hold-C compare. No engine render replaces it (the 1440-line
+`grade.sh FRAME` render took 2–4 s on the Intel Mac). `GradeModel` decodes the clip with
+`NativeSource` at 1080 lines, meters it with the engine's own `probe_scene_exposure`
+(`ExposureMeter`, keyed by clip and `match.reference_stops`), and `GradeKit/LiveChain.swift` puts it
+through the correction, halation, Apple's conversion or the film look, and the hue curves, then
+`LiveGrade` for the tone curve and trims. Decoded frames (8) and settled pictures (24) are cached, so
+switching back to a clip neither decodes nor grades. Starting from an already converted frame made
+the correction stage impossible to preview, so don't go back to that.
 
-**Against the engine's render of IMG_0607 at the shipped look: 1.28 code values mean, 13 at the
-99.9th percentile, 56 at the worst pixel.** The worst pixels sit on hard edges, because the preview
-resamples and then grades while the render grades and then resamples. The test therefore asserts on
-the percentile.
+`PreviewRenderer` and `FRAME_STAGE=source|graded` stay: they are what the tests hold the app to.
 
-## Cost per control change (270×480, release build)
+**Against the engine's render of IMG_0607 at the shipped look: mean ~1.3 code values, 99.9th
+percentile 13–18, worst 56.** The worst pixels sit on hard edges, because the preview resamples and
+then grades while the render grades and then resamples. `LiveChainTests` therefore asserts on the
+percentile, at 480 lines and, for halation computed reduced as a 1080-line landscape preview does,
+at 1920.
 
-| what moved | cost |
+## Cost (Intel i7, release)
+
+| | cost |
 |---|---|
-| midtone, contrast, saturation, warmth | 4.1ms |
-| exposure, white balance, the CDL, the film look | 15.3ms |
+| decode, any height | 0.35–1.3 s, cached |
+| colour stages, 1920x1080 | ~55 ms; ~125 ms with halation |
+| colour stages, 608x1080 portrait | ~22 ms; ~128 ms with halation |
+| tone and trims only | 6–25 ms |
 
-No subprocess is on that path. Three generators were transcribed into Swift, and each is held by an
-exact-equivalence test, not a tolerance:
+No subprocess is on the grade path. Three generators were transcribed into Swift, and each is held
+by an exact-equivalence test, not a tolerance:
 
 - **`CorrectionCube`** replaces a 419ms `make-correct-lut.py` call (1.4ms). All 107,811 numbers
   agree to the last `Float` unit.
 - **`ToneCurve.generated`** replaces `make-tone-lut.py` (~100ms → 0.12ms), across all 4096 entries.
-- **The exposure meter** is the engine's: the app reads what `grade.sh` metered off the event
-  stream rather than measuring the frame twice, and adds it to the correction exactly as the render
-  does (`LiveChainTests`).
+- **The exposure meter** is the engine's function, sourced from `lib.sh` and run beside the decode
+  (`NativeSourceTests`).
 
 The cubes stay data, read from the same files the render hands to `lut3d`. `Cube3D` does tetrahedral
 interpolation, and `Cube3DTests` measures it against ffmpeg on a deliberately non-smooth cube: on a

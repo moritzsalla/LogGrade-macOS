@@ -3,11 +3,8 @@ import Foundation
 
 /// Waveform, parade and vectorscope, measured on a processed frame rather than predicted.
 ///
-/// Two frames reach them. The engine's still is the render itself — one frame through the real
-/// chain — so a scope computed from it measures what was produced rather than what an app thinks
-/// would be produced. While a control is moving they read the live preview's frame instead, which
-/// `LiveChainTests` holds to within a few code values of that render. Every grading suite's scopes
-/// read the processed image for the same reason.
+/// They read the preview's graded frame, which `LiveChainTests` holds to within a few code values
+/// of the engine's render. Every grading suite's scopes read the processed image, not a prediction.
 ///
 /// The three reference targets are the colours this pipeline calibrates against: the Dutch plate
 /// yellow and two traffic signs, whose values are legally standardised. They are drawn as targets

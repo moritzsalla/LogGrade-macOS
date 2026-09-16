@@ -3,11 +3,11 @@ import SwiftUI
 
 /// The picture, in a recess, with nothing bright next to it.
 ///
-/// The panel always says what it is showing. There are three states and they are not
-/// interchangeable: a live approximation while a control is moving, the exact render once it
-/// lands, and a stale render when a control the live tier cannot model has moved. An instrument
-/// that shows a stale value while the controls have moved on is lying, so the stale one is named
-/// "out of date" beside the picture — named, not dimmed, for the reason given at the spinner.
+/// The panel always says what it is showing. Every picture is the in-process grade of the current
+/// look (ADR 0009), so the one state worth naming is a picture that is NOT that: a previous clip's
+/// or look's while a frame or meter reading is still coming, or after a refused grade. An
+/// instrument that shows a stale value while the controls have moved on is lying, so that one is
+/// named "out of date" beside the picture — named, not dimmed, for the reason given at the spinner.
 struct PreviewView: View {
     @ObservedObject var model: GradeModel
     /// Observed separately, so a new frame redraws the picture and nothing else.
@@ -59,7 +59,7 @@ struct PreviewView: View {
                     Text(
                         model.selectedClip == nil
                             ? "Drop Apple Log clips here to start"
-                            : "Rendering the first frame of this clip…"
+                            : "Preparing the first frame of this clip…"
                     )
                     .font(Type.label)
                     .foregroundColor(Palette.inkTertiary)
@@ -83,19 +83,16 @@ struct PreviewView: View {
             }
 
             HStack(spacing: 12) {
-                // NO PREVIEW BUTTON. It had one job — ask for the exact frame — and every path
-                // that changes the look now does that on its own: live while you move a control,
-                // and an engine render the moment you let go. A button that re-does what just
-                // happened is a button that teaches you to distrust the picture.
+                // NO PREVIEW BUTTON. Every path that changes the look updates the picture on its
+                // own. A button that re-does what just happened is a button that teaches you to
+                // distrust the picture.
                 Text("hold C to compare with the look as it ships")
                     .font(Type.label)
                     .foregroundColor(Palette.inkSecondary)
                 Spacer()
                 if comparing {
                     Readout(text: preview.baseline == nil ? "preparing…" : "as shipped")
-                } else if preview.isLive {
-                    Readout(text: "live")
-                } else if model.isStale {
+                } else if preview.isOutOfDate {
                     Readout(text: "out of date")
                 }
             }

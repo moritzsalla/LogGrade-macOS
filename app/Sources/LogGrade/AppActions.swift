@@ -27,7 +27,6 @@ final class AppActions {
         for added in clips.add(urls) {
             guard let grade, grade.selectedClip == nil, added.isUsable else { continue }
             grade.selectedClip = added
-            grade.renderPreview()
         }
     }
 

@@ -12,9 +12,9 @@ import GradeKit
 final class LivePreview: ObservableObject {
     @Published var image: NSImage?
     @Published var scopes: Scopes?
-    /// True when the picture is this app's approximation rather than the engine's render. The
-    /// interface says which, always, because they are not the same claim.
-    @Published var isLive = false
+    /// True when the picture is not of the look and clip now selected: the frame or meter reading
+    /// it needs is still coming, or the grade was refused. Said beside the picture.
+    @Published var isOutOfDate = false
     /// What holding C shows: this clip in the look as it ships, with no Adjust and the stages at
     /// their defaults. ALWAYS THAT, never the step before the last change: the question a person
     /// asks with it is "what have my adjustments done", which the previous step cannot answer.
