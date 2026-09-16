@@ -322,7 +322,10 @@ T_MEASURE=$(( $(now_ms) - T_MEASURE_T0 ))
 _i=0
 while [ "$_i" -lt "${#D_NAME[@]}" ]; do
 	_crops=0
-	if [ "${D_OFF[$_i]}" = "-" ] && [ -z "$CROP_OFFSET_OK" ]; then
+	# Not for FRAME: a still is the uncropped picture and writes no deliverable, and the live
+	# preview asks for one before anyone has placed a crop. A DRY plan still refuses, because it
+	# reports what an export would do.
+	if [ -z "$FRAME" ] && [ "${D_OFF[$_i]}" = "-" ] && [ -z "$CROP_OFFSET_OK" ]; then
 		for _size in "${CLIP_SIZES[@]}"; do
 			[ "$_size" != "-" ] || continue
 			if deliverable_crops "$_size" "${D_AW[$_i]}" "${D_AH[$_i]}"; then

@@ -1558,6 +1558,25 @@ PY
 	[ -z "$(_exports "$work")" ] || fail "FRAME wrote a deliverable"
 }
 
+@test "FRAME on a landscape clip needs no crop offset, because a still is not cropped" {
+	# The live preview asks for a frame with the project's deliverables and no CROP_OFFSET. The
+	# up-front crop refusal ran for it anyway, so every landscape clip showed "a crop offset is a
+	# per-clip framing call" instead of a picture.
+	local work="$BATS_TEST_TMPDIR/frame-wide"
+	mkdir -p "$work/src"
+	cp "$FIXTURES/landscape_tagged.mov" "$work/src/WIDE.mov"
+	DELIVERABLES=reels FRAME=0 FRAME_HEIGHT=72 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/WIDE.mov"
+	[ "$status" -eq 0 ] || fail "a still was refused: $output"
+	[[ "$output" != *"REFUSE_CROP_NO_OFFSET"* ]] || fail "refused a crop for a still: $output"
+	[ -s "$work/.loggrade/frames/WIDE_t0s_graded.png" ] || fail "no preview frame: $output"
+	[ -z "$(_exports "$work")" ] || fail "FRAME wrote a deliverable"
+	# The refusal still stands for what an export would write.
+	DELIVERABLES=reels MATCH=0 STAB=0 DRY=1 GRADE_WORK_DIR="$work" \
+		run "$SCRIPTS/grade.sh" "$work/src/WIDE.mov"
+	[[ "$output" == *"GRADE_CODE=REFUSE_CROP_NO_OFFSET"* ]] || fail "a plan no longer refuses: $output"
+}
+
 @test "FRAME_STAGE=source gives the picture with no grade on it at all" {
 	# The app's live preview grades this frame itself, so that the correction stage — which runs
 	# BEFORE Apple's conversion and therefore cannot be recovered from a converted frame — follows
