@@ -48,6 +48,11 @@ resolve_conversion() {  # resolve_conversion <cube-stem>  -> a path, or refuses
 
 # Denoise in Apple Log, before the correction and the conversion, where the noise is still the
 # sensor's rather than stretched by a film curve. A chroma wavelet pass plus a tight temporal average.
+#
+# OFF BY DEFAULT, for low light only. On daylight iPhone footage delivered at 1080p it changed the
+# final by 46-49 dB PSNR (IMG_0609), less than the 8-bit 4:2:0 conversion and H.264 lose, because the
+# camera already denoises and the 4K-to-1080p resample averages chroma about 4:1. It cost 60% of
+# that render: vaguedenoiser at 4K ran at 1.25 fps against 23 fps for decode.
 # Measured against hqdn3d chroma, nlmeans and removegrain on this camera's shadows: hqdn3d tinted
 # static colour and smeared saturated red while panning, and nlmeans, removegrain and dctdnoiz all
 # negotiate 8-bit. `format=yuv444p10le` pins the planes: behind any RGB filter these would otherwise
@@ -982,13 +987,6 @@ source_fps() {  # source_fps <file>
 # individually and all passed; only the pair fails.
 DELIVERY_SETPARAMS="setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=limited"
 
-# hqdn3d=<luma_spatial>:<chroma_spatial>:<luma_tmp>:<chroma_tmp>. The luma terms are ZERO on
-# purpose: this must not touch image detail. It exists because saturation 1.27 amplifies the
-# chroma error already present on high-contrast edges (measured: the street sign's white-on-blue
-# lettering gains a visible cyan fringe between baseline and graded), and the 4:2:0 conversion at
-# export coarsens it further. Verified chroma-only: luma YAVG 486.97 -> 487.02.
-DELIVERY_CHROMA="hqdn3d=0:5:0:6,"
-
 # `shortest=1` on the blend is REQUIRED, and `-shortest` is not a substitute. The grey plate is an
 # infinite lavfi source; with filter_complex, `-shortest` does not reliably stop the encode, so the
 # render runs forever and the output grows without bound (observed: a 26s clip past 189MB and still
@@ -1046,6 +1044,7 @@ load_delivery_look() {
 	GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain.strength)}")" || return 1
 	GRAIN_SHADOWS="$(require_unit grain.shadows "$(look .grain.shadows)")" || return 1
 	GRAIN_HIGHLIGHTS="$(require_unit grain.highlights "$(look .grain.highlights)")" || return 1
+	# shellcheck disable=SC2034  # read by grade.sh and 01-baseline.sh
 	DENOISE_STRENGTH="$(require_number finish.denoise "$(look .finish.denoise)")" || return 1
 	SHARPEN="$(require_number finish.sharpen "$(look .finish.sharpen)")" || return 1
 	GAUGE="$(look .finish.gauge)" || return 1
@@ -1284,17 +1283,17 @@ delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-pre
 	fi
 	# Read here if nobody loaded them.
 	[ -n "${SHARPEN+set}" ] || load_delivery_look || return 1
-	# The log denoise (denoise_prefix) cleans chroma at the source, and hqdn3d on top of it only
-	# tints static colour, so the two are never both in the graph.
-	local chroma="$DELIVERY_CHROMA" gauge="" tail="" sharpen=""
-	awk -v s="$DENOISE_STRENGTH" 'BEGIN { exit !(s > 0) }' && chroma=""
+	# NO CHROMA FALLBACK when the log denoise is off. An hqdn3d pass used to stand in for it; it
+	# tinted static colour and smeared saturated red while panning, and existed to hide fringes
+	# from a saturation of 1.27 the shipped look no longer has.
+	local gauge="" tail="" sharpen=""
 	awk -v s="$SHARPEN" 'BEGIN { exit !(s > 0) }' && sharpen=",$(edge_limited_sharpen "$r" "$SHARPEN")"
 	if [ "$GAUGE" = super8 ]; then
 		gauge="$(gauge_super8 "$1" "$2")"
 		tail=",$(gauge_super8_tail "${6:-}")"
 	fi
-	printf '%s%s%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=%s%s%s' \
-		"$3" "$chroma" "$4" "$gauge" "$1" "$2" "$(delivery_pix_fmt)" "$sharpen" "$tail"
+	printf '%s%s%szscale=w=%s:h=%s:f=lanczos:d=error_diffusion,format=%s%s%s' \
+		"$3" "$4" "$gauge" "$1" "$2" "$(delivery_pix_fmt)" "$sharpen" "$tail"
 }
 
 # The sharpener, EDGE-LIMITED: unsharp on luma, then clamped to within a code value or two of the
@@ -1360,7 +1359,7 @@ gauge_super8_tail() {  # gauge_super8_tail [fps]
 #
 # The plate is flat grey so its chroma stays neutral and `grainmerge` is a no-op on the chroma
 # planes — measured U-plane residual sd 0.000, i.e. verifiably luma-only. That matters because the
-# hqdn3d pass exists to clean chroma up, and grain must not put any back.
+# delivered chroma is left as the grade made it, and grain must not add any.
 #
 # THE PLATE'S LUMA IS SET TO 128, not left at `gray`'s. grainmerge is A+B-128, and `color=c=gray`
 # converts to Y=126, so every final came out 2 code values darker with nothing on screen to blame.

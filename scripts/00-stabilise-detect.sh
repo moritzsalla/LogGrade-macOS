@@ -11,8 +11,7 @@
 # WHY IT ALSO FIXES A COLOUR ARTEFACT: handheld sway slides high-contrast edges across the chroma
 # sampling grid frame by frame, so chroma fringing does not sit still — it phase-shifts, and reads
 # as a shimmer crawling along fine lettering (spotted on the street sign, described as "moving like
-# a sine wave"). Holding the frame still stops the shimmer moving; the finals' hqdn3d chroma pass
-# removes what is left. Neither alone gets it.
+# a sine wave"). Holding the frame still stops the shimmer moving.
 #
 # Cost: roughly 65s for a 26s 4K clip on this machine (measured 12.4s for a 5s segment). Analysis
 # is decode-bound, so it is far cheaper than the encode that follows.

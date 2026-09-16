@@ -56,7 +56,7 @@
     "reference_stops": -0.4
   },
   "finish": {
-    "denoise": 1,
+    "denoise": 0,
     "sharpen": 1.0,
     "gauge": "none"
   },

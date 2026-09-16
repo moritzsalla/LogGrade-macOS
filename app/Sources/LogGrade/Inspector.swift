@@ -219,9 +219,11 @@ struct InspectorView: View {
                 + "out rather than showing a version that is not what renders.\n\n"
                 + "Grain shadows and highlights set how much grain reaches black and "
                 + "white, as film prints do: most in the midtones, less at either end. "
-                + "Both at 1 is flat grain.\n\nThe switch turns off grain, sharpening and "
-                + "chroma denoise; the stabiliser is switched per clip. With every stage "
-                + "off, the export is Apple's conversion alone.",
+                + "Both at 1 is flat grain.\n\nDenoise is for dim and night footage, and "
+                + "off otherwise: daylight iPhone footage is already clean once it is scaled "
+                + "down, and denoising 4K is most of a render's time.\n\nThe switch turns "
+                + "off grain, sharpening and denoise; the stabiliser is switched per clip. "
+                + "With every stage off, the export is the conversion alone.",
             last: true
         ) {
             control(
@@ -233,6 +235,9 @@ struct InspectorView: View {
             control(
                 "Grain highs", $model.look.grainHighlights, 0...1, format: "%.2f",
                 default: model.defaultLook.grainHighlights)
+            control(
+                "Denoise", $model.look.finish.denoise, 0...2, format: "%.1f",
+                default: model.defaultLook.finish.denoise)
             control(
                 "Stabiliser", $model.look.stabilisationSmoothing, 0...60, format: "%.0f",
                 default: model.defaultLook.stabilisationSmoothing)
