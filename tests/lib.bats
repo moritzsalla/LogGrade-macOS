@@ -58,10 +58,10 @@ for i, line in enumerate(sys.stdin.read().splitlines(), 1):
 # touched: bash 3.2's -nt compares whole seconds, so same-second files would make a freshness test
 # pass for the wrong reason.
 _stale_transform() {  # _stale_transform <work>
-	mkdir -p "$1/src" "$1/dist/stab"
+	mkdir -p "$1/src" "$1/.loggrade/stabilisation"
 	cp "$FIXTURES/portrait_tagged.mov" "$1/src/CLIP.mov"
-	printf 'measured before the source changed\n' > "$1/dist/stab/CLIP.trf"
-	touch -t 202609010000 "$1/dist/stab/CLIP.trf"
+	printf 'measured before the source changed\n' > "$1/.loggrade/stabilisation/CLIP.trf"
+	touch -t 202609010000 "$1/.loggrade/stabilisation/CLIP.trf"
 	touch -t 202609020000 "$1/src/CLIP.mov"
 }
 
@@ -297,25 +297,49 @@ fail() {
 }
 
 # bats test_tags=slow
+# Every dated export folder in a work dir, one per line; nothing when there is none.
+_exports() {  # _exports <work>
+	find "$1" -maxdepth 1 -type d -name 'LogGrade export *' 2>/dev/null
+}
+
+# bats test_tags=slow
+@test "a run exports into one dated folder, and keeps everything else hidden" {
+	local work="$BATS_TEST_TMPDIR/layout" exports
+	mkdir -p "$work/src"
+	cp "$FIXTURES/probe_mid.mov" "$work/src/CLIP.mov"
+	MATCH=0 STAB=0 HEIGHT=128 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || fail "render failed: $output"
+	exports="$(_exports "$work")"
+	[ "$(printf '%s\n' "$exports" | grep -c .)" = 1 ] || fail "not one export folder: $(ls -A "$work")"
+	[[ "$(basename "$exports")" =~ ^LogGrade\ export\ [0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}\.[0-9]{2}$ ]] \
+		|| fail "not named for when it started: $exports"
+	[ -s "$exports/CLIP_reels-stories_9x16.mp4" ] || fail "the deliverable is not in it: $(ls -A "$exports")"
+	[ "$(ls -A "$exports")" = "CLIP_reels-stories_9x16.mp4" ] || fail "more than deliverables: $(ls -A "$exports")"
+	# Beside the export and the footage, only the hidden working folder.
+	[ "$(ls "$work" | grep -vxF src | grep -vxF "$(basename "$exports")")" = "" ] \
+		|| fail "visible litter in the work dir: $(ls "$work")"
+	[ -n "$(ls "$work"/.loggrade/reports/run-*.txt 2>/dev/null)" ] || fail "no report in .loggrade: $(ls -A "$work")"
+}
+
 @test "every stage checks free space on the volume it writes to" {
 	# The work dir became opt-in, and three of the four call sites kept asking about the REPO's
 	# volume while writing to the work dir's. With no .workdir present those are the same path, so
 	# the defect is invisible locally — which is exactly why it shipped. Point the work dir
 	# somewhere else and the two separate.
 	local work="$BATS_TEST_TMPDIR/elsewhere" s
-	mkdir -p "$work/src" "$work/dist/01-baseline" "$work/dist/02-graded"
+	mkdir -p "$work/src" "$work/.loggrade/baseline" "$work/.loggrade/masters"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/01-baseline/CLIP_baseline.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/baseline/CLIP_baseline.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
 	for s in 01-baseline 02-grade 03-final; do
 		GRADE_WORK_DIR="$work" run "$SCRIPTS/$s.sh" CLIP
-		[[ "$output" == *"available in $work/dist"* ]] \
+		[[ "$output" == *"available in $work"* ]] \
 			|| fail "$s.sh measured the wrong volume: $output"
 	done
 	# grade.sh is the path README tells you to run, and it had no disk guard at all while the four
 	# staged scripts did. A test named "every stage" that skipped it is how that went unnoticed.
 	GRADE_WORK_DIR="$work" DRY=1 MATCH=0 STAB=0 run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[[ "$output" == *"available in $work/dist"* ]] \
+	[[ "$output" == *"available in $work"* ]] \
 		|| fail "grade.sh measured no volume at all: $output"
 }
 
@@ -500,7 +524,7 @@ fail() {
 	local src
 	src="$(_real_clip)"; [ -n "$src" ] || skip "no source footage"
 	# Real footage in, but the OUTPUT goes to a temp dir. Without GRADE_WORK_DIR this ran against
-	# the repo root, so every check.sh run left a dist/reports/run-*.txt and a per-clip tone cube
+	# the repo root, so every check.sh run left a .loggrade/reports/run-*.txt and a per-clip tone cube
 	# in the tree someone actually delivers from — 38 report files had accumulated.
 	mkdir -p "$BATS_TEST_TMPDIR/dryrun"
 	GRADE_WORK_DIR="$BATS_TEST_TMPDIR/dryrun" DRY=1 run "$BATS_TEST_DIRNAME/../scripts/grade.sh" "$src"
@@ -512,18 +536,18 @@ fail() {
 @test "grade.sh reads the transform cache that stage 00 writes" {
 	# grade.sh reassigned WORK from the work-dir root to its own scratch dir, then built the
 	# transform path from the reassigned value — landing two levels off, at
-	# <work>/dist/.grade-work/dist/stab/. So it never saw a transform stage 00 had already
+	# <work>/.loggrade/work/.loggrade/stabilisation/. So it never saw a transform stage 00 had already
 	# computed and silently paid ~65s per clip to redo it. One name doing two jobs.
 	#
 	# Transforms are motion-only and survive a re-grade, so one cache is correct. Content here is
 	# irrelevant: this asserts the PATH both entry points agree on, not the warp.
 	local work="$BATS_TEST_TMPDIR/gwork"
-	mkdir -p "$work/src" "$work/dist/stab"
+	mkdir -p "$work/src" "$work/.loggrade/stabilisation"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	printf 'stand-in for a real transform\n' > "$work/dist/stab/CLIP.trf"
+	printf 'stand-in for a real transform\n' > "$work/.loggrade/stabilisation/CLIP.trf"
 	GRADE_WORK_DIR="$work" DRY=1 MATCH=0 run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"$work/dist/stab/CLIP.trf"* ]] \
+	[[ "$output" == *"$work/.loggrade/stabilisation/CLIP.trf"* ]] \
 		|| fail "grade.sh did not find the shared transform: $output"
 }
 
@@ -599,16 +623,16 @@ PY
 	# re-grade — change the look, tone or saturation and the same warp still applies — so the
 	# graded master's mtime says nothing about whether the camera moved.
 	local work="$BATS_TEST_TMPDIR/prov"
-	mkdir -p "$work/src" "$work/dist/02-graded" "$work/dist/stab"
+	mkdir -p "$work/src" "$work/.loggrade/masters" "$work/.loggrade/stabilisation"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	printf 'transform measured on this source\n' > "$work/dist/stab/CLIP.trf"
+	printf 'transform measured on this source\n' > "$work/.loggrade/stabilisation/CLIP.trf"
 	# The master is re-rendered AFTER the transform. That is a re-grade, not a re-shoot.
-	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
 	# Stamp the order explicitly. bash 3.2's -nt compares whole seconds, and all three files are
 	# created inside one second here, so without this the transform is not "newer" than anything.
 	touch -t 202609010000 "$work/src/CLIP.mov"
-	touch -t 202609020000 "$work/dist/stab/CLIP.trf"
-	touch -t 202609030000 "$work/dist/02-graded/CLIP_graded.mov"
+	touch -t 202609020000 "$work/.loggrade/stabilisation/CLIP.trf"
+	touch -t 202609030000 "$work/.loggrade/masters/CLIP_graded.mov"
 	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
 	[[ "$output" == *"stabilising with"* ]] \
 		|| fail "called a valid transform stale after a re-grade: $output"
@@ -624,7 +648,7 @@ PY
 }
 
 @test "every stage creates its own output directory" {
-	# The staged scripts once relied on a dist/*/.gitkeep existing in the REPO, so with a work dir
+	# The staged scripts once relied on a .gitkeep existing in the REPO, so with a work dir
 	# set they wrote into a directory that does not exist — and ffmpeg reported it only at the end
 	# of a full-length encode. The markers have since been deleted, which makes this test the only
 	# thing standing between a fresh clone and that bug returning. The test above pre-creates every
@@ -632,19 +656,19 @@ PY
 	local work="$BATS_TEST_TMPDIR/bare" s
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	mkdir -p "$work/dist/01-baseline" "$work/dist/02-graded"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/01-baseline/CLIP_baseline.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
-	# dist/03-final is the one nothing has created.
-	[ ! -d "$work/dist/03-final" ]
+	mkdir -p "$work/.loggrade/baseline" "$work/.loggrade/masters"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/baseline/CLIP_baseline.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
+	# The export folder is the one nothing has created.
+	[ ! -d "$work/export" ]
 	for s in reels feed; do
-		GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP "$s"
+		EXPORT_DIR="$work/export" GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP "$s"
 		# Assert the directory itself, not the absence of an error message: this fixture is too
 		# small to survive the full delivery chain, and an unrelated encode failure must not let
 		# this pass vacuously.
-		[ -d "$work/dist/03-final" ] \
+		[ -d "$work/export" ] \
 			|| fail "03-final.sh $s did not create its output dir: $output"
-		rm -rf "$work/dist/03-final"
+		rm -rf "$work/export"
 	done
 }
 
@@ -758,7 +782,7 @@ JSON
 	[ "$status" -eq 0 ] || fail "$output"
 	[[ "$output" == *"metered exposure="* ]] || fail "the exposure meter did not run: $output"
 
-	out=$(ls "$work"/dist/proofs/*.mp4 2>/dev/null | head -1) || true
+	out=$(ls "$work"/.loggrade/proofs/*.mp4 2>/dev/null | head -1) || true
 	[ -n "$out" ] || fail "no proof was written: $output"
 	w=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=nw=1:nk=1 "$out" | head -1)
 	h=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=nw=1:nk=1 "$out" | head -1)
@@ -955,20 +979,20 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 	# reports "code 3074: no path between colorspaces" on it, while a real graded master passes the
 	# identical graph), so a plain run is a reliable failing render.
 	local work="$BATS_TEST_TMPDIR/keepdeliv" out before
-	mkdir -p "$work/src" "$work/dist/02-graded" "$work/dist/03-final"
+	mkdir -p "$work/src" "$work/.loggrade/masters" "$work/export"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
 
-	out="$work/dist/03-final/CLIP_reels-stories_9x16.mp4"
+	out="$work/export/CLIP_reels-stories_9x16.mp4"
 	ffmpeg -y -f lavfi -i "color=c=red:s=72x128:d=0.1:r=24" -frames:v 1 \
 		-c:v libx264 -pix_fmt yuv420p "$out" -v error
 	before=$(md5 -q "$out")
 
-	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
+	EXPORT_DIR="$work/export" GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
 	[ "$status" -ne 0 ] || skip "the fixture rendered successfully; this test needs a failing render"
 	[ -s "$out" ] || fail "the approved deliverable was truncated"
 	[ "$(md5 -q "$out")" = "$before" ] || fail "the approved deliverable was modified"
-	[ ! -f "$work/dist/03-final/CLIP_reels-stories_9x16.partial.mp4" ] \
+	[ ! -f "$work/export/CLIP_reels-stories_9x16.partial.mp4" ] \
 		|| fail "left a staging file in the folder someone uploads from"
 }
 
@@ -1000,17 +1024,17 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 	# "Cannot parse localmotion: unexpected end of file". Only AAA gets one, so BBB is the clip
 	# that must still render.
 	local work="$BATS_TEST_TMPDIR/batch"
-	mkdir -p "$work/src" "$work/dist/stab"
+	mkdir -p "$work/src" "$work/.loggrade/stabilisation"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/AAA.mov"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/BBB.mov"
-	printf 'VID.STAB 1\n\n' > "$work/dist/stab/AAA.trf"
+	printf 'VID.STAB 1\n\n' > "$work/.loggrade/stabilisation/AAA.trf"
 	# bash 3.2's -nt compares whole seconds and these are created inside one, so stamp the order.
 	touch -t 202609010000 "$work/src/AAA.mov" "$work/src/BBB.mov"
-	touch -t 202609020000 "$work/dist/stab/AAA.trf"
+	touch -t 202609020000 "$work/.loggrade/stabilisation/AAA.trf"
 
-	GRADE_WORK_DIR="$work" MATCH=0 run "$SCRIPTS/grade.sh" "$work/src"
+	EXPORT_DIR="$work/export" GRADE_WORK_DIR="$work" MATCH=0 run "$SCRIPTS/grade.sh" "$work/src"
 	[[ "$output" == *"FAIL  AAA"* ]] || fail "the failing clip was not reported as failed: $output"
-	[ -s "$work/dist/03-final/BBB_reels-stories_9x16.mp4" ] \
+	[ -s "$work/export/BBB_reels-stories_9x16.mp4" ] \
 		|| fail "the batch stopped at the failing clip; BBB was never rendered: $output"
 	[[ "$output" == *"1 failed"* ]] || fail "the summary did not count the failure: $output"
 	[ "$status" -ne 0 ] || fail "a run with a failed clip exited 0"
@@ -1024,7 +1048,7 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 	mkdir -p "$work"
 	GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh"
 	[ "$status" -ne 0 ] || fail "no-argument run exited 0"
-	[ ! -d "$work/dist" ] || fail "a usage error created $(find "$work/dist" -type f | tr '\n' ' ')"
+	[ -z "$(ls -A "$work")" ] || fail "a usage error created $(find "$work" -mindepth 1 | tr '\n' ' ')"
 }
 
 # --- the grade chain: one builder, two render paths ---------------------------
@@ -1062,7 +1086,7 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 	# whether a filter graph initialises and produces pixels, which does not depend on this
 	# camera's stream structure. A baseline is by definition already Rec.709 ProRes.
 	local work="$BATS_TEST_TMPDIR/staged" base out
-	base="$work/dist/01-baseline/CCC_baseline.mov"
+	base="$work/.loggrade/baseline/CCC_baseline.mov"
 	mkdir -p "$(dirname "$base")"
 	ffmpeg -y -f lavfi -i "testsrc2=s=240x426:d=0.2:r=24" \
 		-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le "$base.raw.mov" -v error
@@ -1072,7 +1096,7 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 
 	GRADE_WORK_DIR="$work" run "$SCRIPTS/02-grade.sh" CCC
 	[ "$status" -eq 0 ] || fail "$output"
-	out="$work/dist/02-graded/CCC_graded.mov"
+	out="$work/.loggrade/masters/CCC_graded.mov"
 	[ -s "$out" ] || fail "the staged graph produced nothing: $output"
 	# THE TONE CURVE MUST BE LOAD-BEARING, and proving that took three attempts — each earlier
 	# one passed against a mutation it was written to catch:
@@ -1209,9 +1233,9 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 
 @test "03-final.sh refuses a non-numeric crop offset" {
 	local work="$BATS_TEST_TMPDIR/inj-crop" marker="$BATS_TEST_TMPDIR/crop-written"
-	mkdir -p "$work/src" "$work/dist/02-graded"
+	mkdir -p "$work/src" "$work/.loggrade/masters"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
 	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP feed "750,metadata=print:file=$marker"
 	[ "$status" -ne 0 ]
 	# The words, not just the status: this fixture cannot complete the delivery chain, so a non-zero
@@ -1224,16 +1248,16 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 	# The spec went through a here-string, which swallows the refusal: the script carried on with
 	# empty aspect terms and died on an arithmetic syntax error, with no code for a wrapper to read.
 	local work="$BATS_TEST_TMPDIR/bad-deliv"
-	mkdir -p "$work/src" "$work/dist/02-graded"
+	mkdir -p "$work/src" "$work/.loggrade/masters"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
 	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP nope
 	[ "$status" -ne 0 ] || fail "accepted an unknown deliverable"
 	[[ "$output" == *"REFUSING: unknown deliverable 'nope'"* ]] || fail "not refused by the spec: $output"
 	[[ "$output" == *"GRADE_CODE=REFUSE_DELIVERABLE"* ]] || fail "unnamed refusal: $output"
 	[[ "$output" != *"syntax error"* ]] || fail "died in arithmetic instead of refusing: $output"
 	[[ "$output" != *"deliverable:"* ]] || fail "went on to plan a deliverable: $output"
-	[ ! -d "$work/dist/03-final" ] || fail "created the output folder for a refused deliverable"
+	[ -z "$(_exports "$work")" ] || fail "created the output folder for a refused deliverable"
 }
 
 @test "every stage refuses a clip argument that escapes the work dir" {
@@ -1242,7 +1266,7 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 	# turns a traversal argument into a successful write: before it, the absent directory stopped
 	# the render by accident.
 	local work="$BATS_TEST_TMPDIR/escape" s
-	mkdir -p "$work/src" "$work/dist/01-baseline" "$work/dist/02-graded"
+	mkdir -p "$work/src" "$work/.loggrade/baseline" "$work/.loggrade/masters"
 	for s in 00-stabilise-detect 01-baseline 02-grade 03-final; do
 		GRADE_WORK_DIR="$work" run "$SCRIPTS/$s.sh" "../../escaped"
 		[ "$status" -ne 0 ] || fail "$s.sh accepted a traversing clip name"
@@ -1317,7 +1341,7 @@ PY
 	[ "$status" -eq 0 ]
 	[[ "$output" != *"clip(s)"* ]] || fail "a human line reached stdout under JSON=1: $output"
 	local report
-	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
+	report=$(ls "$work"/.loggrade/reports/run-*.txt 2>/dev/null | head -1) || true
 	[ -n "$report" ] || fail "no run report was written: $output"
 	grep -q "clip(s)" "$report" || fail "the report lost its header line"
 	grep -q "metered exposure=" "$report" || fail "the report lost the per-clip plan"
@@ -1341,7 +1365,7 @@ PY
 	[ "$status" -eq 0 ] || fail "render failed: $output $stderr"
 	[[ "$output" != *"took"* ]] || fail "a report line reached the event stream: $output"
 	local report
-	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
+	report=$(ls "$work"/.loggrade/reports/run-*.txt 2>/dev/null | head -1) || true
 	[ -n "$report" ] || fail "no run report was written: $output"
 	grep -qE '^ffmpeg: +ffmpeg version' "$report" || fail "no ffmpeg version: $(cat "$report")"
 	grep -qE '^machine: .*[0-9]+ cores' "$report" || fail "no machine line: $(cat "$report")"
@@ -1379,7 +1403,7 @@ PY
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "render failed: $output"
 	local report expected
-	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
+	report=$(ls "$work"/.loggrade/reports/run-*.txt 2>/dev/null | head -1) || true
 	[ -n "$report" ] || fail "no run report was written: $output"
 	expected="[0:v]zscale=w=72:h=128:f=lanczos,format=yuv444p10le,lut3d=file='$(resolve_conversion neutral)':interp=tetrahedral,${DELIVERY_SETPARAMS},zscale=w=72:h=128:f=lanczos:d=error_diffusion,format=yuv420p[o]"
 	grep -qxF -- "$expected" "$report" \
@@ -1394,7 +1418,7 @@ PY
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "frame failed: $output"
 	local report
-	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
+	report=$(ls "$work"/.loggrade/reports/run-*.txt 2>/dev/null | head -1) || true
 	[ -n "$report" ] || fail "no run report was written: $output"
 	grep -qE 'frame render took [0-9]+\.[0-9]{3}s' "$report" || fail "frame untimed: $(cat "$report")"
 	grep -qE -- '--- graph [0-9]+ \(frame, -filter_complex\) ---' "$report" || fail "no frame graph: $(cat "$report")"
@@ -1525,13 +1549,13 @@ PY
 	FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "$output"
-	local png="$work/dist/frames/CLIP_t0s_graded.png"
+	local png="$work/.loggrade/frames/CLIP_t0s_graded.png"
 	[ -s "$png" ] || fail "no preview frame at $png: $output"
 	run ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,height \
 		-of default=nw=1:nk=1 "$png"
 	[[ "$output" == *"png"* ]] || fail "not a PNG: $output"
 	# A preview is not a delivery. Nothing may land where someone uploads from.
-	[ -z "$(ls -A "$work/dist/03-final" 2>/dev/null)" ] || fail "FRAME wrote a deliverable"
+	[ -z "$(_exports "$work")" ] || fail "FRAME wrote a deliverable"
 }
 
 @test "FRAME_STAGE=source gives the picture with no grade on it at all" {
@@ -1548,8 +1572,8 @@ PY
 	FRAME=0 FRAME_HEIGHT=128 MATCH=0 FRAME_STAGE=source GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "$output"
-	local graded="$work/dist/frames/CLIP_t0s_graded.png"
-	local source="$work/dist/frames/CLIP_t0s_source.png"
+	local graded="$work/.loggrade/frames/CLIP_t0s_graded.png"
+	local source="$work/.loggrade/frames/CLIP_t0s_source.png"
 	[ -s "$graded" ] || fail "no graded frame: $output"
 	# SEPARATE FILES. One name for both stages meant the second render silently replaced the first,
 	# which is how a test in the Swift suite once compared a frame against itself.
@@ -1558,14 +1582,14 @@ PY
 }
 
 @test "FRAME_STAGE refuses a value that is neither stage" {
-	# A work dir of its own: without one a broken refusal would render into the repo's dist/.
+	# A work dir of its own: without one a broken refusal would render into the repo.
 	local work="$BATS_TEST_TMPDIR/frame-stage"
 	mkdir -p "$work"
 	run env GRADE_WORK_DIR="$work" FRAME=0 FRAME_STAGE=halfway "$SCRIPTS/grade.sh" "$FIXTURES/portrait_tagged.mov"
 	[ "$status" -ne 0 ] || fail "an unknown stage was accepted"
 	[[ "$output" == *"FRAME_STAGE must be 'graded' or 'source'"* ]] || fail "not refused by the guard: $output"
 	[[ "$output" == *"REFUSE_FRAME_STAGE"* ]] || fail "no refusal code: $output"
-	[ ! -d "$work/dist" ] || fail "created output before refusing the stage"
+	[ -z "$(ls -A "$work")" ] || fail "created output before refusing the stage"
 }
 
 @test "FRAME and PROOF together are refused rather than silently resolved" {
@@ -1598,7 +1622,7 @@ PY
 	FRAME=0 FRAME_HEIGHT=128 MATCH=0 STAB=1 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ]
-	[ ! -f "$work/dist/stab/CLIP.trf" ] || fail "FRAME ran the detect pass anyway"
+	[ ! -f "$work/.loggrade/stabilisation/CLIP.trf" ] || fail "FRAME ran the detect pass anyway"
 	[[ "$output" != *"stabilising from"* ]] || fail "FRAME claimed to stabilise a still: $output"
 }
 
@@ -1656,8 +1680,8 @@ PY
 	# dozen other lines and the render went ahead regardless.
 	local work="$BATS_TEST_TMPDIR/stale-final"
 	_stale_transform "$work"
-	mkdir -p "$work/dist/02-graded"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
+	mkdir -p "$work/.loggrade/masters"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
 	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
 	[ "$status" -ne 0 ] || fail "delivered against a stale transform"
 	# Assert the REFUSAL's own words and that the render was never attempted. A synthetic fixture
@@ -1675,8 +1699,8 @@ PY
 	# that the refusal is skipped, said out loud, and the render is attempted.
 	local work="$BATS_TEST_TMPDIR/stale-ok"
 	_stale_transform "$work"
-	mkdir -p "$work/dist/02-graded"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/02-graded/CLIP_graded.mov"
+	mkdir -p "$work/.loggrade/masters"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
 	ACCEPT_STALE=1 GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
 	[[ "$output" == *"accepted via ACCEPT_STALE=1"* ]] || fail "said nothing about it: $output"
 	[[ "$output" != *"REFUSING"* ]] || fail "refused despite ACCEPT_STALE=1: $output"
@@ -1756,7 +1780,7 @@ PY
 	FPS_OUT=30 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[[ "$output" == *"GRADE_CODE=REFUSE_FPS_RETIME"* ]] || fail "unnamed refusal: $output"
 	[[ "$output" == *"needs retiming"* ]] || fail "said nothing useful: $output"
-	[ -z "$(ls -A "$work/dist/03-final" 2>/dev/null)" ] || fail "delivered anyway"
+	[ -z "$(_exports "$work")" ] || fail "delivered anyway"
 }
 
 # --- deliverables as data ------------------------------------------------------
@@ -1869,7 +1893,7 @@ PY
 	DELIVERABLES=tall:1:4:41 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[[ "$output" == *"does not fit"* ]] || fail "gave no reason: $output"
-	[ -z "$(ls -A "$work/dist/03-final" 2>/dev/null)" ] || fail "delivered anyway"
+	[ -z "$(_exports "$work")" ] || fail "delivered anyway"
 }
 
 @test "a cropping deliverable with no offset is refused even for a single clip" {
@@ -1883,7 +1907,7 @@ PY
 	[ "$status" -ne 0 ] || fail "invented an offset for a single clip: $output"
 	[[ "$output" == *"GRADE_CODE=REFUSE_CROP_NO_OFFSET"* ]] || fail "unnamed refusal: $output"
 	[[ "$output" == *"no sensible"* ]] || fail "did not say why there is no default: $output"
-	[ -z "$(ls -A "$work/dist/03-final" 2>/dev/null)" ] || fail "delivered anyway"
+	[ -z "$(_exports "$work")" ] || fail "delivered anyway"
 	# An explicit offset still works, and so does an explicit "I do not need one".
 	DELIVERABLES=feed CROP_OFFSET=centre MATCH=0 STAB=0 DRY=1 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/ONE.mov"
@@ -1944,7 +1968,7 @@ PY
 		run "$SCRIPTS/grade.sh" "$work/src/WIDE.mov"
 	[ "$status" -eq 0 ] || fail "render failed: $output"
 	[[ "$output" == *"cropped 40x72 at 44,0"* ]] || fail "did not report the horizontal window: $output"
-	out=$(ls "$work"/dist/proofs/*.mp4 2>/dev/null | head -1) || true
+	out=$(ls "$work"/.loggrade/proofs/*.mp4 2>/dev/null | head -1) || true
 	[ -n "$out" ] || fail "no proof was written: $output"
 	w=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of default=nw=1:nk=1 "$out" | head -1)
 	h=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=nw=1:nk=1 "$out" | head -1)
@@ -2229,7 +2253,7 @@ print("%.1e %.4f" % (worst, mc.decode(1.0)))
 	DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ]
 	[[ "$output" != *"correction:"* ]] || fail "announced a correction that does nothing: $output"
-	[ ! -f "$work/dist/.grade-work/correct.cube" ] || fail "generated a cube for a neutral correction"
+	[ ! -f "$work/.loggrade/work/correct.cube" ] || fail "generated a cube for a neutral correction"
 }
 
 # bats test_tags=slow
@@ -2247,13 +2271,13 @@ PY
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "$output"
 	[[ "$output" == *"correction: --exposure 0.75 "* ]] || fail "said nothing about it: $output"
-	[ -s "$work/dist/.grade-work/correct.cube" ] || fail "no cube was generated"
+	[ -s "$work/.loggrade/work/correct.cube" ] || fail "no cube was generated"
 	# And it changed the picture. A string test cannot tell whether the filter did anything.
-	mv "$work/dist/frames/CLIP_t0s_graded.png" "$work/corrected.png"
+	mv "$work/.loggrade/frames/CLIP_t0s_graded.png" "$work/corrected.png"
 	FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ]
-	! cmp -s "$work/corrected.png" "$work/dist/frames/CLIP_t0s_graded.png" \
+	! cmp -s "$work/corrected.png" "$work/.loggrade/frames/CLIP_t0s_graded.png" \
 		|| fail "a 0.75 stop exposure correction changed nothing"
 }
 
@@ -2340,9 +2364,9 @@ _look_with() {  # _look_with <name> <jq-assignment>
 	# and answers with nothing. Compared as a string, nothing is "not active": the correction was
 	# left out of both render paths in silence. Both must refuse instead.
 	local work="$BATS_TEST_TMPDIR/badwheel" look
-	mkdir -p "$work/src" "$work/dist/01-baseline"
+	mkdir -p "$work/src" "$work/.loggrade/baseline"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/dist/01-baseline/CLIP_baseline.mov"
+	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/baseline/CLIP_baseline.mov"
 	look="$(_look_with badwheel '.correct.slope = "1.2, 1, 1"')"
 
 	LOOK_FILE="$look" DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
@@ -2354,7 +2378,7 @@ _look_with() {  # _look_with <name> <jq-assignment>
 	[ "$status" -ne 0 ] || fail "02-grade.sh rendered a master without the correction"
 	[[ "$output" == *"correct.slope must be numbers separated by commas"* ]] \
 		|| fail "02-grade.sh did not say which value: $output"
-	[ ! -e "$work/dist/02-graded" ] || fail "02-grade.sh created output before refusing"
+	[ ! -e "$work/.loggrade/masters" ] || fail "02-grade.sh created output before refusing"
 }
 
 @test "encode settings, analysis settings and stage paths are spelled in lib.sh and nowhere else" {
@@ -2365,7 +2389,7 @@ _look_with() {  # _look_with <name> <jq-assignment>
 	local offenders
 	# The render entry points only. check.sh names Apple's cube and src/ too, to warn that a green run
 	# skipped the render tests; it renders nothing and does not source lib.sh.
-	offenders=$(grep -nE 'libx264|prores_ks|vidstabdetect|AppleLogToRec709|dist/(stab|01-baseline|02-graded)/|/src/' \
+	offenders=$(grep -nE 'libx264|prores_ks|vidstabdetect|AppleLogToRec709|\.loggrade/(stabilisation|baseline|masters)/|/src/' \
 		"$SCRIPTS"/0*.sh "$SCRIPTS"/grade.sh | grep -v ':[0-9]*:[[:space:]]*#' || true)
 	[ -z "$offenders" ] || fail "spelled outside lib.sh:$offenders"
 }
@@ -2482,7 +2506,7 @@ sys.exit("; ".join(problems) or None)
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "$output"
 	[[ "$output" != *"halation:"* ]] || fail "announced a halation that does nothing: $output"
-	[ ! -d "$work/dist/.grade-work/halation" ] || fail "generated cubes for a neutral halation"
+	[ ! -d "$work/.loggrade/work/halation" ] || fail "generated cubes for a neutral halation"
 }
 
 # bats test_tags=slow
@@ -2498,12 +2522,12 @@ sys.exit("; ".join(problems) or None)
 		run "$SCRIPTS/grade.sh" "$clip"
 	[ "$status" -eq 0 ] || fail "$output"
 	[[ "$output" == *"halation: strength=0.8"* ]] || fail "said nothing about it: $output"
-	mv "$work/dist/frames/EDGE_t0s_graded.png" "$work/glowing.png"
+	mv "$work/.loggrade/frames/EDGE_t0s_graded.png" "$work/glowing.png"
 	jq '.halation.strength = 0' "$look" > "$look.off"
 	LOOK_FILE="$look.off" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$clip"
 	[ "$status" -eq 0 ] || fail "$output"
-	! cmp -s "$work/glowing.png" "$work/dist/frames/EDGE_t0s_graded.png" \
+	! cmp -s "$work/glowing.png" "$work/.loggrade/frames/EDGE_t0s_graded.png" \
 		|| fail "a strength of 0.8 changed nothing"
 }
 
@@ -2518,7 +2542,7 @@ sys.exit("; ".join(problems) or None)
 			run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 		[ "$status" -ne 0 ] || fail "rendered with tint '$tint'"
 		[[ "$output" == *"halation.tint"* ]] || fail "tint '$tint' refused without naming it: $output"
-		[ ! -d "$work/dist/frames" ] || fail "tint '$tint' got as far as rendering"
+		[ ! -d "$work/.loggrade/frames" ] || fail "tint '$tint' got as far as rendering"
 	done
 }
 
@@ -2566,7 +2590,7 @@ sys.exit(None if 0 <= hue < tone else "order is hue@%d tone@%d" % (hue, tone))
 	cp "$FIXTURES/probe_mid.mov" "$work/src/CLIP.mov"
 	MATCH=0 STAB=0 HEIGHT=128 PROOF=0.1 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "render failed: $output"
-	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
+	report=$(ls "$work"/.loggrade/reports/run-*.txt 2>/dev/null | head -1) || true
 	[ -n "$report" ] || fail "no run report: $output"
 	grep -qE "^\[0:v\]zscale=w=72:h=128:f=lanczos,format=yuv444p10le,.*lut3d=file='[^']*neutral\.cube'" "$report" \
 		|| fail "the graph does not shrink before the conversion: $(grep -F '[0:v]' "$report")"
@@ -2584,9 +2608,9 @@ sys.exit(None if 0 <= hue < tone else "order is hue@%d tone@%d" % (hue, tone))
 	LOOK_FILE="$look" DELIVERABLES=reels,feed CROP_OFFSET=centre MATCH=0 STAB=0 HEIGHT=128 PROOF=0.2 \
 		GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "render failed: $output"
-	[ -s "$work/dist/proofs/CLIP_reels-stories_9x16_proof-0.2s.mp4" ] || fail "no reels: $output"
-	[ -s "$work/dist/proofs/CLIP_feed_4x5_proof-0.2s.mp4" ] || fail "no feed: $output"
-	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
+	[ -s "$work/.loggrade/proofs/CLIP_reels-stories_9x16_proof-0.2s.mp4" ] || fail "no reels: $output"
+	[ -s "$work/.loggrade/proofs/CLIP_feed_4x5_proof-0.2s.mp4" ] || fail "no feed: $output"
+	report=$(ls "$work"/.loggrade/reports/run-*.txt 2>/dev/null | head -1) || true
 	[ "$(grep -c -- '--- graph [0-9]* (reels-stories_9x16+feed_4x5 encode, -filter_complex) ---' "$report")" = 1 ] \
 		|| fail "not one pass for both: $(grep -F -- '--- graph' "$report")"
 	grep -qE '^\[0:v\].*split=2\[s0\]\[s1\];.*\[sh1_in\].*\[gw1_image\]' "$report" \
@@ -2691,7 +2715,7 @@ sys.exit("; ".join(problems) or None)
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -ne 0 ] || fail "rendered with DELIVERY_BITS=12"
 	[[ "$output" == *"DELIVERY_BITS must be 8 or 10"* ]] || fail "refused without naming DELIVERY_BITS: $output"
-	[ ! -d "$work/dist/frames" ] || fail "DELIVERY_BITS=12 got as far as rendering"
+	[ ! -d "$work/.loggrade/frames" ] || fail "DELIVERY_BITS=12 got as far as rendering"
 }
 
 @test "flat grain weights leave the mask out of the graph" {
@@ -2711,7 +2735,7 @@ sys.exit("; ".join(problems) or None)
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -ne 0 ] || fail "rendered with FINISH=no"
 	[[ "$output" == *"FINISH must be 0 or 1"* ]] || fail "refused without naming FINISH: $output"
-	[ ! -d "$work/dist/frames" ] || fail "FINISH=no got as far as rendering"
+	[ ! -d "$work/.loggrade/frames" ] || fail "FINISH=no got as far as rendering"
 }
 
 @test "a grain weight outside 0 to 1 is refused before anything renders" {
@@ -2724,7 +2748,7 @@ sys.exit("; ".join(problems) or None)
 			run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 		[ "$status" -ne 0 ] || fail "rendered with grain.shadows '$v'"
 		[[ "$output" == *"grain.shadows"* ]] || fail "'$v' refused without naming it: $output"
-		[ ! -d "$work/dist/frames" ] || fail "'$v' got as far as rendering"
+		[ ! -d "$work/.loggrade/frames" ] || fail "'$v' got as far as rendering"
 	done
 }
 
@@ -2740,7 +2764,7 @@ sys.exit("; ".join(problems) or None)
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "$output"
 	local out
-	out=$(find "$work/dist/proofs" -name '*.mp4' | head -1)
+	out=$(find "$work/.loggrade/proofs" -name '*.mp4' | head -1)
 	[ -s "$out" ] || fail "no proof was written: $output"
 }
 
@@ -2750,7 +2774,7 @@ sys.exit("; ".join(problems) or None)
 	# to go. For as long as the correction existed this path rendered masters without it, and they
 	# looked finished.
 	local work="$BATS_TEST_TMPDIR/staged-pre" base look="$BATS_TEST_TMPDIR/staged-pre.json" key
-	base="$work/dist/01-baseline/CCC_baseline.mov"
+	base="$work/.loggrade/baseline/CCC_baseline.mov"
 	mkdir -p "$(dirname "$base")"
 	ffmpeg -y -f lavfi -i "testsrc2=s=72x128:d=0.1:r=24" \
 		-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le "$base" -v error
@@ -2760,7 +2784,7 @@ sys.exit("; ".join(problems) or None)
 		[ "$status" -ne 0 ] || fail "rendered a master with '$key' left out"
 		[[ "$output" == *"runs before Apple's conversion"* ]] || fail "'$key' refused without saying why: $output"
 		[[ "$output" == *"GRADE_CODE=REFUSE_STAGED_PRE_CONVERSION"* ]] || fail "'$key' refused without its code"
-		[ ! -e "$work/dist/02-graded/CCC_graded.mov" ] || fail "'$key' got as far as encoding"
+		[ ! -e "$work/.loggrade/masters/CCC_graded.mov" ] || fail "'$key' got as far as encoding"
 	done
 }
 
@@ -2850,8 +2874,8 @@ _low_band_db() {  # _low_band_db <file> <hz>
 	PROOF=3 STAB=0 AUDIO_HIGHPASS_HZ=0 GRADE_WORK_DIR="$BATS_TEST_TMPDIR/hp-off" \
 		run "$SCRIPTS/grade.sh" "$src"
 	[ "$status" -eq 0 ] || fail "unfiltered render failed: $output"
-	on=$(find "$BATS_TEST_TMPDIR/hp-on/dist/proofs" -name '*.mp4')
-	off=$(find "$BATS_TEST_TMPDIR/hp-off/dist/proofs" -name '*.mp4')
+	on=$(find "$BATS_TEST_TMPDIR/hp-on/.loggrade/proofs" -name '*.mp4')
+	off=$(find "$BATS_TEST_TMPDIR/hp-off/.loggrade/proofs" -name '*.mp4')
 	[ -s "$on" ] && [ -s "$off" ] || fail "a proof is missing: '$on' '$off'"
 
 	hz=$(( DELIVERY_AUDIO_HIGHPASS_HZ / 2 ))
@@ -2880,9 +2904,9 @@ _low_band_db() {  # _low_band_db <file> <hz>
 	[[ "$output" != *highpass* && "$output" != *Filtergraph* ]] \
 		|| fail "the audio filter complained: $output"
 	# Without this the test also passes with the filter off, which is not the case it is about.
-	grep -q -- "-af highpass=f=$DELIVERY_AUDIO_HIGHPASS_HZ" "$work"/dist/reports/*.txt \
+	grep -q -- "-af highpass=f=$DELIVERY_AUDIO_HIGHPASS_HZ" "$work"/.loggrade/reports/*.txt \
 		|| fail "the render did not carry the audio filter"
-	out=$(find "$work/dist/proofs" -name '*.mp4')
+	out=$(find "$work/.loggrade/proofs" -name '*.mp4')
 	[ -s "$out" ] || fail "no proof was written: $output"
 	streams=$(ffprobe -v error -show_entries stream=codec_type -of default=nw=1:nk=1 "$out")
 	[ "$streams" = video ] || fail "expected only a video stream, got: $streams"
@@ -2899,7 +2923,7 @@ _low_band_db() {  # _low_band_db <file> <hz>
 		[ "$status" -ne 0 ] || fail "grade.sh accepted '$v'"
 		[[ "$output" == *"AUDIO_HIGHPASS_HZ must be a whole number of hertz"* ]] \
 			|| fail "grade.sh did not refuse '$v' by name: $output"
-		[ ! -e "$work/dist/proofs" ] || fail "grade.sh got as far as rendering with '$v'"
+		[ ! -e "$work/.loggrade/proofs" ] || fail "grade.sh got as far as rendering with '$v'"
 		AUDIO_HIGHPASS_HZ="$v" GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP
 		[ "$status" -ne 0 ] || fail "03-final.sh accepted '$v'"
 		[[ "$output" == *"AUDIO_HIGHPASS_HZ must be a whole number of hertz"* ]] \

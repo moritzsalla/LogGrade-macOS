@@ -85,7 +85,7 @@ final class EndToEndTests: XCTestCase {
     }
 
     private func onlyProof(in work: URL) throws -> URL {
-        let proofs = work.appendingPathComponent("dist/proofs")
+        let proofs = work.appendingPathComponent(".loggrade/proofs")
         let files = try FileManager.default.contentsOfDirectory(
             at: proofs,
             includingPropertiesForKeys: nil
@@ -158,7 +158,7 @@ final class DeliveryTests: XCTestCase {
         // WHERE IT LANDED. A deliverable rendered into a scratch directory is one macOS may
         // delete, and that is what this app did until it was given somewhere to put things.
         //
-        // The prefix, not the exact folder: this render is a proof so it lands in dist/proofs by
+        // The prefix, not the exact folder: this render is a proof so it lands in .loggrade/proofs by
         // design, and proofs are deliberately not deliverables. What is asserted is that the
         // engine wrote inside the directory it was pointed at.
         let written = try XCTUnwrap(queue.jobs.first?.outputs.first).standardizedFileURL.path

@@ -422,8 +422,8 @@ final class GradeModel: ObservableObject {
         let shipped = engine.shippedPresets()
         self.shippedPresets = shipped
         self.project = Project(
-            presets: [.init(name: "shipped", look: look)] + shipped,
-            activePreset: "shipped")
+            presets: [.init(name: Self.neutralPresetName, look: look)] + shipped,
+            activePreset: Self.neutralPresetName)
         let work = FileManager.default.temporaryDirectory
             .appendingPathComponent("loggrade-preview", isDirectory: true)
         self.workDirectory = work
@@ -613,8 +613,12 @@ final class GradeModel: ObservableObject {
         UserDefaults.standard.set(url, forKey: DefaultsKey.lastProject)
     }
 
+    /// The app's own rendering with nothing on top: the preset a new project starts on.
+    static let neutralPresetName = "Neutral"
+
     func openProject(at url: URL) throws {
         var opened = try Project(data: try Data(contentsOf: url))
+        opened.renamePreset(from: "shipped", to: Self.neutralPresetName)
         for preset in shippedPresets
         where !opened.presets.contains(where: { $0.name == preset.name }) {
             opened.presets.append(preset)
@@ -633,8 +637,8 @@ final class GradeModel: ObservableObject {
     ///
     /// A preview is scratch and belongs in a temp directory. A deliverable is the thing the whole
     /// app exists to produce, and rendering it into a temp directory — which is what this did —
-    /// means macOS is free to delete your shoot. The engine writes `dist/` inside whatever work
-    /// directory it is given, so choosing an output folder is choosing that.
+    /// means macOS is free to delete your shoot. Each Convert lands in its own dated folder inside
+    /// this one (`Project.exportFolder(in:)`), and the engine's working files in a hidden `.loggrade` beside it.
     ///
     /// The default is the folder the clips came from, so a shoot's output lands beside it rather
     /// than somewhere nobody chose. ADR 0006 in the engine's own docs makes the same argument
@@ -651,8 +655,13 @@ final class GradeModel: ObservableObject {
     /// Renders every clip in the list, through the engine, with the project's own settings. The
     /// look is written to a file per run and handed over with LOOK_FILE, so a render never edits
     /// the checkout's own look.json.
+    /// The folder the last Convert wrote to, so a cancel sweeps its staging files.
+    private(set) var lastExportFolder: URL?
+
     func convert(queue: RenderQueue) {
         guard let clips = clipEntries, let destination = outputDirectory else { return }
+        let export = Project.exportFolder(in: destination)
+        lastExportFolder = export
         let project = self.project
         let match = !bypassed.contains(.correct)
         let finish = Look.finishes(bypassing: bypassed)
@@ -683,6 +692,7 @@ final class GradeModel: ObservableObject {
             queue.start(environment: { stem in
                 var env = project.environment(for: stem, lookFile: lookFile)
                 env["GRADE_WORK_DIR"] = destination.path
+                env["EXPORT_DIR"] = export.path
                 if !match { env["MATCH"] = "0" }
                 if !finish { env["FINISH"] = "0" }
                 return env
@@ -702,7 +712,7 @@ final class GradeModel: ObservableObject {
 
     func cancel(queue: RenderQueue) {
         queue.cancel()
-        RenderQueue.sweepStagingFiles(in: workDirectory)
+        if let export = lastExportFolder { RenderQueue.sweepStagingFiles(in: export) }
     }
 
     /// The clips the interface is holding, set by the window when the list changes.

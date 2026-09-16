@@ -117,7 +117,7 @@ if ! GRADE_WORK_DIR="$TMP/work" LOOK_FILE="$ROOT/look.json" STAB=0 PROOF="$PROOF
 	exit 1
 fi
 PROOF_FILE=""
-for f in "$TMP/work/dist/proofs"/*.mp4; do
+for f in "$TMP/work/.loggrade/proofs"/*.mp4; do
 	if [ -f "$f" ]; then PROOF_FILE="$f"; fi
 done
 [ -n "$PROOF_FILE" ] || { echo "FAIL: the render wrote no proof" >&2; exit 1; }

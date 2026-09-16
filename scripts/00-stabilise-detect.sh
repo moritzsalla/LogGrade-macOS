@@ -1,7 +1,7 @@
 #!/bin/bash
 # Stage 0 (optional): analyse camera motion, producing transforms the final stages apply.
 # Usage: ./00-stabilise-detect.sh IMG_XXXX
-# Reads dist/02-graded/<clip>_graded.mov, writes dist/stab/<clip>.trf
+# Reads .loggrade/masters/<clip>_graded.mov, writes .loggrade/stabilisation/<clip>.trf
 #
 # Numbered 00 but run LAST in practice — it needs the master, and it is only worth running on a
 # clip that was shot handheld. A clip on a tripod needs nothing. With no .trf for the clip,

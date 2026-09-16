@@ -230,15 +230,15 @@ public final class RenderQueue: ObservableObject {
         }
     }
 
-    /// Removes staging files under a work directory. Called after a cancel, and safe any time: a
+    /// Removes staging files under an export folder. Called after a cancel, and safe any time: a
     /// `.partial` file is by definition not a deliverable.
     @discardableResult
     public static func sweepStagingFiles(
-        in workDirectory: URL,
+        in folder: URL,
         fileManager: FileManager = .default
     ) -> [URL] {
-        let dist = workDirectory.appendingPathComponent("dist")
-        guard let walker = fileManager.enumerator(at: dist, includingPropertiesForKeys: nil) else {
+        guard let walker = fileManager.enumerator(at: folder, includingPropertiesForKeys: nil)
+        else {
             return []
         }
         var swept: [URL] = []

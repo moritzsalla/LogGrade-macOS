@@ -158,7 +158,7 @@ final class RenderQueueTests: XCTestCase {
         // litter for a run that may never happen.
         let work = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
-        let final = work.appendingPathComponent("dist/03-final")
+        let final = work.appendingPathComponent("LogGrade export 2026-09-16 14.30")
         try FileManager.default.createDirectory(at: final, withIntermediateDirectories: true)
         let partial = final.appendingPathComponent("IMG_0609_reels.partial.mp4")
         let keeper = final.appendingPathComponent("IMG_0609_reels.mp4")
@@ -166,7 +166,7 @@ final class RenderQueueTests: XCTestCase {
         try Data("y".utf8).write(to: keeper)
         defer { try? FileManager.default.removeItem(at: work) }
 
-        let swept = RenderQueue.sweepStagingFiles(in: work)
+        let swept = RenderQueue.sweepStagingFiles(in: final)
         XCTAssertEqual(swept.map(\.lastPathComponent), ["IMG_0609_reels.partial.mp4"])
         XCTAssertFalse(FileManager.default.fileExists(atPath: partial.path))
         XCTAssertTrue(

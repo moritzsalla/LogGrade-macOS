@@ -65,12 +65,12 @@ _arg_off="$(crop_offset CROP_OFFSET "${3:-${CROP_OFFSET:-}}")" || exit 1
 
 IN="$(graded_master_path "$WORK" "$CLIP")"
 SRC="$(source_path "$WORK" "$CLIP")"
-OUT="$(deliverable_path "$WORK/dist/03-final" "$CLIP" "$SUFFIX")"
+OUT="$(deliverable_path "$(export_dir "$WORK")" "$CLIP" "$SUFFIX")"
 
 [ -f "$IN" ] || { echo "graded master not found: $IN — run 02-grade.sh first" >&2; exit 1; }
 # Lower than the ProRes stages' 10: a delivery mp4 measured ~100-170MB against 4.6GB for a clip's
 # two masters (docs/PIPELINE.md, "Disk space policy"). The margins themselves are a judgement.
-check_disk_space "$WORK/dist" 2
+check_disk_space "$WORK" 2
 # Create the output directory. This used to rely on a checked-in dist/*/.gitkeep marker, which
 # is wrong the moment a work dir is set: the marker was in the repo and the output was not.
 mkdir -p "$(dirname "$OUT")"
