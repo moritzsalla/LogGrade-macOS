@@ -570,8 +570,12 @@ for SRC in "${CLIPS[@]}"; do
 		fi
 		# One argument list for both the report and ffmpeg, so what is recorded cannot drift from what
 		# ran. Never empty, so bash 3.2's empty-array trap under `set -u` does not apply.
+		# UNCOMPRESSED PNG. The still is read once by the app and thrown away, and compressing a
+		# 16-bit 2560x1440 frame cost ~2 s of a ~3.7 s preview on the Intel Mac (IMG_0102 HEVC:
+		# 3708 ms compressed, 1600 ms at level 0; IMG_0444 ProRes 2520 vs 627 ms). PNG is lossless
+		# either way, so the pixels are identical.
 		frame_args=(-ss "$FRAME" -i "$SRC" -frames:v 1 -filter_complex "[0:v]${frame_graph}[o]" \
-			-map "[o]" -pix_fmt rgb48be "$frame_out")
+			-map "[o]" -pix_fmt rgb48be -compression_level 0 "$frame_out")
 		report_command "frame" "${frame_args[@]}"
 		_t=$(now_ms)
 		if ffmpeg -v error -y "${frame_args[@]}"; then
