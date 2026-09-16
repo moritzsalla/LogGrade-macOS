@@ -42,20 +42,28 @@ final class GradeModel: ObservableObject {
     /// grain because Neutral is what opens. `apply(preset:)` turns grain on for a film preset.
     @Published var bypassed: Set<Look.Stage> = [.denoise, .grain]
 
-    /// Per-clip exposure metering, which makes a shoot land together. A switch of its own because a
-    /// deliberately dark scene needs a way out of it without losing the sliders. Adjust switched
-    /// off takes it out too: off is the preset as shipped.
-    @Published var matchExposure = true
+    /// The selected clip's Adjust, stored in the project under the clip. With no clip selected
+    /// there is nothing to adjust, and a write goes nowhere.
+    var adjust: Look.Adjust {
+        get { selectedClip.map { project.settings(for: $0.stem).adjust } ?? Look.Adjust() }
+        set {
+            guard let stem = selectedClip?.stem else { return }
+            var settings = project.settings(for: stem)
+            settings.adjust = newValue
+            project.clips[stem] = settings
+        }
+    }
 
-    var matches: Bool { matchExposure && !bypassed.contains(.adjust) }
+    /// Adjust switched off takes metering out too: off is the preset as shipped.
+    var matches: Bool { adjust.match && !bypassed.contains(.adjust) }
 
     func setMatch(_ on: Bool) {
-        matchExposure = on
+        adjust.match = on
         liveUpdate()
         renderPreview()
     }
 
-    var effectiveLook: Look { look.bypassing(bypassed) }
+    var effectiveLook: Look { adjust.applied(to: look).bypassing(bypassed) }
 
     func setEnabled(_ stage: Look.Stage, _ enabled: Bool) {
         if enabled { bypassed.remove(stage) } else { bypassed.insert(stage) }
@@ -454,7 +462,10 @@ final class GradeModel: ObservableObject {
             $selectedClip.map { _ in () }.eraseToAnyPublisher(),
             $isComparing.map { _ in () }.eraseToAnyPublisher(),
             $renderedLook.map { _ in () }.eraseToAnyPublisher(),
-            $project.map { _ in () }.eraseToAnyPublisher(),
+            // Adjust lives in the project, and a drag writes it every tick; the panels watching
+            // `changes` never show it, so they see the project without it.
+            $project.map(\.ignoringAdjustments).removeDuplicates().map { _ in () }
+                .eraseToAnyPublisher(),
             $openStages.map { _ in () }.eraseToAnyPublisher(),
             $bypassed.map { _ in () }.eraseToAnyPublisher(),
             $frameSizes.map { _ in () }.eraseToAnyPublisher(),
@@ -525,16 +536,16 @@ final class GradeModel: ObservableObject {
         renderPreview()
     }
 
-    /// Everything in the inspector back to the active preset, bypass switches included: a stage
-    /// left off after a reset is an adjustment the reset did not remove.
+    /// The selected clip's Adjust and the switches back to where a preset starts. Other clips keep
+    /// their Adjust: a reset while looking at one clip must not undo work on eighteen others.
     func resetAdjustments() {
         bypassed = [.denoise]
-        matchExposure = true
+        adjust = Look.Adjust()
         apply(preset: project.activePreset)
     }
 
     var hasAdjustments: Bool {
-        hasUnsavedChanges || !matchExposure || bypassed.contains(.adjust)
+        hasUnsavedChanges || adjust != Look.Adjust() || bypassed.contains(.adjust)
             || !bypassed.contains(.denoise)
             || bypassed.contains(.grain) != (look.convertCube == Look.neutralConversion)
     }
@@ -602,10 +613,19 @@ final class GradeModel: ObservableObject {
         let export = Project.exportFolder(in: destination)
         lastExportFolder = export
         let project = self.project
-        let match = matches
-        // The look file is scratch and stays in the scratch directory; the RENDER goes where the
-        // person said, or beside their footage.
-        let lookFile = workDirectory.appendingPathComponent("render-look.json")
+        let adjustOff = bypassed.contains(.adjust)
+        let missingLook = workDirectory
+        // One look file per clip, because each carries its own Adjust. Scratch, in the scratch
+        // directory; the RENDER goes where the person said, or beside their footage.
+        //
+        // THE QUEUE'S WAITING JOBS TOO, not only the list. A retried job from an earlier export
+        // runs with this one, and its clip may have left the list since.
+        let stems = Set(
+            clips.map(\.stem) + queue.jobs.filter { $0.state == .waiting }.map(\.stem))
+        let lookFiles = Dictionary(
+            uniqueKeysWithValues: stems.map {
+                ($0, workDirectory.appendingPathComponent("render-look-\($0).json"))
+            })
         // BEFORE ANYTHING IS QUEUED, and refused outright on failure. A look file that could not
         // be written is the PREVIOUS run's look still on disk, so carrying on renders a whole
         // shoot with a grade nobody is looking at.
@@ -613,7 +633,10 @@ final class GradeModel: ObservableObject {
             try FileManager.default.createDirectory(
                 at: workDirectory,
                 withIntermediateDirectories: true)
-            try effectiveLook.write(to: lookFile)
+            for (stem, file) in lookFiles {
+                try project.settings(for: stem).adjust.applied(to: look)
+                    .bypassing(bypassed).write(to: file)
+            }
             try FileManager.default.createDirectory(
                 at: destination,
                 withIntermediateDirectories: true)
@@ -628,10 +651,16 @@ final class GradeModel: ObservableObject {
         // Off the main thread: `start` returns only when the whole queue has run.
         DispatchQueue.global(qos: .userInitiated).async {
             queue.start(environment: { stem in
-                var env = project.environment(for: stem, lookFile: lookFile)
+                // A stem with no file here can only be one queued after this export started.
+                // It gets a path that does not exist, which the engine refuses by name, rather
+                // than another clip's grade or a crash.
+                let file =
+                    lookFiles[stem]
+                    ?? missingLook.appendingPathComponent("no-look-for-\(stem).json")
+                var env = project.environment(for: stem, lookFile: file)
                 env["GRADE_WORK_DIR"] = destination.path
                 env["EXPORT_DIR"] = export.path
-                if !match { env["MATCH"] = "0" }
+                if adjustOff { env["MATCH"] = "0" }
                 return env
             })
         }

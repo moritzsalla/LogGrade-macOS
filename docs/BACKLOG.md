@@ -34,17 +34,15 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
 
 ## Next, in order
 
-1. **Adjust per clip.** The panel is cut, but Adjust still writes the project-wide look.
-   `Project.ClipSettings.lookOverride` exists and is saved; the model, preview and export do not
-   read it yet. The engine keeps hue curves, wheels, halation and tone internals only while the
-   presets are tuned, then whatever no preset uses is deleted.
-2. **Export picker.** ProRes needs its own pix_fmt path: the finish dithers to 8/10-bit 4:2:0
+1. **Export picker.** ProRes needs its own pix_fmt path: the finish dithers to 8/10-bit 4:2:0
    before sharpen and grain.
 3. **Preset lineup.** Delete Pro 400H and RZ67 Portra 400; add Portra 160 and 800. A new stock is
    encoded for Apple playback (`cubefile.py` `display_encode`, `display=apple` in its TITLE), or it
    renders milky.
 4. **Prune what the old app needed:** precursor parity (`tests/grade-parity.py`, ADR 0014's
-   conformance), tests of removed controls, stale words in `CONTEXT.md`, README.
+   conformance), tests of removed controls, stale words in `CONTEXT.md`, README. Once the looks
+   are tuned, delete the engine's wheels, hue curves, halation and tone internals that no preset
+   uses.
 5. **Portra 160 against the scans** (arriving). Tone, colour and grain side by side, then both users
    judge. The render golden moves with it (`render-golden.sh --regenerate`).
 6. **Portra 800, IMAX, Super 8** against public references.

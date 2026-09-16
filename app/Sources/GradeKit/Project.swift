@@ -35,8 +35,7 @@ public struct Project: Equatable {
         /// Where the preview frame is taken from.
         public var previewSeconds: Double
         public var stabilise: Bool
-        /// A departure from the project's preset, for this clip alone. Nil means it follows.
-        public var lookOverride: Look?
+        public var adjust: Look.Adjust
 
         /// A clip nobody has decided about is not stabilised: the stabiliser crops and softens,
         /// and a locked-off shot gains nothing for it. One constant, because the interface, the
@@ -45,12 +44,12 @@ public struct Project: Equatable {
 
         public init(
             cropOffset: Int? = nil, previewSeconds: Double = 1,
-            stabilise: Bool = stabilisesByDefault, lookOverride: Look? = nil
+            stabilise: Bool = stabilisesByDefault, adjust: Look.Adjust = Look.Adjust()
         ) {
             self.cropOffset = cropOffset
             self.previewSeconds = previewSeconds
             self.stabilise = stabilise
-            self.lookOverride = lookOverride
+            self.adjust = adjust
         }
     }
 
@@ -216,9 +215,12 @@ public struct Project: Equatable {
         clips[clip] ?? ClipSettings()
     }
 
-    /// The look a clip renders with: its own departure, or the project's preset.
-    public func look(for clip: String) -> Look? {
-        clips[clip]?.lookOverride ?? active?.look
+    /// The project with every clip's Adjust at neutral: what the panels that never show Adjust
+    /// watch, so a slider drag does not rebuild them sixty times a second.
+    public var ignoringAdjustments: Project {
+        var out = self
+        for name in out.clips.keys { out.clips[name]?.adjust = Look.Adjust() }
+        return out
     }
 
     /// What stops a render before it starts. The interface shows these rather than discovering
@@ -274,6 +276,7 @@ public struct Project: Equatable {
         env["DELIVERABLES"] = delivery.targets.map(\.spec).joined(separator: ",")
         if let offset = clips[clip]?.cropOffset { env["CROP_OFFSET"] = String(offset) }
         env["STAB"] = settings(for: clip).stabilise ? "1" : "0"
+        if !settings(for: clip).adjust.match { env["MATCH"] = "0" }
         return env
     }
 }
@@ -342,8 +345,12 @@ extension Project {
                 "stabilise": s.stabilise,
             ]
             if let offset = s.cropOffset { entry["crop_offset"] = offset }
-            if let look = s.lookOverride {
-                entry["look_override"] = try JSONSerialization.jsonObject(with: look.serialised())
+            if s.adjust != Look.Adjust() {
+                entry["adjust"] = [
+                    "exposure": s.adjust.exposure, "warmth": s.adjust.warmth,
+                    "tint": s.adjust.tint, "contrast": s.adjust.contrast,
+                    "saturation": s.adjust.saturation, "match": s.adjust.match,
+                ]
             }
             clipMap[name] = entry
         }
@@ -456,16 +463,22 @@ extension Project {
         let targets = Delivery.targets(fromSerialised: d)
         var clipMap: [String: ClipSettings] = [:]
         for (name, raw) in (root["clips"] as? [String: [String: Any]] ?? [:]) {
-            var override: Look?
-            if let o = raw["look_override"] {
-                override = try Self.look(from: o, version: version)
+            // An older file's "look_override" is not read: it pinned a whole look, which the
+            // panel can no longer show or undo.
+            let a = raw["adjust"] as? [String: Any] ?? [:]
+            func number(_ key: String, _ fallback: Double) -> Double {
+                (a[key] as? NSNumber)?.doubleValue ?? fallback
             }
             clipMap[name] = ClipSettings(
                 cropOffset: (raw["crop_offset"] as? NSNumber)?.intValue,
                 previewSeconds: (raw["preview_seconds"] as? NSNumber)?.doubleValue ?? 1,
                 stabilise: (raw["stabilise"] as? NSNumber)?.boolValue
                     ?? ClipSettings.stabilisesByDefault,
-                lookOverride: override)
+                adjust: Look.Adjust(
+                    exposure: number("exposure", 0), warmth: number("warmth", 0),
+                    tint: number("tint", 0), contrast: number("contrast", 1),
+                    saturation: number("saturation", 1),
+                    match: (a["match"] as? NSNumber)?.boolValue ?? true))
         }
         self.init(
             presets: loaded,

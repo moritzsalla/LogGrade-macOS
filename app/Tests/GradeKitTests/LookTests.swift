@@ -192,8 +192,8 @@ final class ProjectTests: XCTestCase {
             opened.presets.first?.look.halation.isNeutral, true,
             "a look from before halation existed came back with some")
         XCTAssertEqual(
-            opened.clips["IMG_0609"]?.lookOverride?.halation.isNeutral, true,
-            "a per-clip look was not upgraded like the preset it sits beside")
+            opened.clips["IMG_0609"]?.adjust, Look.Adjust(),
+            "an old per-clip whole look must open as no Adjust, not pin the clip")
         XCTAssertEqual(opened.presets.first?.look.grainShadows, 1, "old grain came back weighted")
         XCTAssertEqual(
             opened.presets.first?.look.grainHighlights, 1, "old grain came back weighted")
@@ -318,16 +318,39 @@ final class ProjectTests: XCTestCase {
             "no filter fragments belong in here: \(env)")
     }
 
-    func testAClipFollowsThePresetUnlessItDeparts() throws {
+    /// Adjust layers on the look rather than replacing it, so a clip still follows a change of
+    /// preset, and a neutral Adjust is the look exactly.
+    func testAdjustLayersOnTheLookItIsGiven() throws {
+        let look = try aLook()
+        XCTAssertEqual(Look.Adjust().applied(to: look), look)
+        let moved = Look.Adjust(
+            exposure: 0.5, warmth: 0.1, tint: -0.1, contrast: 1.2, saturation: 0.8
+        ).applied(to: look)
+        XCTAssertEqual(moved.correct.exposure, look.correct.exposure + 0.5, accuracy: 1e-12)
+        XCTAssertEqual(moved.correct.temp, look.correct.temp + 0.1, accuracy: 1e-12)
+        XCTAssertEqual(moved.correct.tint, look.correct.tint - 0.1, accuracy: 1e-12)
+        XCTAssertEqual(moved.tone.contrast, look.tone.contrast * 1.2, accuracy: 1e-12)
+        XCTAssertEqual(moved.colour.saturation, look.colour.saturation * 0.8, accuracy: 1e-12)
+        XCTAssertEqual(moved.convertCube, look.convertCube)
+        XCTAssertEqual(moved.halation, look.halation)
+    }
+
+    /// One clip's Adjust survives a save, the others stay neutral, and match off reaches the
+    /// engine for that clip alone.
+    func testAdjustIsPerClipOnDiskAndInTheEnvironment() throws {
         var project = Project(presets: [.init(name: "P", look: try aLook())], activePreset: "P")
-        project.clips["A"] = .init()
-        XCTAssertEqual(project.look(for: "A")?.tone.gamma, 2.02)
-        var departed = try aLook()
-        departed.tone.gamma = 1.5
-        project.clips["A"]?.lookOverride = departed
-        XCTAssertEqual(project.look(for: "A")?.tone.gamma, 1.5)
+        let dark = Look.Adjust(exposure: -1, contrast: 1.3, match: false)
+        project.clips["A"] = .init(adjust: dark)
+        project.clips["B"] = .init()
+        let reread = try Project(data: try project.serialised())
+        XCTAssertEqual(reread.clips["A"]?.adjust, dark)
+        XCTAssertEqual(reread.clips["B"]?.adjust, Look.Adjust())
+        let look = URL(fileURLWithPath: "/tmp/look.json")
+        XCTAssertEqual(reread.environment(for: "A", lookFile: look)["MATCH"], "0")
+        XCTAssertNil(reread.environment(for: "B", lookFile: look)["MATCH"])
         XCTAssertEqual(
-            project.look(for: "B")?.tone.gamma, 2.02, "an unknown clip follows the preset")
+            reread.ignoringAdjustments.clips["A"]?.adjust, Look.Adjust(),
+            "the panels that ignore Adjust would rebuild on every drag tick")
     }
 }
 

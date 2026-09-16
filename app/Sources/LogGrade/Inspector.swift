@@ -61,33 +61,25 @@ struct InspectorView: View {
     private var adjustStage: some View {
         stage(
             "Adjust", isOn: enabledBinding(.adjust),
-            help: "For a clip that needs help, or a small move of your own. Switched off, the "
-                + "picture is the look as it ships.\n\nMatch exposure evens out brightness and "
+            help: "For a clip that needs help, or a small move of your own. Each clip keeps its "
+                + "own. Switched off, every clip is the look as it ships.\n\nMatch exposure evens out brightness and "
                 + "white balance across a shoot. Turn it off for a scene meant to stay dark."
         ) {
             Toggle(
                 "Match exposure",
-                isOn: Binding(get: { model.matchExposure }, set: { model.setMatch($0) })
+                isOn: Binding(get: { model.adjust.match }, set: { model.setMatch($0) })
             )
             .toggleStyle(.checkbox)
             .font(Type.label)
             .foregroundColor(Palette.inkSecondary)
-            control(
-                "Exposure", $model.look.correct.exposure, -3...3, format: "%+.2f",
-                default: model.defaultLook.correct.exposure)
-            control(
-                "Warmth", $model.look.correct.temp, -1...1,
-                default: model.defaultLook.correct.temp)
-            control(
-                "Tint", $model.look.correct.tint, -1...1,
-                default: model.defaultLook.correct.tint)
-            control(
-                "Contrast", $model.look.tone.contrast, 0.8...1.8,
-                default: model.defaultLook.tone.contrast)
-            control(
-                "Saturation", $model.look.colour.saturation, 0.6...1.6,
-                default: model.defaultLook.colour.saturation)
+            control("Exposure", $model.adjust.exposure, -3...3, format: "%+.2f", default: 0)
+            control("Warmth", $model.adjust.warmth, -1...1, default: 0)
+            control("Tint", $model.adjust.tint, -1...1, default: 0)
+            control("Contrast", $model.adjust.contrast, 0.8...1.8, default: 1)
+            control("Saturation", $model.adjust.saturation, 0.6...1.6, default: 1)
         }
+        // Adjust is per clip, so with no clip there is nothing for it to move.
+        .disabled(model.selectedClip == nil)
     }
 
     /// Per clip, because shake is a property of the shot. Strength is shared across the shoot.
