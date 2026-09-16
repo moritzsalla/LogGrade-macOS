@@ -342,6 +342,11 @@ struct InspectorView: View {
                 Button("auto") { model.autoTone() }
                     .buttonStyle(.bordered).controlSize(.small).font(Type.label)
                     .disabled(model.selectedClip == nil)
+                // Back to the active preset, not to neutral: the preset is the finished starting
+                // point, and the controls are fine tuning on top of it.
+                Button("reset") { model.resetAdjustments() }
+                    .buttonStyle(.bordered).controlSize(.small).font(Type.label)
+                    .disabled(!model.hasAdjustments || model.project.active == nil)
                 if model.hasUnsavedChanges {
                     Text("adjusted").font(Type.caption).foregroundColor(Palette.plate)
                 }
