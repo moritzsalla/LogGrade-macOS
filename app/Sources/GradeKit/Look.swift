@@ -31,11 +31,13 @@ public struct Look: Equatable {
         public var offset: String
         public var power: String
         public var lumMix: Double
+        public var contrast: Double
+        public var saturation: Double
 
         public init(
             exposure: Double = 0, temp: Double = 0, tint: Double = 0,
             slope: String = "1,1,1", offset: String = "0,0,0", power: String = "1,1,1",
-            lumMix: Double = 1
+            lumMix: Double = 1, contrast: Double = 1, saturation: Double = 1
         ) {
             self.exposure = exposure
             self.temp = temp
@@ -44,6 +46,8 @@ public struct Look: Equatable {
             self.offset = offset
             self.power = power
             self.lumMix = lumMix
+            self.contrast = contrast
+            self.saturation = saturation
         }
 
         /// The three ASC CDL controls, which is what a colourist's wheels are. The names on the
@@ -138,7 +142,8 @@ public struct Look: Equatable {
             [
                 "--stdout", "--exposure", String(exposure), "--temp", String(temp),
                 "--tint", String(tint), "--slope", slope, "--offset", offset, "--power", power,
-                "--lum-mix", String(lumMix), "--size", String(size),
+                "--lum-mix", String(lumMix), "--contrast", String(contrast),
+                "--saturation", String(saturation), "--size", String(size),
             ]
         }
 
@@ -146,7 +151,9 @@ public struct Look: Equatable {
         /// generator owns the rule — but the interface needs to know whether to show the stage as
         /// active, and a neutral correction is one the render leaves out.
         public var isNeutral: Bool {
-            guard exposure == 0, temp == 0, tint == 0 else { return false }
+            guard exposure == 0, temp == 0, tint == 0, contrast == 1, saturation == 1 else {
+                return false
+            }
             // PARSED, not compared as text — the generator decides this by parsing too, and
             // "1.0,1.0,1.0" is the same correction as "1,1,1". Comparing strings here made a
             // wheel returned to centre read as an active correction.
@@ -382,7 +389,9 @@ public struct Look: Equatable {
             slope: try text(correctBlock, "slope", "correct.slope"),
             offset: try text(correctBlock, "offset", "correct.offset"),
             power: try text(correctBlock, "power", "correct.power"),
-            lumMix: try number(correctBlock, "lum_mix", "correct.lum_mix"))
+            lumMix: try number(correctBlock, "lum_mix", "correct.lum_mix"),
+            contrast: try number(correctBlock, "contrast", "correct.contrast"),
+            saturation: try number(correctBlock, "saturation", "correct.saturation"))
         let halationBlock = try block("halation")
         halation = Halation(
             strength: try number(halationBlock, "strength", "halation.strength"),
@@ -437,7 +446,8 @@ public struct Look: Equatable {
         root["correct"] = [
             "exposure": correct.exposure, "temp": correct.temp, "tint": correct.tint,
             "slope": correct.slope, "offset": correct.offset, "power": correct.power,
-            "lum_mix": correct.lumMix,
+            "lum_mix": correct.lumMix, "contrast": correct.contrast,
+            "saturation": correct.saturation,
         ]
         root["halation"] = [
             "strength": halation.strength, "threshold": halation.threshold,
@@ -469,6 +479,10 @@ public struct Look: Equatable {
     /// preset was active when it was adjusted, so switching the batch's look silently skipped it.
     /// Exposure, warmth and tint add to the correction; contrast and saturation scale, so either
     /// leaves a preset's own value (neutral in every shipped preset) where it was.
+    ///
+    /// ALL FIVE ARE THE CORRECTION, which runs in log before the preset's cube. Contrast and
+    /// saturation once scaled the tone curve and colour trims after it, where a contrast push
+    /// fought the cube's shoulder instead of feeding it (make-correct-lut.py's header).
     public struct Adjust: Equatable {
         public var exposure: Double
         public var warmth: Double
@@ -496,8 +510,8 @@ public struct Look: Equatable {
             out.correct.exposure += exposure
             out.correct.temp += warmth
             out.correct.tint += tint
-            out.tone.contrast *= contrast
-            out.colour.saturation *= saturation
+            out.correct.contrast *= contrast
+            out.correct.saturation *= saturation
             return out
         }
     }

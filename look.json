@@ -42,7 +42,9 @@
     "slope": "1,1,1",
     "offset": "0,0,0",
     "power": "1,1,1",
-    "lum_mix": 1.0
+    "lum_mix": 1.0,
+    "contrast": 1.0,
+    "saturation": 1.0
   },
   "halation": {
     "strength": 0.0,

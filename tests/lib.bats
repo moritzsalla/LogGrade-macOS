@@ -1395,7 +1395,7 @@ PY
 	local work="$BATS_TEST_TMPDIR/all-off" look="$BATS_TEST_TMPDIR/all-off.json"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/probe_mid.mov" "$work/src/CLIP.mov"
-	jq '.correct = {exposure: 0, temp: 0, tint: 0, slope: "1,1,1", offset: "0,0,0", power: "1,1,1", lum_mix: 1}
+	jq '.correct = {exposure: 0, temp: 0, tint: 0, slope: "1,1,1", offset: "0,0,0", power: "1,1,1", lum_mix: 1, contrast: 1, saturation: 1}
 		| .halation.strength = 0
 		| .tone += {gamma: 1, contrast: 1, toe: 0, shoulder: 0, black: 0}
 		| .colour = {saturation: 1, warmth: 0} | .grain.strength = 0' \
@@ -2293,7 +2293,7 @@ print("%.1e %.4f" % (worst, mc.decode(1.0)))
 	[ "$status" -eq 0 ]
 	[ "$output" = "neutral" ] || fail "defaults are not neutral: $output"
 	for arg in "--exposure 0.1" "--temp 0.1" "--tint 0.1" "--slope 1.1,1,1" \
-	           "--offset 0.01,0,0" "--power 1.1,1,1"; do
+	           "--offset 0.01,0,0" "--power 1.1,1,1" "--contrast 1.1" "--saturation 0.9"; do
 		# shellcheck disable=SC2086
 		run "$SCRIPTS/make-correct-lut.py" --check-neutral $arg
 		[ "$output" = "active" ] || fail "$arg reported as $output"

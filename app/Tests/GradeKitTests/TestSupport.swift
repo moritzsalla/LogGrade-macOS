@@ -90,7 +90,7 @@ func libSh(_ engine: EngineLocation, _ function: String, _ arguments: [String]) 
 func lookFixture(gamma: Double = 2.02) throws -> Look {
     let json = """
         {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
-         "power":"1,1,1","lum_mix":1},
+         "power":"1,1,1","lum_mix":1,"contrast":1,"saturation":1},
          "halation":{"strength":0,"threshold":1,"radius":0.006,"tint":"1,0.3,0.05"},
          "tone":{"gamma":\(gamma),"pivot":0.39,"contrast":1.09,"toe":0,"shoulder":0.1,"black":0.025},
          "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8,"shadows":1,"highlights":1},

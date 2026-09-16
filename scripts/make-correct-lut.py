@@ -40,7 +40,7 @@ small corrections. If large white-balance moves ever matter, that is the thing t
 USAGE
     ./make-correct-lut.py OUT.cube [--exposure 0] [--temp 0] [--tint 0]
                                    [--slope 1,1,1] [--offset 0,0,0] [--power 1,1,1]
-                                   [--lum-mix 1] [--size 33]
+                                   [--lum-mix 1] [--contrast 1] [--saturation 1] [--size 33]
     ./make-correct-lut.py --stdout ...          same cube, to stdout
 
     --exposure  stops, applied in linear. +1 is one stop brighter.
@@ -53,7 +53,19 @@ USAGE
     --lum-mix   1 keeps the per-channel result as computed. 0 restores the original luma, so the
                 move becomes chroma-only. Resolve carries this control for the same reason: a
                 per-channel move shifts saturation as a matter of arithmetic.
+    --contrast  slope in log about mid grey's code value, so mid grey holds and each stop either side
+                moves by the factor. >1 increases contrast.
+    --saturation chroma about luma, in log. >1 increases saturation.
     --size      cube points per axis, 33 by default, 2..64.
+
+WHY CONTRAST AND SATURATION ARE HERE, BEFORE THE RENDERING
+----------------------------------------------------------
+They are the panel's trims, and they used to act on the finished picture, after the preset's cube.
+There a contrast push fought the rendering: the cube had already rolled highlights into its
+shoulder, and a display-space curve pushed them back out towards clip. Done in log, before the
+cube, the same move widens or narrows the scene the cube receives, and the cube's own shoulder and
+toe shape the result, which is how contrast and saturation in a colourist's log working space
+behave. They follow the luminance mix, which would otherwise undo the contrast.
 
 MEASURED, so the defaults are not guesses
 -----------------------------------------
@@ -97,6 +109,10 @@ LW = (0.2126, 0.7152, 0.0722)
 # near-zero denominator is noise, so black is left as the per-channel result computed it.
 LUMA_EPSILON = 1e-6
 
+# The contrast pivot: mid grey (18% reflectance) as an Apple Log code value, so a contrast move
+# leaves the exposure the meter set where it put it.
+MID_GREY = encode(0.18)
+
 # Temperature and tint as per-channel linear gains. The scale is chosen so that 1.0 is a large
 # but not absurd correction, and the green axis moves against magenta rather than alone.
 WB_SCALE = 0.30
@@ -122,12 +138,12 @@ def triple(s, name):
 def fingerprint(a):
     """The TITLE line, which doubles as the freshness test — see cubefile.py."""
     return title(
-        "Input correction (exposure=%s temp=%s tint=%s slope=%s offset=%s power=%s lum_mix=%s size=%d)"
+        "Input correction (exposure=%s temp=%s tint=%s slope=%s offset=%s power=%s lum_mix=%s contrast=%s saturation=%s size=%d)"
         % (number(a.exposure), number(a.temp), number(a.tint),
            ",".join(number(v) for v in a.slope),
            ",".join(number(v) for v in a.offset),
            ",".join(number(v) for v in a.power),
-           number(a.lum_mix), a.size)
+           number(a.lum_mix), number(a.contrast), number(a.saturation), a.size)
     )
 
 
@@ -140,7 +156,8 @@ def is_neutral(a):
     """
     return (a.exposure == 0.0 and a.temp == 0.0 and a.tint == 0.0
             and a.slope == (1.0, 1.0, 1.0) and a.offset == (0.0, 0.0, 0.0)
-            and a.power == (1.0, 1.0, 1.0))
+            and a.power == (1.0, 1.0, 1.0)
+            and a.contrast == 1.0 and a.saturation == 1.0)
 
 
 def correct(rgb, a, wb):
@@ -174,6 +191,12 @@ def correct(rgb, a, wb):
             k = ((1.0 - a.lum_mix) * (y_in / y_out)) + a.lum_mix
             out = [v * k for v in out]
 
+    if a.contrast != 1.0:
+        out = [MID_GREY + (v - MID_GREY) * a.contrast for v in out]
+    if a.saturation != 1.0:
+        y = sum(w * v for w, v in zip(LW, out))
+        out = [y + (v - y) * a.saturation for v in out]
+
     return [min(1.0, max(0.0, v)) for v in out]
 
 
@@ -193,6 +216,10 @@ def main():
                     help="gamma wheel: per-channel exponent in log, applied as 1/power, R,G,B")
     ap.add_argument("--lum-mix", dest="lum_mix", type=float, default=1.0,
                     help="1 keeps the per-channel result; 0 restores the original luma")
+    ap.add_argument("--contrast", type=float, default=1.0,
+                    help="slope in log about mid grey; >1 more contrast")
+    ap.add_argument("--saturation", type=float, default=1.0,
+                    help="chroma about luma, in log; >1 more saturated")
     ap.add_argument("--size", type=int, default=33, help="cube points per axis, 2..64")
     ap.add_argument("--check-neutral", action="store_true",
                     help="print neutral or active for these parameters and exit, writing nothing")
