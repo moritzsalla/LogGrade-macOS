@@ -283,14 +283,16 @@ struct InspectorView: View {
                     ForEach(model.project.presets.map(\.name), id: \.self) { Text($0).tag($0) }
                 }
                 .labelsHidden().frame(width: 150)
+                // Back to the active preset, not to neutral: the preset is the finished starting
+                // point, and the controls are fine tuning on top of it.
+                //
                 // BORDERED, NOT TINTED. The accent is spent on the picture only — the selected
                 // clip's edge and the curve, not a control (docs/APP_DESIGN.md) — so prominence
                 // here comes from shape against "save"'s plain text, not colour.
-                Button("auto") { model.autoTone() }
-                    .buttonStyle(.bordered).controlSize(.small).font(Type.label)
-                    .disabled(model.selectedClip == nil)
-                // Back to the active preset, not to neutral: the preset is the finished starting
-                // point, and the controls are fine tuning on top of it.
+                //
+                // NO AUTO BUTTON. It stretched every clip to fill the histogram, which turned an
+                // overcast wall bright; the rendering and the per-clip metering are what make a
+                // clip right with no step at all.
                 Button("reset") { model.resetAdjustments() }
                     .buttonStyle(.bordered).controlSize(.small).font(Type.label)
                     .disabled(!model.hasAdjustments || model.project.active == nil)
