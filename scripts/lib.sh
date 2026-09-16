@@ -996,9 +996,13 @@ DELIVERY_BLEND="blend=all_mode=grainmerge:shortest=1"
 
 # Every output flag a deliverable is encoded with. Both delivery paths passed their own copy, and
 # the byte comparisons render only grade.sh's, so a change to one reached a file nobody compared.
-# CRF 18, preset slow and AAC 192k: the platform recompresses whatever it receives, so it is fed
-# quality (docs/PIPELINE.md, "Encode"), and grain survival through that re-encode was measured
-# against exactly this encode (ADR 0008).
+# CRF 18 and AAC 192k: the platform recompresses whatever it receives, so it is fed quality
+# (docs/PIPELINE.md, "Encode"), and grain survival through that re-encode was measured (ADR 0008).
+#
+# x264 PRESET MEDIUM, not slow: on IMG_0609 with grain 4 it encoded 1.5x faster (24.4 against 16.2
+# fps) for 45.8 against 46.6 dB (worst frame 44.1 against 45.1), no visible change at 3x on brick or
+# flat asphalt, and SSIM 0.9614 against 0.9617 after a 4 Mbit/s re-encode. `fast` bought little more
+# and lost more. HEVC keeps slow: a 10-bit file is watched as delivered, not re-encoded.
 # `0:a:0?` MUST stay quoted: `?` is a glob character, and a file named `0:a:00` in the launch
 # directory would otherwise expand it. An array, and never empty, so bash 3.2's empty-array trap
 # under `set -u` does not apply.
@@ -1009,7 +1013,7 @@ DELIVERY_ENCODE=(-map "[o]" -map "0:a:0?" -shortest
 # that plays them (a Mac, a phone, an editor) rather than recompressing to 8-bit: no dither noise in a
 # sky, and no banding under it. HEVC because H.264 High 10 does not play in QuickTime or on iOS.
 # `hvc1`, not ffmpeg's default `hev1`, or QuickTime refuses the file.
-DELIVERY_VIDEO_8=(-c:v libx264 -profile:v high -preset slow -crf 18)
+DELIVERY_VIDEO_8=(-c:v libx264 -profile:v high -preset medium -crf 18)
 DELIVERY_VIDEO_10=(-c:v libx265 -preset slow -crf 18 -pix_fmt yuv420p10le -tag:v hvc1
 	-x265-params log-level=error)
 

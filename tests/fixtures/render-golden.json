@@ -6,7 +6,7 @@
     "This is the DEFAULT image this repo renders, recorded from its own chain. Moving it",
     "is allowed and takes a reason, which lands in recorded_because. See docs/adr/0014."
   ],
-  "recorded_because": "shrink to delivery size before the grade: 42 dB luma / 54 dB chroma against grading at 4K, mean level and saturation within 0.1 on IMG_0609, twice as fast",
+  "recorded_because": "x264 preset medium for 8-bit delivery: 1.5x faster encode, no visible change, same quality after a platform re-encode",
   "clip": {
     "name": "IMG_0607.mov",
     "bytes": 399774249
@@ -14,7 +14,7 @@
   "proof_secs": 0.1,
   "ffmpeg": "ffmpeg version 9.0.1-tessus  https://evermeet.cx/ffmpeg/  Copyright (c) 2000-2026 the FFmpeg developers",
   "arch": "x86_64",
-  "stream_md5": "0212a17a6735329d95e573f0b372fe46",
+  "stream_md5": "0bbfe31acecaa11f9bdc9a82401ea1db",
   "inputs": {
     "look.json": "9b16acf56d3fcd8a61864d95968af31d9d4f3a829182865bba93f654f2c03d69",
     "scripts/00-stabilise-detect.sh": "9dd18f45899418a1323984b02904c9373eef31d8eccbc893ab68307a3ac0fe5d",
@@ -23,8 +23,8 @@
     "scripts/03-final.sh": "9bd2f2b907cd07ecde1e7468c4d6edcd685e9fb385bc6850aa58f7dfad20a5ae",
     "scripts/applelog.py": "97be85a467ef03b9510a22ee8c3e93aaae02d17cad46397ea3669b8d3215b6ae",
     "scripts/cubefile.py": "b87f276f8579484d43c61683a2ca943acf9af59f7e750a1cc8ed0d53aecec13e",
-    "scripts/grade.sh": "cda5de136b30174cece9882d567eda8f4a62f33d3fdc6fe7cca610d94833c08b",
-    "scripts/lib.sh": "c061fa227ccf82cf12bba2a5c14daf74d793051438610ede8cc8f3032144093a",
+    "scripts/grade.sh": "b671f0e355be05094ac7adda88bbb05d021ad1d32e311b32379aab6d975a4836",
+    "scripts/lib.sh": "27b0e73a95b5085c9258458a79a467c882fe77d9fbdf148f3475c561b5037e95",
     "scripts/make-correct-lut.py": "93d79ee78266071ca6ca9195126bc67006cb2b7c66ce7eee44f73b8fec81e521",
     "scripts/make-filmic-lut.py": "e846834cdef9e82c2c57251b70bcd3b7a150bddbd691562290b914494c8e9135",
     "scripts/make-halation-luts.py": "574e21ef03435c9b6ee8f1d81cde19e06dafdd1bd38a6c54157767f911d3351a",
