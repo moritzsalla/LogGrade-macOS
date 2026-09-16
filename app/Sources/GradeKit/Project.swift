@@ -222,7 +222,7 @@ public struct Project: Equatable {
         }
     }
 
-    public func blockers(for clipNames: [String]) -> [Blocker] {
+    public var blockers: [Blocker] {
         active == nil ? [.noActivePreset(activePreset)] : []
     }
 

@@ -298,7 +298,7 @@ final class ProjectTests: XCTestCase {
         project.clips["A"] = .init(cropOffset: 750)
         project.clips["B"] = .init(cropOffset: nil)
         // Named, but not blocking: an unplaced clip renders centred, and says so to the engine.
-        XCTAssertTrue(project.blockers(for: ["A", "B"]).isEmpty)
+        XCTAssertTrue(project.blockers.isEmpty)
         let unframed = try XCTUnwrap(project.unframed(for: ["A", "B"]))
         XCTAssertEqual(unframed, .init(deliverables: [.feed], clips: ["B"]))
         XCTAssertTrue(
