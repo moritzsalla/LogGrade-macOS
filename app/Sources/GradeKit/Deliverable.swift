@@ -47,9 +47,19 @@ public struct Deliverable: Equatable, Hashable {
     /// 4:5 — a Feed post.
     public static let feed = Deliverable(name: "feed", aspectWidth: 4, aspectHeight: 5)
 
-    /// The shapes the interface offers as checkboxes. The panel is generated from this list, so a
-    /// preset added here appears in the app without a UI edit.
+    /// The engine's named presets, which write their own file suffixes (see `spec`).
     public static let presets: [Deliverable] = [.reels, .feed]
+
+    /// The aspects Custom offers, as (width, height). Landscape first: Custom is where footage that
+    /// is not headed for a phone-shaped post goes.
+    public static let customAspects: [(Int, Int)] = [(16, 9), (4, 3), (1, 1), (4, 5), (9, 16)]
+
+    /// Custom's one shape. Named "custom" so its file says so: `<clip>_custom_16x9`.
+    public static func custom(aspectWidth: Int, aspectHeight: Int) -> Deliverable {
+        Deliverable(name: "custom", aspectWidth: aspectWidth, aspectHeight: aspectHeight)
+    }
+
+    public static let defaultCustom = custom(aspectWidth: 16, aspectHeight: 9)
 
     /// What goes into the engine's `DELIVERABLES`.
     ///

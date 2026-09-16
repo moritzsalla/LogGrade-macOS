@@ -16,8 +16,6 @@ struct DeliveryPanel: View {
         self.model = model
         _changes = ObservedObject(wrappedValue: model.changes)
     }
-    @State private var shapeEditor: ShapeEditorMode?
-
     private static let cropStepperPixels = 8
 
     var body: some View {
@@ -27,8 +25,7 @@ struct DeliveryPanel: View {
                 .foregroundColor(Palette.ink)
             presetRow
             if model.project.exportPreset == .custom {
-                shapeRow
-                customTargetsSection
+                aspectRow
                 sizeRow
                 sizeCostNote
                 codecRow
@@ -44,79 +41,35 @@ struct DeliveryPanel: View {
         }
         .padding(Space.l)
         .background(Palette.panel)
-        .sheet(item: $shapeEditor) { mode in
-            DeliverableEditor(mode: mode) { model.saveShape($0, replacing: mode.original) }
-        }
     }
 
-    // GENERATED FROM THE PRESET LIST, not written out one per line. Two hardcoded toggles is what
-    // made the set of shapes closed at two in the first place; a preset added to
-    // Deliverable.presets now appears here without a UI edit.
-    private var shapeRow: some View {
-        HStack(spacing: 14) {
-            ForEach(Deliverable.presets, id: \.self) { deliverable in
-                Toggle(label(for: deliverable), isOn: binding(for: deliverable))
-            }
-        }
-        .toggleStyle(.checkbox)
-        .font(Type.label)
-        .foregroundColor(Palette.inkSecondary)
-    }
-
-    // Shapes that are not presets have no checkbox: they exist only while selected, so removing
-    // one is unticking it. They were listed read-only before an editor existed, and are still
-    // listed rather than hidden, because a deliverable rendering with no visible reason reads as a
-    // bug in the renderer.
-    private var customTargetsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(customTargets, id: \.self) { deliverable in
-                HStack(spacing: 8) {
-                    Text(deliverable.spec)
-                        .font(Type.value)
-                        .foregroundColor(Palette.ink)
-                        .lineLimit(1).truncationMode(.middle)
-                    Spacer(minLength: 4)
-                    Button("edit") { shapeEditor = .editing(deliverable) }
-                    Button("remove") {
-                        model.project.customDelivery.targets.removeAll { $0 == deliverable }
-                    }
-                }
-                .buttonStyle(.borderless)
-                .font(Type.caption)
-            }
-            Button {
-                shapeEditor = .adding
-            } label: {
-                Label("Add shape", systemImage: "plus")
-                    .font(Type.label)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-        }
-    }
-
-    // Labels get room rather than wrapping mid-word, which is what "heig / ht" was.
-    private var sizeRow: some View {
+    /// ONE SHAPE. Custom used to be the Instagram checkboxes plus an "Add shape" editor, which
+    /// opened with nothing ticked and so could not export; the presets already are those shapes.
+    private var aspectRow: some View {
         HStack(spacing: 8) {
-            Text("size").font(Type.label).foregroundColor(Palette.inkSecondary)
-                .fixedSize()
-            // Spelled as the WIDTH every deliverable shares, not as "1080p" or a portrait size: each
-            // shape's height follows its own aspect, so "1080 × 1920" was only true of reels. The
-            // tag stays the 9:16 reference height the engine's HEIGHT takes.
+            Text("aspect").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
             Picker(
                 "",
                 selection: Binding(
-                    get: { model.project.delivery.height },
-                    set: { model.project.customDelivery.height = $0 })
+                    get: { aspectTag(model.project.customDelivery.targets.first) },
+                    set: { tag in
+                        guard
+                            let (w, h) = Deliverable.customAspects.first(where: {
+                                aspectTag($0.0, $0.1) == tag
+                            })
+                        else { return }
+                        model.project.customDelivery.targets = [
+                            .custom(aspectWidth: w, aspectHeight: h)
+                        ]
+                    })
             ) {
-                Text("1080 wide").tag(1920)
-                Text("1440 wide").tag(2560)
-                Text("2160 wide").tag(3840)
+                ForEach(Deliverable.customAspects.map { aspectTag($0.0, $0.1) }, id: \.self) {
+                    Text($0).tag($0)
+                }
             }
-            .labelsHidden().frame(width: 108)
+            .labelsHidden().frame(width: 84)
             Spacer(minLength: 4)
-            Text("fps").font(Type.label).foregroundColor(Palette.inkSecondary)
-                .fixedSize()
+            Text("fps").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
             Picker("", selection: fpsBinding) {
                 Text("source").tag(0)
                 Text("30").tag(30)
@@ -127,16 +80,45 @@ struct DeliveryPanel: View {
         }
     }
 
+    private func aspectTag(_ w: Int, _ h: Int) -> String { "\(w):\(h)" }
+
+    private func aspectTag(_ shape: Deliverable?) -> String {
+        shape.map { aspectTag($0.aspectWidth, $0.aspectHeight) } ?? ""
+    }
+
+    /// By the short edge, with the pixels it comes to for the chosen aspect, so "1080p" is never a
+    /// guess about which side is 1080.
+    private var sizeRow: some View {
+        HStack(spacing: 8) {
+            Text("size").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
+            Picker("", selection: custom(\.shortSide)) {
+                ForEach(Project.Delivery.shortSides, id: \.self) { side in
+                    Text(sizeLabel(side)).tag(side)
+                }
+            }
+            .labelsHidden().frame(width: 190)
+        }
+    }
+
+    private func sizeLabel(_ side: Int) -> String {
+        var d = model.project.customDelivery
+        d.shortSide = side
+        let shape = d.targets.first ?? Deliverable.defaultCustom
+        // The engine derives height from width and aspect; mirrored here only for the label.
+        let tall = d.width * shape.aspectHeight / shape.aspectWidth
+        return "\(side)p · \(d.width) × \(tall - tall % 2)"
+    }
+
     // WHAT THIS COSTS, BEFORE IT COSTS IT. A 2160-tall delivery is four times the pixels of a
     // 1080 one and takes proportionally longer, and Instagram re-encodes everything to 1080 wide
     // anyway — so the larger sizes buy nothing downstream while multiplying the render. The look
     // was also tuned at 1080: grain and the sharpener have radii in pixels, and scaling them with
     // height is an assumption rather than a measurement.
     @ViewBuilder private var sizeCostNote: some View {
-        if model.project.delivery.height > 1920 {
+        if model.project.customDelivery.shortSide > Project.Delivery.defaultShortSide {
             Label(
-                "Instagram re-encodes to 1080 wide. This renders \(pixelRatio)× longer for no "
-                    + "gain, and the grain was tuned at 1080.",
+                "This renders \(pixelRatio)× longer than 1080p, and grain and sharpening were "
+                    + "tuned at 1080p. Instagram re-encodes to 1080 anyway.",
                 systemImage: "info.circle"
             )
             .font(Type.caption)
@@ -145,11 +127,11 @@ struct DeliveryPanel: View {
         }
     }
 
-    /// The chosen size's pixels over 1080 × 1920's, as the note prints it. In Double: integer
-    /// division made 2560 "1×". A String, because an interpolated number in a SwiftUI Text is
-    /// localised and a German locale would print "1,8".
+    /// The chosen size's pixels over 1080p's, as the note prints it. In Double: integer division
+    /// made 1440 "1×". A String, because an interpolated number in a SwiftUI Text is localised and a
+    /// German locale would print "1,8".
     private var pixelRatio: String {
-        let linear = Double(model.project.delivery.height) / 1920
+        let linear = Double(model.project.customDelivery.shortSide) / 1080
         let ratio = linear * linear
         return String(format: ratio == ratio.rounded() ? "%.0f" : "%.1f", ratio)
     }
@@ -264,8 +246,7 @@ struct DeliveryPanel: View {
             // tick, so only Custom is told how to get a crop.
             Text(
                 model.project.exportPreset == .custom
-                    ? "Nothing selected crops this clip, so there is no crop to place. Tick a "
-                        + "shape that is not the clip's own and it appears here."
+                    ? "This clip already has that aspect, so nothing is cropped."
                     : "This clip already has that shape, so nothing is cropped."
             )
             .font(Type.caption)
@@ -350,23 +331,6 @@ struct DeliveryPanel: View {
     private var cropLabel: String {
         model.project.delivery.clipFramedTargets(model.selectedFrameSize).first
             .map { "\($0.aspectWidth):\($0.aspectHeight) crop" } ?? "crop"
-    }
-
-    /// The shapes carried by the project that have no checkbox, because they are not presets.
-    private var customTargets: [Deliverable] {
-        model.project.delivery.targets.filter { !Deliverable.presets.contains($0) }
-    }
-
-    private func label(for deliverable: Deliverable) -> String {
-        deliverable.crops(model.selectedFrameSize)
-            ? "\(deliverable.name), cropped to \(deliverable.aspectWidth):\(deliverable.aspectHeight)"
-            : "\(deliverable.name), full frame"
-    }
-
-    private func binding(for deliverable: Deliverable) -> Binding<Bool> {
-        Binding(
-            get: { model.project.delivery.isSelected(deliverable) },
-            set: { model.project.customDelivery.setTarget(deliverable, selected: $0) })
     }
 
     private var cropRow: some View {

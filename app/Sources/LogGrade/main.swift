@@ -101,12 +101,6 @@ struct RootView: View {
                 Text("LogGrade")
                     .font(Type.title)
                     .foregroundColor(Palette.ink)
-                if let engine {
-                    Text(engine.root.path)
-                        .font(Type.value)
-                        .foregroundColor(Palette.inkTertiary)
-                        .lineLimit(2).truncationMode(.head)
-                }
                 ForEach(problems.indices, id: \.self) { i in
                     Text(problems[i])
                         .font(Type.caption).foregroundColor(Palette.lamp)

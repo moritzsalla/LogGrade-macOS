@@ -112,35 +112,6 @@ final class DeliverableTests: XCTestCase {
         XCTAssertEqual(env["DELIVERABLES"], "reels,square:1:1")
     }
 
-    // MARK: - Selection
-
-    func testTickingAShapeBackOnRestoresItsPlaceInTheRenderOrder() throws {
-        // Appending would make the render order depend on the order the boxes were clicked, so
-        // unticking reels and ticking it again would move it behind feed. The order is what the
-        // queue shows and what the engine works through.
-        var delivery = Project.Delivery(targets: [.reels, .feed])
-        delivery.setTarget(.reels, selected: false)
-        XCTAssertEqual(delivery.targets, [.feed])
-        delivery.setTarget(.reels, selected: true)
-        XCTAssertEqual(delivery.targets, [.reels, .feed], "preset order, not click order")
-    }
-
-    func testSelectingSomethingAlreadySelectedChangesNothing() throws {
-        var delivery = Project.Delivery(targets: [.reels])
-        delivery.setTarget(.reels, selected: true)
-        XCTAssertEqual(delivery.targets, [.reels])
-    }
-
-    func testAShapeWithNoCheckboxSurvivesSelectingOneThatHasOne() throws {
-        // A custom shape has no checkbox, so ticking a preset is not a moment anyone is watching
-        // it, and losing it here would be silent.
-        let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
-        var delivery = Project.Delivery(targets: [square])
-        delivery.setTarget(.feed, selected: true)
-        XCTAssertTrue(delivery.targets.contains(square), "a custom shape was dropped")
-        XCTAssertTrue(delivery.targets.contains(.feed))
-    }
-
     // MARK: - On disk
 
     func testAProjectWrittenBeforeTheSetOpenedUpStillOpens() throws {
@@ -152,8 +123,9 @@ final class DeliverableTests: XCTestCase {
              "delivery": {"reels": true, "feed": true, "height": 2560}, "clips": {}}
             """
         let project = try Project(data: Data(legacy.utf8))
-        XCTAssertEqual(project.delivery.targets, [.reels, .feed])
-        XCTAssertEqual(project.delivery.height, 2560)
+        // Custom renders one shape now, so the first survives; 2560 was the 9:16 height of 1440p.
+        XCTAssertEqual(project.delivery.targets, [.custom(aspectWidth: 9, aspectHeight: 16)])
+        XCTAssertEqual(project.delivery.shortSide, 1440)
     }
 
     func testALegacyProjectWithFeedOffLoadsOnlyReels() throws {
@@ -162,16 +134,23 @@ final class DeliverableTests: XCTestCase {
              "delivery": {"reels": true, "feed": false, "height": 1920}, "clips": {}}
             """
         let project = try Project(data: Data(legacy.utf8))
-        XCTAssertEqual(project.delivery.targets, [.reels])
+        XCTAssertEqual(project.delivery.targets, [.custom(aspectWidth: 9, aspectHeight: 16)])
     }
 
-    func testAnArbitraryShapeSurvivesTheProjectFile() throws {
+    /// A saved shape opens as Custom's aspect when the panel lists it, and as the default when it
+    /// does not, so the aspect picker never shows blank.
+    func testASavedShapeOpensAsOneTheAspectPickerLists() throws {
         let square = Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)
         let project = Project(
             presets: [], activePreset: "",
-            delivery: .init(targets: [.reels, square], height: 1920))
+            delivery: .init(targets: [square]))
         let reread = try Project(data: try project.serialised())
-        XCTAssertEqual(reread.delivery.targets, [.reels, square])
+        XCTAssertEqual(reread.delivery.targets, [.custom(aspectWidth: 1, aspectHeight: 1)])
+        let tall = Deliverable(name: "tall", aspectWidth: 2, aspectHeight: 3, cropOffset: .centre)
+        let unlisted = try Project(
+            data: try Project(presets: [], activePreset: "", delivery: .init(targets: [tall]))
+                .serialised())
+        XCTAssertEqual(unlisted.delivery.targets, [Deliverable.defaultCustom])
     }
 
     // What blocks a render is `ProjectTests.testACroppedRenderIsBlockedUntilEveryClipHasAnOffset`,
@@ -206,43 +185,5 @@ final class DeliverableTests: XCTestCase {
             project.unframed(for: ["IMG_0609"]),
             .init(deliverables: [.feed], clips: ["IMG_0609"]),
             "the warning must name only the shape that takes the clip's offset")
-    }
-
-    func testTheEngineReadsACentreShapeAsCentred() throws {
-        let engine = try engineCheckout()
-        let centred = Deliverable(
-            name: "square", aspectWidth: 1, aspectHeight: 1,
-            cropOffset: .centre)
-        XCTAssertEqual(
-            engine.resolveDeliverable(name: centred.name, spec: centred.spec),
-            .resolved(
-                .init(
-                    name: "square", aspectWidth: "1", aspectHeight: "1",
-                    offset: "centre", suffix: "square_1x1")))
-    }
-
-    /// Both directions, because a serialiser that dropped the key would read every shape back as
-    /// nil and still pass a test that only saves shapes without one.
-    func testACentreOffsetSurvivesTheProjectFileAndItsAbsenceReadsAsNone() throws {
-        let centred = Deliverable(
-            name: "square", aspectWidth: 1, aspectHeight: 1,
-            cropOffset: .centre)
-        let plain = Deliverable(name: "tall", aspectWidth: 2, aspectHeight: 3)
-        let project = Project(
-            presets: [], activePreset: "",
-            delivery: .init(targets: [.reels, centred, plain]))
-        let reread = try Project(data: try project.serialised())
-        XCTAssertEqual(reread.delivery.targets, [.reels, centred, plain])
-
-        // Written before a shape could carry an offset: every shape then followed the clip's offset.
-        let older = """
-            {"version": 2, "presets": [], "active_preset": "",
-             "delivery": {"targets": [{"name": "square", "aspect_width": 1, "aspect_height": 1}]},
-             "clips": {}}
-            """
-        let opened = try Project(data: Data(older.utf8))
-        XCTAssertEqual(
-            opened.delivery.targets,
-            [Deliverable(name: "square", aspectWidth: 1, aspectHeight: 1)])
     }
 }
