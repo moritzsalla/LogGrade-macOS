@@ -54,9 +54,13 @@ public enum NativeSource {
             throw Failure.noVideoTrack
         }
         let reader = try AVAssetReader(asset: asset)
+        // THE FIRST FRAME AT OR AFTER the timecode, as ffmpeg's `-ss` gives. The reader alone
+        // returns the frame SHOWING at a time, one frame early whenever no frame starts exactly
+        // there (29.97 fps, a non-zero start); so it starts a little before and skips ahead.
+        let wanted = CMTime(seconds: seconds, preferredTimescale: 600)
         reader.timeRange = CMTimeRange(
-            start: CMTime(seconds: seconds, preferredTimescale: 600),
-            duration: CMTime(seconds: 0.05, preferredTimescale: 600))
+            start: CMTime(seconds: max(0, seconds - 0.2), preferredTimescale: 600),
+            duration: CMTime(seconds: 0.4, preferredTimescale: 600))
         let output = AVAssetReaderTrackOutput(
             track: track,
             outputSettings: [
@@ -64,8 +68,20 @@ public enum NativeSource {
                     kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange
             ])
         reader.add(output)
-        guard reader.startReading(), let sample = output.copyNextSampleBuffer(),
-            let buffer = CMSampleBufferGetImageBuffer(sample)
+        guard reader.startReading() else { throw Failure.noFrame }
+        var sample = output.copyNextSampleBuffer()
+        var last = sample
+        // Half a millisecond of slack: the timebases differ, and 1.0 s must still count as 1.0 s.
+        let slack = CMTime(value: 1, timescale: 2000)
+        while let current = sample,
+            CMTimeCompare(CMTimeAdd(CMSampleBufferGetPresentationTimeStamp(current), slack), wanted)
+                < 0
+        {
+            last = current
+            sample = output.copyNextSampleBuffer()
+        }
+        // A clip that ends before the timecode gives its last frame, as ffmpeg's seek does.
+        guard let chosen = sample ?? last, let buffer = CMSampleBufferGetImageBuffer(chosen)
         else { throw Failure.noFrame }
         defer { reader.cancelReading() }
 

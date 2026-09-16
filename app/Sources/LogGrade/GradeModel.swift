@@ -389,10 +389,10 @@ final class GradeModel: ObservableObject {
     /// function (`ExposureMeter`), side by side. It was a 2–3.5 s grade.sh call per selection.
     @discardableResult
     private func refreshSource(for clip: ClipList.Entry, seconds: Double, look: Look)
-        -> (size: FrameSize, metered: PreviewRenderer.Metered)?
+        -> (size: FrameSize, metered: PreviewRenderer.Metered?)?
     {
         var decoded: Result<NativeSource.Frame, Error>?
-        var reading = PreviewRenderer.Metered()
+        var reading: PreviewRenderer.Metered?
         let group = DispatchGroup()
         group.enter()
         DispatchQueue.global(qos: .userInitiated).async {
@@ -403,9 +403,10 @@ final class GradeModel: ObservableObject {
         }
         group.enter()
         DispatchQueue.global(qos: .userInitiated).async {
-            reading =
-                (try? self.meter.measure(clip.url, referenceStops: look.matchReferenceStops))
-                ?? PreviewRenderer.Metered()
+            // NIL, NOT ZERO, when the meter fails: a zero handed on as a reading made the preview
+            // show the clip unmetered while the export metered it. Without one, the exact render
+            // meters for itself.
+            reading = try? self.meter.measure(clip.url, referenceStops: look.matchReferenceStops)
             group.leave()
         }
         group.wait()
@@ -428,7 +429,7 @@ final class GradeModel: ObservableObject {
 
             // What was metered, so the first drag already grades with it.
             self.frameSizes[clip.stem] = frame.sourceSize
-            self.measuredMetering[clip.url] = reading
+            if let reading { self.measuredMetering[clip.url] = reading }
             // THE PICTURE NOW, from the live tier, rather than after the graded render.
             if self.selectedClip?.url == clip.url { self.liveUpdate() }
         }
@@ -464,7 +465,7 @@ final class GradeModel: ObservableObject {
     private var lastSource:
         (
             clip: URL, seconds: Double, referenceStops: Double, size: FrameSize,
-            metered: PreviewRenderer.Metered
+            metered: PreviewRenderer.Metered?
         )?
     private lazy var meter = ExposureMeter(engine: engine)
     /// The live grade, on its OWN queue. Sharing the engine's serial queue meant every live frame
@@ -875,7 +876,7 @@ final class GradeModel: ObservableObject {
                 self.lastSource.map {
                     $0.clip == clip.url && $0.seconds == seconds
                         && $0.referenceStops == look.matchReferenceStops
-                } == true ? self.lastSource?.metered : nil
+                } == true ? self.lastSource?.metered ?? nil : nil
             let pixels: CGImage
             do {
                 let frame = try self.renderer.render(
@@ -979,7 +980,7 @@ final class GradeModel: ObservableObject {
             let usable =
                 fresh() && source?.referenceStops == look.matchReferenceStops ? source : nil
             let hintSize = usable?.size ?? knownSize
-            let hintMetering = usable?.metered
+            let hintMetering = usable?.metered ?? nil
             guard generation == self.previewGeneration else { return }
             do {
                 let frame = try self.renderer.render(

@@ -7,11 +7,17 @@ import Foundation
 /// grade.sh — preflight, generators, a decode for the picture — just to learn three numbers.
 /// Measured on the Intel Mac: ~0.5 s ProRes, ~1.3 s HEVC, run beside the native decode.
 public struct ExposureMeter {
+    public enum Failure: Error {
+        case noReading(status: Int32)
+    }
+
     public let engine: EngineLocation
     public init(engine: EngineLocation) { self.engine = engine }
 
     /// Metered at 1 s, the timecode the export meters at, against the look's reference. "0 0 0",
-    /// the engine's answer for a frame it cannot read, comes back as a neutral reading.
+    /// the engine's answer for a frame it cannot read, is a real neutral reading. A process that
+    /// fails or prints something unreadable THROWS: a failure passed on as zero would be used as
+    /// the reading and the preview would silently disagree with the export.
     public func measure(_ clip: URL, referenceStops: Double) throws -> PreviewRenderer.Metered {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -30,7 +36,7 @@ public struct ExposureMeter {
         let numbers = String(decoding: data, as: UTF8.self)
             .split(whereSeparator: { $0 == " " || $0 == "\n" }).compactMap { Double($0) }
         guard process.terminationStatus == 0, numbers.count == 3 else {
-            return PreviewRenderer.Metered()
+            throw Failure.noReading(status: process.terminationStatus)
         }
         return PreviewRenderer.Metered(exposure: numbers[0], temp: numbers[1], tint: numbers[2])
     }
