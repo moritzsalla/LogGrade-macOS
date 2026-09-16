@@ -20,12 +20,6 @@ final class LivePreview: ObservableObject {
     @Published var lastExact: NSImage?
     /// The render before that one, which is what compare shows once the exact frame IS the picture.
     @Published var previous: NSImage?
-    /// What an exact frame is, said beside it. Spelled once: the model says it when a render lands
-    /// and the view shows it before any has, and two copies of a claim about the render drift.
-    static let exactFrameNote =
-        "This is the grade. Grain, sharpening, denoise, the stabiliser "
-        + "and dither are added when you convert."
-
     @Published var status = ""
     @Published var statusIsFailure = false
     @Published var isRendering = false

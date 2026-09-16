@@ -69,6 +69,7 @@ public final class PreviewRenderer {
     public func render(
         clip: URL, seconds: Double, look: Look, height: Int = 1440,
         match: Bool = true, stage: Stage = .graded,
+        knownSize: FrameSize? = nil, knownMetering: Metered? = nil,
         onStart: ((Process) -> Void)? = nil
     ) throws -> Frame {
         let lookFile = workDirectory.appendingPathComponent("preview-look.json")
@@ -84,6 +85,15 @@ public final class PreviewRenderer {
             "FRAME_STAGE": stage.rawValue,
             "MATCH": match ? "1" : "0",
         ]
+        // WHAT AN EARLIER PREVIEW OF THIS CLIP ALREADY MEASURED, so the engine does not decode the
+        // same frame twice more to learn it again (~2 s on 4K HEVC). Both come from that render's
+        // own clip_planned, at the same timecode.
+        if let knownSize {
+            environment["FRAME_SOURCE_SIZE"] = "\(knownSize.width) \(knownSize.height)"
+        }
+        if match, let m = knownMetering {
+            environment["FRAME_METERED"] = "\(m.exposure) \(m.temp) \(m.tint)"
+        }
         let outcome = try EngineRun(engine: engine).run(
             arguments: [clip.path],
             environment: environment,
