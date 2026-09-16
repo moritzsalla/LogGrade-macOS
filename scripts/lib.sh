@@ -99,12 +99,14 @@ export_dir() {  # export_dir <work>
 	fi
 }
 
-# A proof is named so it can never be mistaken for a deliverable in a folder listing.
+# A proof is named so it can never be mistaken for a deliverable in a folder listing. The extension is
+# DELIVERY_CONTAINER's (load_delivery_look), mp4 when nothing loaded it.
 deliverable_path() {  # deliverable_path <dir> <clip> <suffix> [proof-seconds]
+	local ext="${DELIVERY_CONTAINER:-mp4}"
 	if [ -n "${4:-}" ]; then
-		printf '%s/%s_%s_proof-%ss.mp4\n' "$1" "$2" "$3" "$4"
+		printf '%s/%s_%s_proof-%ss.%s\n' "$1" "$2" "$3" "$4" "$ext"
 	else
-		printf '%s/%s_%s.mp4\n' "$1" "$2" "$3"
+		printf '%s/%s_%s.%s\n' "$1" "$2" "$3" "$ext"
 	fi
 }
 
@@ -702,7 +704,9 @@ fps_filter() {  # fps_filter <source-rate> <target-rate>  -> ",fps=N" or "" or r
 	num="${src%%/*}"; den="${src#*/}"
 	[ "$den" != "$src" ] || den=1
 	case "$num$den" in ''|*[!0-9]*) echo "unreadable source rate: $src" >&2; return 1;; esac
-	if [ $(( num )) -eq $(( out * den )) ]; then
+	# THE SAME RATE, within 0.1%: an iPhone's "30 fps" is 30000/1001, and asking for 30 from it means
+	# the source's rate, not a retime. No filter, so the file keeps the rate it was shot at.
+	if [ $(( (num - out * den) * 1000 )) -le "$num" ] && [ $(( (out * den - num) * 1000 )) -le "$num" ]; then
 		printf ''
 		return 0
 	fi
@@ -1020,20 +1024,56 @@ DELIVERY_BLEND="blend=all_mode=grainmerge:shortest=1"
 # x264 PRESET MEDIUM, not slow: on IMG_0609 with grain 4 it encoded 1.5x faster (24.4 against 16.2
 # fps) for 45.8 against 46.6 dB (worst frame 44.1 against 45.1), no visible change at 3x on brick or
 # flat asphalt, and SSIM 0.9614 against 0.9617 after a 4 Mbit/s re-encode. `fast` bought little more
-# and lost more. HEVC keeps slow: a 10-bit file is watched as delivered, not re-encoded.
-# `0:a:0?` MUST stay quoted: `?` is a glob character, and a file named `0:a:00` in the launch
-# directory would otherwise expand it. An array, and never empty, so bash 3.2's empty-array trap
-# under `set -u` does not apply.
-DELIVERY_ENCODE=(-map "[o]" -map "0:a:0?" -shortest
-	-color_primaries bt709 -color_trc bt709 -colorspace bt709
-	-c:a aac -b:a 192k -movflags +faststart)
-# The video encoder, by DELIVERY_BITS. 10 keeps the grade's 10 bits to the file for a destination
-# that plays them (a Mac, a phone, an editor) rather than recompressing to 8-bit: no dither noise in a
-# sky, and no banding under it. HEVC because H.264 High 10 does not play in QuickTime or on iOS.
-# `hvc1`, not ffmpeg's default `hev1`, or QuickTime refuses the file.
-DELIVERY_VIDEO_8=(-c:v libx264 -profile:v high -preset medium -crf 18)
-DELIVERY_VIDEO_10=(-c:v libx265 -preset slow -crf 18 -pix_fmt yuv420p10le -tag:v hvc1
-	-x265-params log-level=error)
+# and lost more. HEVC 10-bit keeps slow: it is watched as delivered, not re-encoded.
+DELIVERY_TAGS=(-color_primaries bt709 -color_trc bt709 -colorspace bt709 -movflags +faststart)
+
+# One deliverable's audio and video encode, by DELIVERY_CODEC, DELIVERY_QUALITY and DELIVERY_AUDIO,
+# into the global array DELIVERY_ARGS (a function cannot return an array in bash 3.2).
+#
+#   h264        x264 High, 8-bit 4:2:0. `auto` is the measured medium/CRF 18 above.
+#   hevc        x265, 8-bit 4:2:0: a smaller file for the same picture where HEVC plays.
+#   hevc10      x265 Main 10, 4:2:0: keeps the grade's 10 bits for a destination that plays them (a
+#               Mac, a phone, an editor), no dither noise in a sky and no banding under it. HEVC
+#               because H.264 High 10 does not play in QuickTime or on iOS.
+#   prores422, prores422hq  10-bit 4:2:2, for an editor. Its quality IS its profile, so it takes no
+#               DELIVERY_QUALITY other than auto; PCM audio, as a ProRes file is expected to carry.
+#
+# `high` and `max` spend time and bitrate on a smaller difference than `auto` already leaves: they are
+# for a file that is itself the archive, not measured improvements after a platform re-encode.
+# `hvc1`, not ffmpeg's default `hev1`, or QuickTime refuses the file. `0:a:0?` MUST stay quoted: `?`
+# is a glob character.
+delivery_encode_args() {  # delivery_encode_args  -> sets DELIVERY_ARGS
+	local preset crf
+	case "$DELIVERY_CODEC:$DELIVERY_QUALITY" in
+		h264:auto)    preset=medium crf=18;;
+		h264:high)    preset=slow   crf=16;;
+		h264:max)     preset=slower crf=14;;
+		hevc:auto)    preset=medium crf=20;;
+		hevc:high)    preset=slow   crf=18;;
+		hevc:max)     preset=slower crf=16;;
+		hevc10:auto)  preset=slow   crf=18;;
+		hevc10:high)  preset=slow   crf=16;;
+		hevc10:max)   preset=slower crf=14;;
+	esac
+	DELIVERY_ARGS=(-shortest "${DELIVERY_TAGS[@]}")
+	if [ "$DELIVERY_AUDIO" = 1 ]; then
+		case "$DELIVERY_CODEC" in
+			prores*) DELIVERY_ARGS+=(-map "0:a:0?" -c:a pcm_s16le);;
+			*)       DELIVERY_ARGS+=(-map "0:a:0?" -c:a aac -b:a 192k);;
+		esac
+	else
+		DELIVERY_ARGS+=(-an)
+	fi
+	case "$DELIVERY_CODEC" in
+		h264)   DELIVERY_ARGS+=(-c:v libx264 -profile:v high -preset "$preset" -crf "$crf");;
+		hevc)   DELIVERY_ARGS+=(-c:v libx265 -preset "$preset" -crf "$crf" -pix_fmt yuv420p -tag:v hvc1
+		            -x265-params log-level=error);;
+		hevc10) DELIVERY_ARGS+=(-c:v libx265 -preset "$preset" -crf "$crf" -pix_fmt yuv420p10le -tag:v hvc1
+		            -x265-params log-level=error);;
+		prores422)   DELIVERY_ARGS+=(-c:v prores_ks -profile:v 2 -pix_fmt yuv422p10le -vendor apl0);;
+		prores422hq) DELIVERY_ARGS+=(-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le -vendor apl0);;
+	esac
+}
 
 # Delivery only; the master keeps its audio. 60, not 80: the filter is -3 dB at its cutoff, and 80
 # cut the peak less (1.3 dB against 1.8) and cost 1.8 dB at 80-120 Hz. docs/PIPELINE.md, "Encode".
@@ -1082,16 +1122,69 @@ load_delivery_look() {
 		0|1) ;;
 		*) echo "FINISH must be 0 or 1: got '$FINISH'" >&2; return 1;;
 	esac
-	DELIVERY_BITS="${DELIVERY_BITS:-8}"
-	case "$DELIVERY_BITS" in
-		8|10) ;;
+	load_delivery_format
+}
+
+# What a deliverable is encoded as. Every value is refused by name rather than defaulted past, because
+# each one is a file somebody asked for.
+#
+# DELIVERY_BITS IS THE OLD SPELLING and still works alone: 8 is h264, 10 is hevc10. Beside a
+# DELIVERY_CODEC it must agree with it, so a caller moving from one to the other cannot send two
+# answers and get the one it did not mean.
+load_delivery_format() {
+	case "${DELIVERY_BITS:-}" in
+		''|8|10) ;;
 		*) echo "DELIVERY_BITS must be 8 or 10: got '$DELIVERY_BITS'" >&2; return 1;;
+	esac
+	if [ -z "${DELIVERY_CODEC:-}" ]; then
+		DELIVERY_CODEC=h264
+		[ "${DELIVERY_BITS:-8}" = 8 ] || DELIVERY_CODEC=hevc10
+	fi
+	case "$DELIVERY_CODEC" in
+		h264|hevc) DELIVERY_DEPTH=8;;
+		hevc10|prores422|prores422hq) DELIVERY_DEPTH=10;;
+		*) echo "DELIVERY_CODEC must be h264, hevc, hevc10, prores422 or prores422hq: got '$DELIVERY_CODEC'" >&2
+			return 1;;
+	esac
+	if [ -n "${DELIVERY_BITS:-}" ] && [ "$DELIVERY_BITS" != "$DELIVERY_DEPTH" ]; then
+		echo "DELIVERY_BITS=$DELIVERY_BITS contradicts DELIVERY_CODEC=$DELIVERY_CODEC ($DELIVERY_DEPTH-bit): set one" >&2
+		return 1
+	fi
+	DELIVERY_BITS="$DELIVERY_DEPTH"
+	DELIVERY_QUALITY="${DELIVERY_QUALITY:-auto}"
+	case "$DELIVERY_QUALITY" in
+		auto|high|max) ;;
+		*) echo "DELIVERY_QUALITY must be auto, high or max: got '$DELIVERY_QUALITY'" >&2; return 1;;
+	esac
+	case "$DELIVERY_CODEC:$DELIVERY_QUALITY" in
+		prores*:high|prores*:max)
+			echo "DELIVERY_QUALITY=$DELIVERY_QUALITY does not apply to $DELIVERY_CODEC: a ProRes file's quality is its profile (prores422hq is the higher one)" >&2
+			return 1;;
+	esac
+	DELIVERY_CONTAINER="${DELIVERY_CONTAINER:-mp4}"
+	case "$DELIVERY_CONTAINER" in
+		mp4|mov) ;;
+		*) echo "DELIVERY_CONTAINER must be mp4 or mov: got '$DELIVERY_CONTAINER'" >&2; return 1;;
+	esac
+	case "$DELIVERY_CODEC:$DELIVERY_CONTAINER" in
+		prores*:mp4)
+			echo "DELIVERY_CONTAINER=mp4 cannot hold $DELIVERY_CODEC: ProRes is a QuickTime codec, set DELIVERY_CONTAINER=mov" >&2
+			return 1;;
+	esac
+	DELIVERY_AUDIO="${DELIVERY_AUDIO:-1}"
+	case "$DELIVERY_AUDIO" in
+		0|1) ;;
+		*) echo "DELIVERY_AUDIO must be 0 or 1: got '$DELIVERY_AUDIO'" >&2; return 1;;
 	esac
 }
 
 # The delivered pixel format and the numbers the grain mask is written in, which follow it: an 8-bit
 # expression on a 10-bit plane puts mid-grey at 128 of 1023, and the grain merge turns every frame dark.
-delivery_pix_fmt() {  # delivery_pix_fmt  -> yuv420p|yuv420p10le, from DELIVERY_BITS
+# ProRes is 4:2:2, so its finish is sharpened and grained at 4:2:2 and never reduced to 4:2:0 first.
+delivery_pix_fmt() {  # delivery_pix_fmt  -> yuv420p|yuv420p10le|yuv422p10le
+	case "${DELIVERY_CODEC:-}" in
+		prores*) printf 'yuv422p10le\n'; return;;
+	esac
 	[ "${DELIVERY_BITS:-8}" = 10 ] && printf 'yuv420p10le\n' || printf 'yuv420p\n'
 }
 
@@ -1519,7 +1612,8 @@ render_deliverables() {  # render_deliverables <label> <input> <fps> <shared-cha
 		shift 4
 	done
 	local af="" grain=1
-	[ "$AUDIO_HIGHPASS_HZ" -eq 0 ] || af="highpass=f=$AUDIO_HIGHPASS_HZ"
+	[ "$AUDIO_HIGHPASS_HZ" -eq 0 ] || [ "$DELIVERY_AUDIO" = 0 ] || af="highpass=f=$AUDIO_HIGHPASS_HZ"
+	delivery_encode_args
 	# Strength 0 is no plate and no merge: absent rather than idle, like a neutral grade stage.
 	[ "$(awk -v k="$GRAIN_STRENGTH" 'BEGIN { print (k == 0) }')" = 1 ] && grain=0
 	local inputs=(-y -i "$in") graph="" outargs=() b g o t
@@ -1552,12 +1646,7 @@ render_deliverables() {  # render_deliverables <label> <input> <fps> <shared-cha
 		fi
 		# `${af:+-af "$af"}` is zero words when the filter is off and exactly two when it is on. An
 		# array would be the obvious spelling, but an empty one under `set -u` is "unbound" on bash 3.2.
-		outargs+=(-map "[$o]" "${DELIVERY_ENCODE[@]:2}" ${af:+-af "$af"})
-		if [ "$DELIVERY_BITS" = 10 ]; then
-			outargs+=("${DELIVERY_VIDEO_10[@]}")
-		else
-			outargs+=("${DELIVERY_VIDEO_8[@]}")
-		fi
+		outargs+=(-map "[$o]" "${DELIVERY_ARGS[@]}" ${af:+-af "$af"})
 		[ "$#" -eq 0 ] || outargs+=("$@")
 		outargs+=("@OUT$(( i + 1 ))@")
 	done

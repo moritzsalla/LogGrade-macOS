@@ -30,7 +30,11 @@ Nothing has to be downloaded: `luts/rendering/neutral.cube` is the shipped conve
 | `HEIGHT=<px>` | 9:16 reference height, default 1920 |
 | `CROP_OFFSET=<px\|centre>` | offset for cropping deliverables without their own: from the top, or from the left on a frame wider than the window. No default |
 | `FPS_OUT=<n>` | output rate; integer relations only |
-| `DELIVERY_BITS=8\|10` | 8: H.264, default. 10: HEVC Main 10, for a destination that keeps it (a Mac, a phone, an editor); social platforms re-encode to 8-bit |
+| `DELIVERY_CODEC=h264\|hevc\|hevc10\|prores422\|prores422hq` | default h264. hevc10 keeps 10 bits for a destination that plays them; ProRes is 10-bit 4:2:2 for an editor, mov only |
+| `DELIVERY_QUALITY=auto\|high\|max` | encoder effort per codec, default auto; ProRes takes auto only |
+| `DELIVERY_CONTAINER=mp4\|mov` | default mp4 |
+| `DELIVERY_AUDIO=1\|0` | 0 delivers with no audio stream |
+| `DELIVERY_BITS=8\|10` | old spelling of h264 / hevc10; must agree with DELIVERY_CODEC |
 | `AUDIO_HIGHPASS_HZ=<hz\|0>` | delivered-audio high-pass, default 60; 0 off. Never applied to the master |
 | `CONVERT=<name>` | the conversion out of Apple Log, from `luts/rendering/` or `luts/film/`. Overrides `convert.cube` |
 | `GRAIN_STRENGTH=<n>` | overrides `look.json` |

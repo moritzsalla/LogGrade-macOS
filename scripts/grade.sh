@@ -25,6 +25,12 @@
 #   DRY=1             plan only, render nothing
 #   HEIGHT=<px>       height of the 9:16 reference frame (default 1920). It sets the shared
 #                     delivery width; each deliverable's own height follows its aspect.
+#   DELIVERY_CODEC=<c>  h264 (default) | hevc | hevc10 | prores422 | prores422hq. lib.sh's
+#                     delivery_encode_args says what each one is for. DELIVERY_BITS=8|10 is the old
+#                     spelling of h264|hevc10 and must agree with DELIVERY_CODEC if both are set.
+#   DELIVERY_QUALITY=<q>  auto (default) | high | max. ProRes takes auto only: its profile is its quality.
+#   DELIVERY_CONTAINER=<c>  mp4 (default) | mov. ProRes needs mov, and mp4 with it is refused.
+#   DELIVERY_AUDIO=0  deliver with no audio stream (default 1).
 #   FPS_OUT=<n>       output frame rate. Default is the source's. Only an integer relation is
 #                     accepted — anything needing retiming is refused rather than interpolated.
 #   CORRECT_SIZE=<n>  points per axis in the correction cube (default 33; see its header for
@@ -393,7 +399,7 @@ say "convert: $CONVERT_NAME"
 [ -n "$FRAME" ] || report_environment "$ROOT"
 # The EFFECTIVE values, after defaults and look.json, which is what a report read weeks later needs:
 # the environment that launched the run is gone by then.
-report_line "knobs:   deliverables=$(IFS=,; printf '%s' "${D_NAME[*]}") width=$WIDTH height=$HEIGHT crop_offset=${CROP_OFFSET_OK:--} match=$MATCH stab=$STAB smoothing=$SMOOTHING grain=$GRAIN_STRENGTH fps_out=${FPS_OUT:--} proof=${PROOF:--} frame=${FRAME:--} frame_height=$FRAME_HEIGHT frame_stage=$FRAME_STAGE halation=${HAL_STRENGTH}/${HAL_THRESHOLD}/${HAL_RADIUS}/${HAL_TINT} grain_weights=${GRAIN_SHADOWS}/${GRAIN_HIGHLIGHTS} audio_highpass=${AUDIO_HIGHPASS_HZ} bits=$DELIVERY_BITS correct_size=$CORRECT_SIZE convert=$CONVERT_NAME reference_stops=$REF_STOPS denoise=$DENOISE_STRENGTH sharpen=$SHARPEN gauge=$GAUGE dry=$DRY json=$JSON"
+report_line "knobs:   deliverables=$(IFS=,; printf '%s' "${D_NAME[*]}") width=$WIDTH height=$HEIGHT crop_offset=${CROP_OFFSET_OK:--} match=$MATCH stab=$STAB smoothing=$SMOOTHING grain=$GRAIN_STRENGTH fps_out=${FPS_OUT:--} proof=${PROOF:--} frame=${FRAME:--} frame_height=$FRAME_HEIGHT frame_stage=$FRAME_STAGE halation=${HAL_STRENGTH}/${HAL_THRESHOLD}/${HAL_RADIUS}/${HAL_TINT} grain_weights=${GRAIN_SHADOWS}/${GRAIN_HIGHLIGHTS} audio_highpass=${AUDIO_HIGHPASS_HZ} codec=$DELIVERY_CODEC quality=$DELIVERY_QUALITY container=$DELIVERY_CONTAINER audio=$DELIVERY_AUDIO correct_size=$CORRECT_SIZE convert=$CONVERT_NAME reference_stops=$REF_STOPS denoise=$DENOISE_STRENGTH sharpen=$SHARPEN gauge=$GAUGE dry=$DRY json=$JSON"
 report_line "work:    $WORK"
 report_line "preflight took $(fmt_ms "$T_PREFLIGHT")"
 say ""
