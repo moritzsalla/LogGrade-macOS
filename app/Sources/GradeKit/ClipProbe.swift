@@ -77,13 +77,19 @@ public struct ClipProbe {
         public var isAppleLog: Bool { self == .appleLog }
     }
 
-    private func field(_ entry: String, of url: URL) -> String? {
+    /// ONE ffprobe for every field. It was one launch per field, twice over (the verdict read them
+    /// all again): ~16 launches at ~0.11 s each, so adding a clip froze the window ~1.7 s and the
+    /// thirteen Mexico clips ~22 s. The quirks are handled per key instead of per launch: the first
+    /// value of each key wins (the video stream prints twice) and a trailing comma is stripped.
+    public func fields(of url: URL) -> Fields? {
         let process = Process()
         process.executableURL = ffprobe
         process.arguments = [
             "-v", "error", "-select_streams", "v:0",
-            "-show_entries", "stream=\(entry)",
-            "-of", "default=nw=1:nk=1", url.path,
+            "-show_entries",
+            "stream=codec_name,pix_fmt,width,height,r_frame_rate,color_primaries,"
+                + "color_transfer,duration",
+            "-of", "default=nw=1", url.path,
         ]
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -91,26 +97,28 @@ public struct ClipProbe {
         do { try process.run() } catch { return nil }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        // FIRST line only: this camera's files print the video stream twice, so a naive read of
-        // the whole output gets two values and a blank line.
-        let text = String(decoding: data, as: UTF8.self)
-        guard
-            let first = text.split(separator: "\n").first(where: {
-                !$0.trimmingCharacters(in: .whitespaces).isEmpty
-            })
-        else { return nil }
-        // And a trailing comma appears on camera originals, so it is stripped rather than trusted.
-        return first.trimmingCharacters(in: CharacterSet(charactersIn: " ,\r"))
+        return Self.fields(parsing: String(decoding: data, as: UTF8.self))
     }
 
-    public func fields(of url: URL) -> Fields? {
-        guard let codec = field("codec_name", of: url),
-            let pix = field("pix_fmt", of: url),
-            let w = field("width", of: url).flatMap(Int.init),
-            let h = field("height", of: url).flatMap(Int.init)
+    /// `key=value` lines, the first usable value per key. Apart from the launch so the quirks can
+    /// be tested on text.
+    static func fields(parsing text: String) -> Fields? {
+        var values: [String: String] = [:]
+        for line in text.split(separator: "\n") {
+            guard let eq = line.firstIndex(of: "=") else { continue }
+            let key = String(line[..<eq])
+            let value = String(line[line.index(after: eq)...])
+                .trimmingCharacters(in: CharacterSet(charactersIn: " ,\r"))
+            // "N/A" is ffprobe not answering; a later occurrence of the key may.
+            guard values[key] == nil, !value.isEmpty, value != "N/A" else { continue }
+            values[key] = value
+        }
+        guard let codec = values["codec_name"], let pix = values["pix_fmt"],
+            let w = values["width"].flatMap(Int.init),
+            let h = values["height"].flatMap(Int.init)
         else { return nil }
         var rate: Double?
-        if let raw = field("r_frame_rate", of: url) {
+        if let raw = values["r_frame_rate"] {
             let parts = raw.split(separator: "/").compactMap { Double($0) }
             if parts.count == 2, parts[1] != 0 {
                 rate = parts[0] / parts[1]
@@ -121,18 +129,23 @@ public struct ClipProbe {
         return Fields(
             codec: codec,
             pixelFormat: pix,
-            primaries: field("color_primaries", of: url) ?? "unknown",
-            transfer: field("color_transfer", of: url) ?? "unknown",
+            primaries: values["color_primaries"] ?? "unknown",
+            transfer: values["color_transfer"] ?? "unknown",
             width: w, height: h,
-            duration: field("duration", of: url).flatMap(Double.init),
+            duration: values["duration"].flatMap(Double.init),
             frameRate: rate)
+    }
+
+    public func verdict(for url: URL) -> Verdict {
+        Self.verdict(for: fields(of: url), name: url.lastPathComponent)
     }
 
     /// A SIGNATURE, not proof, and the interface says so. What it rules out is the case that
     /// matters: footage that has already been converted, which would otherwise be converted again.
-    public func verdict(for url: URL) -> Verdict {
-        guard let f = fields(of: url) else {
-            return .unreadable("ffprobe read no video stream from \(url.lastPathComponent)")
+    /// From fields already read, so a caller holding them does not launch ffprobe again.
+    public static func verdict(for fields: Fields?, name: String) -> Verdict {
+        guard let f = fields else {
+            return .unreadable("ffprobe read no video stream from \(name)")
         }
         let converted = ["bt709", "smpte170m", "iec61966-2-1", "srgb"]
         if converted.contains(f.transfer) {

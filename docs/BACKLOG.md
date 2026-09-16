@@ -35,9 +35,20 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
 
 ## Next, in order
 
-1. **Portra 160 against the scans** (arriving). Tone, colour and grain side by side, then both users
-   judge.
-2. **Delete the engine controls no look uses**, once the looks are signed off: wheels, hue curves,
+1. **Native rendering, in stages** (the user: performance is "meagre everywhere"). Each stage is held
+   to grade.sh output by tests, and grade.sh stays the fallback until a stage is at parity.
+   Measured on the Intel Mac: an AVFoundation 10-bit 4K frame decodes in 0.10-0.19 s (ProRes),
+   0.9 s (HEVC, first read); a Core Image 65³ cube at 2560x1440 takes 80 ms.
+   - **Import:** one ffprobe per clip, clips probed in parallel.
+   - **Preview:** AVFoundation decode and one shared GPU grade chain in GradeKit; the engine FRAME
+     render becomes a background confirmation.
+   - **Export:** AVAssetReader, the same chain, the delivery stage, VideoToolbox H.264/HEVC through
+     AVAssetWriter. ProRes, stabilisation and Super 8's gauge stay on grade.sh until at parity.
+2. **Portra 160, now, against public lab scans**; the partner's scans when they arrive. The user
+   found it dull; measured darker than Neutral with foliage at 2/3 the reference chroma.
+3. **Cross-check Super 8** against professional emulations (licence permitting, comparison only)
+   and more reference stills per stock.
+4. **Delete the engine controls no look uses**, once the looks are signed off: wheels, hue curves,
    halation and tone internals, with their tests and the live preview's copies.
 
 ## Also open

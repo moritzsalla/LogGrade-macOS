@@ -38,6 +38,38 @@ final class ClipProbeTests: XCTestCase {
             "the container's dimensions are not the graph's; that is ADR 0005")
     }
 
+    /// The one-launch reader against this camera's output shape: the video stream printed twice,
+    /// a trailing comma, and a key ffprobe cannot answer the first time it prints it.
+    func testOneReadSurvivesTheCamerasQuirks() throws {
+        let text = """
+            codec_name=hevc
+            width=3840,
+            height=2160
+            pix_fmt=yuv422p10le
+            color_transfer=unknown
+            color_primaries=bt2020
+            r_frame_rate=24/1
+            duration=N/A
+            codec_name=hevc
+            width=1920
+            height=1080
+            pix_fmt=yuv420p
+            duration=4.801604
+            """
+        let fields = try XCTUnwrap(ClipProbe.fields(parsing: text))
+        XCTAssertEqual(fields.codec, "hevc")
+        XCTAssertEqual(
+            fields.width, 3840, "the second printing overwrote the first, or the comma stayed")
+        XCTAssertEqual(fields.height, 2160)
+        XCTAssertEqual(fields.pixelFormat, "yuv422p10le")
+        XCTAssertEqual(fields.frameRate, 24)
+        XCTAssertEqual(
+            fields.duration ?? 0, 4.801604, accuracy: 1e-9, "N/A was kept over a real value")
+        XCTAssertEqual(ClipProbe.verdict(for: fields, name: "X"), .appleLog)
+        XCTAssertNil(
+            ClipProbe.fields(parsing: "duration=1\n"), "no video stream must read as nothing")
+    }
+
     func testRefusesFootageThatHasAlreadyBeenConverted() throws {
         // The case that matters. Converting twice is the *bleached* failure with a new cause, and
         // it produces a file that looks finished.

@@ -30,16 +30,29 @@ public final class ClipList: ObservableObject {
     /// the reason is the thing the person needs.
     @discardableResult
     public func add(_ urls: [URL]) -> [Entry] {
+        var fresh: [URL] = []
+        for url in urls where !entries.contains(where: { $0.url == url }) && !fresh.contains(url) {
+            fresh.append(url)
+        }
+        // IN PARALLEL, one ffprobe per clip. Probing one after another on the main thread froze the
+        // window for the whole batch.
+        var measured = [ClipProbe.Fields?](repeating: nil, count: fresh.count)
+        if let probe {
+            measured.withUnsafeMutableBufferPointer { out in
+                DispatchQueue.concurrentPerform(iterations: fresh.count) { i in
+                    out[i] = probe.fields(of: fresh[i])
+                }
+            }
+        }
         var added: [Entry] = []
-        for url in urls where !entries.contains(where: { $0.url == url }) {
-            let stem = url.deletingPathExtension().lastPathComponent
-            let fields = probe?.fields(of: url)
+        for (url, fields) in zip(fresh, measured) {
             let verdict =
-                probe?.verdict(for: url)
-                ?? .unreadable("no ffprobe available to measure with")
+                probe == nil
+                ? .unreadable("no ffprobe available to measure with")
+                : ClipProbe.verdict(for: fields, name: url.lastPathComponent)
             let entry = Entry(
-                stem: stem, url: url, verdict: verdict, fields: fields,
-                thumbnail: nil)
+                stem: url.deletingPathExtension().lastPathComponent, url: url,
+                verdict: verdict, fields: fields, thumbnail: nil)
             entries.append(entry)
             added.append(entry)
         }
