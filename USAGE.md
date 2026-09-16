@@ -12,7 +12,7 @@ itself ([ADR 0008](docs/adr/0008_THE_APP_DRIVES_THE_CHAIN_AND_NEVER_REBUILDS_IT.
 ./scripts/02-grade.sh    IMG_0609          # staged: baseline -> master (refuses correction or halation)
 ./scripts/00-stabilise-detect.sh IMG_0609  # staged, optional: camera motion
 ./scripts/03-final.sh    IMG_0609 feed 820 # staged: master -> one deliverable
-./scripts/check.sh [--fast|--conformance|--allow-skips]
+./scripts/check.sh [--fast|--allow-skips]
 ./tests/render-golden.sh [--regenerate "<why>"]
 ```
 

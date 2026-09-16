@@ -1,20 +1,16 @@
 #!/bin/bash
 # render-golden.sh — did the default render move, and if it did, did anyone mean it to?
 #
-# WHY THIS EXISTS, AND WHY IT IS NOT tests/conformance.sh. Conformance compares this engine with the
-# frozen precursor. That proved the fork survived being instrumented and parameterised, and it
-# still does. But a render that must match the precursor can never be better than the precursor,
-# and nothing can be re-based against a frozen repo. So every improvement to the default image had
-# two options: stay the old edit forever, or delete the guard. docs/adr/0014 records why the
-# expectation now lives HERE, recorded from this repo's own render, where moving it takes one
-# deliberate commit.
+# WHY IT IS RECORDED FROM THIS REPO'S OWN RENDER. It replaced a comparison against the frozen
+# precursor, which could never let the default image get better than the precursor. Here moving
+# the image takes one deliberate commit.
 #
 # THE RECORD IS A STREAM HASH, NOT A FILE HASH. `-c copy -f md5` hashes the packets, so a muxer
 # that starts stamping a timestamp cannot fail this. PROVENANCE.md measured two renders of one clip
 # minutes apart as byte-identical, so the render is deterministic on a fixed build.
 #
-# A DIFFERENT ffmpeg OR ARCHITECTURE IS A SKIP, NOT A FAILURE. Conformance was immune to this,
-# because both sides ran the same binary. A golden recorded on one build says nothing about another:
+# A DIFFERENT ffmpeg OR ARCHITECTURE IS A SKIP, NOT A FAILURE. A golden recorded on one build says
+# nothing about another:
 # the encoder writes its version into the stream, and SIMD paths are not promised to agree. That is
 # a skip until someone measures otherwise, and check.sh counts a skip against the run.
 #
@@ -26,7 +22,8 @@
 # its hash, so the recorded and the new one can be put side by side. Look at them before
 # regenerating. The reason you pass is written into the golden, where the diff shows it.
 #
-# STABILISATION IS EXCLUDED (STAB=0), for the reason conformance.sh gives.
+# STABILISATION IS EXCLUDED (STAB=0). Its detect pass costs about a minute per clip, and pinning it
+# would rest on vid.stab being deterministic as well, which nobody has measured.
 #
 # Usage:  ./tests/render-golden.sh                      compare against tests/fixtures/render-golden.json
 #         ./tests/render-golden.sh --regenerate "<why>"  record this render as the default image
@@ -144,7 +141,7 @@ if [ "$MODE" = regenerate ]; then
 				"rendered is a claim nothing produced.",
 				"",
 				"This is the DEFAULT image this repo renders, recorded from its own chain. Moving it",
-				"is allowed and takes a reason, which lands in recorded_because. See docs/adr/0014."
+				"is allowed and takes a reason, which lands in recorded_because."
 			],
 			recorded_because: $why,
 			clip: {name: $name, bytes: $bytes},

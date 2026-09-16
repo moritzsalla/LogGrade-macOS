@@ -43,7 +43,7 @@ Check: `lipo -archs dist/LogGrade.app/Contents/MacOS/LogGrade` prints `x86_64 ar
   down. That source is also the first place to look for an arm64 build.
 - **The halves are NOT the same build, deliberately.** No static arm64 9.0.1 with libvidstab
   exists, and replacing the Intel half would move the image on the Mac where it is judged, with
-  nothing to catch it: `--conformance` runs the same new binary on both sides, and
+  nothing to catch it:
   `tests/render-golden.sh` skips on a different ffmpeg build or architecture rather than failing.
   The cost is on the Apple Mac: 9.0 against 9.0.1, NEON against x86 SIMD, so its renders may not
   be byte-identical to this Mac's. That is to be measured there, not assumed.
