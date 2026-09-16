@@ -21,6 +21,8 @@ public struct LiveHalation {
     /// as `halation_sigma` in scripts/lib.sh reads it, so a 480-line preview and a 3840-line render
     /// blur the same part of the picture in either orientation.
     let sigma: Float
+    /// How many times smaller the glow is computed than the frame being graded.
+    let reduction: Int
 
     /// BT.2020, because Apple Log's primaries are BT.2020. The same weights the engine writes into
     /// its channel mixer.
@@ -28,12 +30,18 @@ public struct LiveHalation {
 
     /// Nil when the stage would do nothing, or when the tint is not a value the engine accepts —
     /// a live picture of something the render refuses is worse than none.
-    public init?(_ halation: Look.Halation, frameLongEdge: Int) {
+    ///
+    /// `sourceLongEdge` is the clip's decoded frame. The engine computes the glow on a quarter of
+    /// THAT (`HALATION_SCALE` in scripts/lib.sh), so a preview larger than a quarter of the source
+    /// reduces by the difference and one smaller does not reduce at all. Without it, no reduction.
+    public init?(_ halation: Look.Halation, frameLongEdge: Int, sourceLongEdge: Int? = nil) {
         guard !halation.isNeutral, let t = halation.tintValues else { return nil }
         strength = Float(halation.strength)
         threshold = halation.threshold
         tint = SIMD3(Float(t.0), Float(t.1), Float(t.2))
         sigma = Float(halation.radius) * Float(frameLongEdge)
+        reduction =
+            sourceLongEdge.map { max(1, frameLongEdge * Self.engineReduction / max(1, $0)) } ?? 1
     }
 
     /// `halation-threshold.cube`, one entry.
@@ -50,46 +58,91 @@ public struct LiveHalation {
         max(0, linear - threshold)
     }
 
+    /// `HALATION_SCALE` in scripts/lib.sh: the engine computes the glow on the source this many
+    /// times smaller.
+    static let engineReduction = 4
+
     /// Adds the glow to a frame of Apple Log values, interleaved RGB, in place.
+    ///
+    /// AT THE ENGINE'S RESOLUTION, AS THE ENGINE DOES IT: the log frame area-averaged down to about a
+    /// quarter of the source, thresholded, blurred with the radius scaled to match, the sharp
+    /// highlight subtracted and clamped at zero, and only that glow scaled back up bilinearly. It
+    /// blurred the full preview, a ~180-tap kernel over every pixel at 2560x1440: 1.1 s on the Intel
+    /// Mac, 0.12–0.15 s now. Reducing by a quarter of the PREVIEW instead broke parity at 480 lines
+    /// (99.9th percentile 45 against a bound of 24), because that is far coarser than the engine.
     func apply(to log: inout [Float], width: Int, height: Int) {
-        let count = width * height
-        var linear = [Float](repeating: 0, count: count * 3)
-        var highlight = [Float](repeating: 0, count: count)
+        let f = reduction
+        let sw = max(1, width / f)
+        let sh = max(1, height / f)
         let t = threshold
+
+        var highlight = [Float](repeating: 0, count: sw * sh)
         log.withUnsafeBufferPointer { src in
-            linear.withUnsafeMutableBufferPointer { lin in
-                highlight.withUnsafeMutableBufferPointer { hi in
-                    LiveChain.inBands(height: height) { rows in
-                        for i in (rows.lowerBound * width)..<(rows.upperBound * width) {
+            highlight.withUnsafeMutableBufferPointer { hi in
+                LiveChain.inBands(height: sh) { rows in
+                    for sy in rows {
+                        for sx in 0..<sw {
+                            // The block's mean in log, as `scale=...:flags=area` gives.
+                            var mean = SIMD3<Float>()
+                            let x0 = sx * width / sw
+                            let x1 = max(x0 + 1, (sx + 1) * width / sw)
+                            let y0 = sy * height / sh
+                            let y1 = max(y0 + 1, (sy + 1) * height / sh)
+                            for y in y0..<y1 {
+                                for x in x0..<x1 {
+                                    let i = (y * width + x) * 3
+                                    mean += SIMD3(src[i], src[i + 1], src[i + 2])
+                                }
+                            }
+                            mean /= Float((x1 - x0) * (y1 - y0))
                             var h = SIMD3<Float>()
                             for c in 0..<3 {
-                                let decoded = CorrectionCube.decode(Double(src[i * 3 + c]))
-                                lin[i * 3 + c] = Float(decoded)
+                                let decoded = CorrectionCube.decode(Double(mean[c]))
                                 h[c] = Float(Self.thresholded(linear: decoded, threshold: t))
                             }
-                            hi[i] = (h * Self.lumaWeights).sum()
+                            hi[sy * sw + sx] = (h * Self.lumaWeights).sum()
                         }
                     }
                 }
             }
         }
 
-        let blurred = Self.gaussian(highlight, width: width, height: height, sigma: sigma)
+        let blurred = Self.gaussian(highlight, width: sw, height: sh, sigma: sigma / Float(f))
+        // Edge-only: what the blur spreads past the highlight, never the highlight glowing onto
+        // itself; clamped at zero as `nonnegative.cube` clamps it.
+        var glowSmall = [Float](repeating: 0, count: sw * sh)
+        for i in 0..<(sw * sh) { glowSmall[i] = max(0, blurred[i] - highlight[i]) }
+
         let gain = tint * strength
         log.withUnsafeMutableBufferPointer { out in
-            linear.withUnsafeBufferPointer { lin in
-                highlight.withUnsafeBufferPointer { hi in
-                    blurred.withUnsafeBufferPointer { blur in
-                        LiveChain.inBands(height: height) { rows in
-                            for i in (rows.lowerBound * width)..<(rows.upperBound * width) {
-                                // Edge-only: what the blur spreads past the highlight, never the
-                                // highlight glowing onto itself.
-                                let glow = blur[i] - hi[i]
-                                guard glow > 0 else { continue }
-                                for c in 0..<3 {
-                                    let lit = Double(lin[i * 3 + c] + gain[c] * glow)
-                                    out[i * 3 + c] = Float(min(1, CorrectionCube.encode(lit)))
-                                }
+            glowSmall.withUnsafeBufferPointer { small in
+                LiveChain.inBands(height: height) { rows in
+                    for y in rows {
+                        // Bilinear, pixel centres aligned, edges clamped.
+                        let fy = max(
+                            0,
+                            min(Float(sh - 1), (Float(y) + 0.5) * Float(sh) / Float(height) - 0.5))
+                        let y0 = Int(fy)
+                        let y1 = min(sh - 1, y0 + 1)
+                        let wy = fy - Float(y0)
+                        for x in 0..<width {
+                            let fx = max(
+                                0,
+                                min(
+                                    Float(sw - 1), (Float(x) + 0.5) * Float(sw) / Float(width) - 0.5
+                                ))
+                            let x0 = Int(fx)
+                            let x1 = min(sw - 1, x0 + 1)
+                            let wx = fx - Float(x0)
+                            let top = small[y0 * sw + x0] * (1 - wx) + small[y0 * sw + x1] * wx
+                            let bottom = small[y1 * sw + x0] * (1 - wx) + small[y1 * sw + x1] * wx
+                            let glow = top * (1 - wy) + bottom * wy
+                            guard glow > 0 else { continue }
+                            let i = (y * width + x) * 3
+                            for c in 0..<3 {
+                                let linear = CorrectionCube.decode(Double(out[i + c]))
+                                let lit = linear + Double(gain[c] * glow)
+                                out[i + c] = Float(min(1, CorrectionCube.encode(lit)))
                             }
                         }
                     }

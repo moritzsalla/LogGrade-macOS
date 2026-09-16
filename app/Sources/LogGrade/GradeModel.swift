@@ -254,13 +254,19 @@ final class GradeModel: ObservableObject {
         pendingLook = nil
         gradeInFlight = true
         let metered = matchedMetering
+        // THE CLIP THE FRAME CAME FROM, not the selection: the selection can move on while a grade
+        // of the previous clip's frame is still queued.
+        let sourceLongEdge = sourceClip.flatMap {
+            frameSizes[$0.deletingPathExtension().lastPathComponent]
+        }.map { max($0.width, $0.height) }
 
         // OFF THE MAIN THREAD, all of it. The main thread's job during a drag is to redraw the
         // slider; any work here is a frame the thumb doesn't get, which reads as the control being
         // slow rather than the picture being late.
         liveQueue.async { [weak self] in
             guard let self else { return }
-            let outcome = self.grade(wanted, source: source, metered: metered)
+            let outcome = self.grade(
+                wanted, source: source, metered: metered, sourceLongEdge: sourceLongEdge)
             DispatchQueue.main.async {
                 self.gradeInFlight = false
                 switch outcome {
@@ -297,7 +303,8 @@ final class GradeModel: ObservableObject {
 
     /// One live frame. Runs on `liveQueue`, where the caches it reads live.
     private func grade(
-        _ requested: Look, source: CGImage, metered: PreviewRenderer.Metered?
+        _ requested: Look, source: CGImage, metered: PreviewRenderer.Metered?,
+        sourceLongEdge: Int? = nil
     ) -> LiveOutcome {
         // The engine adds what it metered to the look's correction before building the cube, so
         // the live picture does the same.
@@ -321,7 +328,8 @@ final class GradeModel: ObservableObject {
         // Built against the SOURCE frame's height, because the look stores the glow's radius as a
         // fraction of the frame and the frame this grades is the preview-sized one.
         let halation = LiveHalation(
-            wanted.halation, frameLongEdge: max(source.width, source.height))
+            wanted.halation, frameLongEdge: max(source.width, source.height),
+            sourceLongEdge: sourceLongEdge)
         if !wanted.halation.isNeutral && halation == nil {
             return .refused("That halation tint isn’t a value the engine accepts.")
         }
