@@ -164,7 +164,7 @@ final class LiveChainTests: XCTestCase {
             strength: 0.8, threshold: 1, radius: 0.006,
             tint: "1,0.3,0.05")
         let filmPreset = try XCTUnwrap(
-            rig.engine.shippedPresets().first { $0.look.convertCube == "rz67_portra400" }
+            rig.engine.shippedPresets().first { $0.look.convertCube == "portra160" }
         ).look
         var withHue = filmPreset
         withHue.hue = Look.Hue(

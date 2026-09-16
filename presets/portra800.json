@@ -5,11 +5,12 @@
     "stock's own. Each clip's exposure and white balance are metered in linear before the cube",
     "(scripts/solve-exposure.py) against match.reference_stops; correct.* still adds on top.",
     "",
-    "Fujifilm Pro 400H on 35mm, a lab scan: +1 stop, pastel, cyan-leaning highlights. 35mm",
-    "grain, heavier than the medium-format preset."
+    "Portra 800 on 35mm, a lab scan: +1 stop, more contrast and colour than 160. The fastest",
+    "Portra, so the grain is coarse and shows most in the thin shadows. Stills stocks carry an",
+    "anti-halation layer, so the glow is slight."
   ],
   "convert": {
-    "cube": "pro400h"
+    "cube": "portra800"
   },
   "correct": {
     "exposure": 0.0,
@@ -44,7 +45,7 @@
     "warmth": 0.0
   },
   "grain": {
-    "strength": 6,
+    "strength": 8,
     "shadows": 1.0,
     "highlights": 0.5
   },
@@ -59,5 +60,5 @@
     "sharpen": 0.6,
     "gauge": "none"
   },
-  "name": "Pro 400H 35mm"
+  "name": "Portra 800"
 }

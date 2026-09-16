@@ -36,17 +36,14 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
 
 1. **Export picker.** ProRes needs its own pix_fmt path: the finish dithers to 8/10-bit 4:2:0
    before sharpen and grain.
-3. **Preset lineup.** Delete Pro 400H and RZ67 Portra 400; add Portra 160 and 800. A new stock is
-   encoded for Apple playback (`cubefile.py` `display_encode`, `display=apple` in its TITLE), or it
-   renders milky.
-4. **Prune what the old app needed:** precursor parity (`tests/grade-parity.py`, ADR 0014's
+2. **Prune what the old app needed:** precursor parity (`tests/grade-parity.py`, ADR 0014's
    conformance), tests of removed controls, stale words in `CONTEXT.md`, README. Once the looks
    are tuned, delete the engine's wheels, hue curves, halation and tone internals that no preset
    uses.
-5. **Portra 160 against the scans** (arriving). Tone, colour and grain side by side, then both users
+3. **Portra 160 against the scans** (arriving). Tone, colour and grain side by side, then both users
    judge. The render golden moves with it (`render-golden.sh --regenerate`).
-6. **Portra 800, IMAX, Super 8** against public references.
-7. **Neutral on a sunny, contrasty scene.** `luts/rendering/neutral.cube` was judged on one overcast
+4. **Portra 800, IMAX, Super 8** against public references.
+5. **Neutral on a sunny, contrasty scene.** `luts/rendering/neutral.cube` was judged on one overcast
    shoot and IMG_0609 only.
 
 ## Also open

@@ -52,7 +52,7 @@ Nothing has to be downloaded: `luts/rendering/neutral.cube` is the shipped conve
 
 Presets: `reels` is 9:16, `<clip>_reels-stories_9x16.mp4`; `feed` is 4:5, `<clip>_feed_4x5.mp4`.
 Everything else about the look lives in `look.json`. The film presets are complete look files in
-`presets/`, and the app lists them: `LOOK_FILE=presets/rz67_portra400.json ./scripts/grade.sh clip.mov`.
+`presets/`, and the app lists them: `LOOK_FILE=presets/portra160.json ./scripts/grade.sh clip.mov`.
 
 ## Named codes
 
