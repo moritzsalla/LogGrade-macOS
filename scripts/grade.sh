@@ -26,8 +26,7 @@
 #   HEIGHT=<px>       height of the 9:16 reference frame (default 1920). It sets the shared
 #                     delivery width; each deliverable's own height follows its aspect.
 #   DELIVERY_CODEC=<c>  h264 (default) | hevc | hevc10 | prores422 | prores422hq. lib.sh's
-#                     delivery_encode_args says what each one is for. DELIVERY_BITS=8|10 is the old
-#                     spelling of h264|hevc10 and must agree with DELIVERY_CODEC if both are set.
+#                     delivery_encode_args says what each one is for.
 #   DELIVERY_QUALITY=<q>  auto (default) | high | max. ProRes takes auto only: its profile is its quality.
 #   DELIVERY_CONTAINER=<c>  mp4 (default) | mov. ProRes needs mov, and mp4 with it is refused.
 #   DELIVERY_AUDIO=0  deliver with no audio stream (default 1).

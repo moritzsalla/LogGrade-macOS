@@ -1128,29 +1128,19 @@ load_delivery_look() {
 # What a deliverable is encoded as. Every value is refused by name rather than defaulted past, because
 # each one is a file somebody asked for.
 #
-# DELIVERY_BITS IS THE OLD SPELLING and still works alone: 8 is h264, 10 is hevc10. Beside a
-# DELIVERY_CODEC it must agree with it, so a caller moving from one to the other cannot send two
-# answers and get the one it did not mean.
+# DELIVERY_BITS IS GONE, and refused rather than ignored: a script or a shell that still sets it
+# asked for 10-bit, and would otherwise get an 8-bit file without a word.
 load_delivery_format() {
-	case "${DELIVERY_BITS:-}" in
-		''|8|10) ;;
-		*) echo "DELIVERY_BITS must be 8 or 10: got '$DELIVERY_BITS'" >&2; return 1;;
-	esac
-	if [ -z "${DELIVERY_CODEC:-}" ]; then
-		DELIVERY_CODEC=h264
-		[ "${DELIVERY_BITS:-8}" = 8 ] || DELIVERY_CODEC=hevc10
+	if [ -n "${DELIVERY_BITS:-}" ]; then
+		echo "DELIVERY_BITS is gone: set DELIVERY_CODEC instead (8 was h264, 10 was hevc10)" >&2
+		return 1
 	fi
+	DELIVERY_CODEC="${DELIVERY_CODEC:-h264}"
 	case "$DELIVERY_CODEC" in
-		h264|hevc) DELIVERY_DEPTH=8;;
-		hevc10|prores422|prores422hq) DELIVERY_DEPTH=10;;
+		h264|hevc|hevc10|prores422|prores422hq) ;;
 		*) echo "DELIVERY_CODEC must be h264, hevc, hevc10, prores422 or prores422hq: got '$DELIVERY_CODEC'" >&2
 			return 1;;
 	esac
-	if [ -n "${DELIVERY_BITS:-}" ] && [ "$DELIVERY_BITS" != "$DELIVERY_DEPTH" ]; then
-		echo "DELIVERY_BITS=$DELIVERY_BITS contradicts DELIVERY_CODEC=$DELIVERY_CODEC ($DELIVERY_DEPTH-bit): set one" >&2
-		return 1
-	fi
-	DELIVERY_BITS="$DELIVERY_DEPTH"
 	DELIVERY_QUALITY="${DELIVERY_QUALITY:-auto}"
 	case "$DELIVERY_QUALITY" in
 		auto|high|max) ;;
@@ -1182,10 +1172,11 @@ load_delivery_format() {
 # expression on a 10-bit plane puts mid-grey at 128 of 1023, and the grain merge turns every frame dark.
 # ProRes is 4:2:2, so its finish is sharpened and grained at 4:2:2 and never reduced to 4:2:0 first.
 delivery_pix_fmt() {  # delivery_pix_fmt  -> yuv420p|yuv420p10le|yuv422p10le
-	case "${DELIVERY_CODEC:-}" in
-		prores*) printf 'yuv422p10le\n'; return;;
+	case "${DELIVERY_CODEC:-h264}" in
+		prores*) printf 'yuv422p10le\n';;
+		hevc10) printf 'yuv420p10le\n';;
+		*) printf 'yuv420p\n';;
 	esac
-	[ "${DELIVERY_BITS:-8}" = 10 ] && printf 'yuv420p10le\n' || printf 'yuv420p\n'
 }
 
 # THE GRADE ITSELF, as a spliceable filter chain: hue curves, tone curve, saturation, warmth. Both

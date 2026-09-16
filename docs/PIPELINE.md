@@ -73,7 +73,7 @@ upstream of it.
 |---|---|---|
 | 4:2:0 against 4:4:4, 8-bit | 42.3 vs 48.9 | chroma subsampling is the largest single loss, and no delivery format avoids it |
 | H.264 CRF 18, 8-bit | 38.2 | the shipped encode, subsampling included |
-| HEVC CRF 18, 10-bit | 40.7 | `DELIVERY_BITS=10`, +2.5 dB for a similar bitrate |
+| HEVC CRF 18, 10-bit | 40.7 | `DELIVERY_CODEC=hevc10`, +2.5 dB for a similar bitrate |
 | 1080p against the 4K master | 38.0 vs 40.1 | `HEIGHT=3840` delivers the full frame, at 2.4x the file |
 | the 65-point cube against the rendering it samples | mean 0.16, worst 8.5 code values | the conversion itself is no longer a bottleneck |
 
