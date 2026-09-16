@@ -35,9 +35,11 @@ imax65.cube, portra160.cube, portra800.cube
     imax65          kodak_vision3_250d negative, +0.5 stop, graded as a DI
                     finish: highlights rolled off later ("peak" 48), red
                     chroma pulled back ("red_sat", a third window on the
-                    hue-vs-chroma curve), and a yellow-green cast in Oklab
-                    ("cast_a"/"cast_b") rising from neutral black to full at
-                    lightness 0.6
+                    hue-vs-chroma curve), half the stock's crossover (Vision3
+                    leans green in the highlights), and a neutral-to-warm cast
+                    in Oklab ("cast_a"/"cast_b", a +0.008 b +0.014) rising from
+                    neutral black to full at lightness 0.6. A yellow-green cast
+                    matched to Interstellar read "so damn green" on real footage
     portra160       kodak_portra_160, +1 stop, scanned
     portra800       kodak_portra_800, +1 stop, scanned
 
