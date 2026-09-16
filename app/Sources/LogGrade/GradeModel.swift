@@ -757,20 +757,6 @@ final class GradeModel: ObservableObject {
             ?? false
     }
 
-    /// Saves a shape from the editor through the engine's own resolver, or says why not. A copy is
-    /// taken so a refusal does not publish a project change that did not happen.
-    func saveShape(_ draft: ShapeDraft, replacing original: Deliverable?) -> ShapeRefusal? {
-        var delivery = project.customDelivery
-        if let refusal = delivery.save(
-            draft, replacing: original,
-            resolve: engine.resolveDeliverable)
-        {
-            return refusal
-        }
-        project.customDelivery = delivery
-        return nil
-    }
-
     /// What would stop a render, named before one starts.
     var blockers: [Project.Blocker] {
         project.blockers

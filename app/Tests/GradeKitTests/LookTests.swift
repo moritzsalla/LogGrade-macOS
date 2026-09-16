@@ -158,7 +158,7 @@ final class ProjectTests: XCTestCase {
         var project = Project(
             presets: [.init(name: "Portra", look: try aLook())],
             activePreset: "Portra",
-            delivery: .init(targets: [.reels, .feed], height: 1440, fps: 24))
+            delivery: .init(targets: [.feed], shortSide: 1440, fps: 24))
         project.clips["IMG_0609"] = .init(cropOffset: 750, previewSeconds: 4, stabilise: true)
         project.clips["IMG_0610"] = .init(cropOffset: nil, previewSeconds: 1, stabilise: false)
 
@@ -308,20 +308,21 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(project.environment(for: "B", lookFile: look)["CROP_OFFSET"], "centre")
         XCTAssertEqual(project.environment(for: "A", lookFile: look)["CROP_OFFSET"], "750")
         // The shape that does not crop needs no offset at all.
-        project.customDelivery.setTarget(.feed, selected: false)
+        project.customDelivery.targets = [.reels]
         XCTAssertNil(project.unframed(for: ["A", "B"]))
     }
 
     func testTheEnvironmentCarriesOnlyVariables() throws {
         var project = Project(
             presets: [.init(name: "P", look: try aLook())], activePreset: "P",
-            delivery: .init(targets: [.reels, .feed], height: 1080, fps: 12))
+            delivery: .init(
+                targets: [.custom(aspectWidth: 16, aspectHeight: 9)], shortSide: 720, fps: 12))
         project.clips["IMG_0609"] = .init(cropOffset: 600, stabilise: false)
         let env = project.environment(
             for: "IMG_0609",
             lookFile: URL(fileURLWithPath: "/tmp/look.json"))
         XCTAssertEqual(env["CROP_OFFSET"], "600")
-        XCTAssertEqual(env["HEIGHT"], "1080")
+        XCTAssertEqual(env["WIDTH"], "1280", "720p at 16:9 is 1280 wide")
         XCTAssertEqual(env["FPS_OUT"], "12")
         XCTAssertEqual(env["DELIVERY_CODEC"], "h264")
         XCTAssertEqual(env["STAB"], "0")
@@ -427,7 +428,7 @@ final class PresetTests: XCTestCase {
             presets: [.init(name: "shipped", look: try aLook())],
             activePreset: "shipped",
             delivery: .init(
-                targets: [.reels, .feed], height: 2560, fps: 24, codec: .hevc10,
+                targets: [.reels], shortSide: 1440, fps: 24, codec: .hevc10,
                 quality: .max, container: .mov, audio: false))
         project.clips["IMG_0609"] = .init(cropOffset: 812, previewSeconds: 4, stabilise: false)
         project.clips["IMG_0610"] = .init(cropOffset: nil)
@@ -443,7 +444,7 @@ final class PresetTests: XCTestCase {
         XCTAssertEqual(reopened.clips["IMG_0609"]?.cropOffset, 812)
         XCTAssertNil(reopened.clips["IMG_0610"]?.cropOffset, "undecided must stay undecided")
         XCTAssertEqual(reopened.clips["IMG_0609"]?.previewSeconds, 4)
-        XCTAssertEqual(reopened.delivery.height, 2560)
+        XCTAssertEqual(reopened.delivery.shortSide, 1440)
         XCTAssertEqual(reopened.delivery.fps, 24)
         XCTAssertEqual(reopened.exportPreset, .custom)
         XCTAssertEqual(reopened.delivery.codec, .hevc10)
@@ -460,7 +461,7 @@ final class PresetTests: XCTestCase {
         var project = Project(
             presets: [.init(name: "p", look: try aLook())], activePreset: "p",
             delivery: .init(
-                targets: [.feed], height: 3840, codec: .prores422hq, quality: .max,
+                targets: [.feed], shortSide: 2160, codec: .prores422hq, quality: .max,
                 container: .mp4))
         let look = URL(fileURLWithPath: "/tmp/look.json")
         var env = project.environment(for: "A", lookFile: look)
@@ -472,7 +473,8 @@ final class PresetTests: XCTestCase {
         project.exportPreset = .instagramStory
         env = project.environment(for: "A", lookFile: look)
         XCTAssertEqual(env["DELIVERABLES"], Deliverable.reels.spec)
-        XCTAssertEqual(env["HEIGHT"], String(Project.Delivery.defaultHeight))
+        XCTAssertEqual(env["WIDTH"], "1080")
+        XCTAssertNil(env["HEIGHT"])
         XCTAssertEqual(env["DELIVERY_CODEC"], "h264")
         XCTAssertEqual(env["DELIVERY_CONTAINER"], "mp4")
         XCTAssertEqual(env["DELIVERY_AUDIO"], "1")
@@ -480,7 +482,8 @@ final class PresetTests: XCTestCase {
 
         let reread = try Project(data: try project.serialised())
         XCTAssertEqual(reread.exportPreset, .instagramStory)
-        XCTAssertEqual(reread.customDelivery.height, 3840, "Custom was not kept behind the preset")
+        XCTAssertEqual(
+            reread.customDelivery.shortSide, 2160, "Custom was not kept behind the preset")
         XCTAssertEqual(Project(presets: [], activePreset: "").exportPreset, .instagramStory)
     }
 

@@ -128,7 +128,7 @@ final class DeliveryTests: XCTestCase {
         var project = Project(
             presets: [.init(name: "shipped", look: look)],
             activePreset: "shipped",
-            delivery: .init(targets: [.reels], height: 640))
+            delivery: .init(targets: [.reels], shortSide: 360))
         let stem = clip.deletingPathExtension().lastPathComponent
         project.clips[stem] = .init(stabilise: false)
 

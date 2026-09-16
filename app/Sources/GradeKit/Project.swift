@@ -57,17 +57,30 @@ public struct Project: Equatable {
         /// What to render, in render order. Order is preserved because it is the order the engine
         /// works through, and a person watching a queue should see what they asked for first.
         public var targets: [Deliverable]
-        public var height: Int
+        /// The output's SHORT edge, as "1080p" means it: 1080 × 1920 portrait, 1920 × 1080
+        /// landscape. The engine takes a width, and a width alone made a 16:9 export at "1080
+        /// wide" come out 1080 × 608.
+        public var shortSide: Int
         /// Nil keeps the source's rate, which is the only lossless answer.
         public var fps: Int?
         public var codec: Codec
         public var quality: Quality
         public var container: Container
         public var audio: Bool
-        /// 1080 wide at 9:16: what Instagram re-encodes to, and the size the grain and the
-        /// sharpener were tuned at. A project that names no height gets it, and the interface
-        /// warns about anything larger.
-        public static let defaultHeight = 1920
+        /// 1080: what Instagram re-encodes to, and the size the grain and the sharpener were tuned
+        /// at. The interface warns about anything larger.
+        public static let defaultShortSide = 1080
+        public static let shortSides = [720, 1080, 1440, 2160]
+
+        /// The engine's `WIDTH`, from the short edge and the first shape's aspect. Even, because
+        /// the encoders refuse odd dimensions.
+        public var width: Int {
+            guard let shape = targets.first, shape.aspectWidth > shape.aspectHeight else {
+                return shortSide
+            }
+            let w = shortSide * shape.aspectWidth / shape.aspectHeight
+            return w - w % 2
+        }
 
         /// The engine's `DELIVERY_CODEC` values, spelled as it spells them.
         public enum Codec: String, CaseIterable {
@@ -97,12 +110,12 @@ public struct Project: Equatable {
         }
 
         public init(
-            targets: [Deliverable] = [.reels], height: Int = defaultHeight,
+            targets: [Deliverable] = [.reels], shortSide: Int = defaultShortSide,
             fps: Int? = nil, codec: Codec = .h264, quality: Quality = .auto,
             container: Container = .mp4, audio: Bool = true
         ) {
             self.targets = targets
-            self.height = height
+            self.shortSide = shortSide
             self.fps = fps
             self.codec = codec
             self.quality = quality
@@ -149,50 +162,6 @@ public struct Project: Equatable {
         /// fixed, so what it will cut is visible before it is rendered.
         public func cropBoxTarget(_ source: FrameSize?) -> Deliverable? {
             clipFramedTargets(source).first ?? croppingTargets(source).first
-        }
-
-        public func isSelected(_ deliverable: Deliverable) -> Bool {
-            targets.contains(deliverable)
-        }
-
-        /// Ticking and unticking a shape.
-        ///
-        /// A SELECTED PRESET LANDS IN PRESET ORDER, not at the end of the list. Appending would
-        /// make the render order depend on the order the boxes happened to be clicked, so
-        /// unticking reels and ticking it again would quietly move it behind feed — and the order
-        /// is what the queue shows and what the engine works through. Shapes that are not presets
-        /// keep their own order after them; nothing here can reorder them.
-        public mutating func setTarget(_ deliverable: Deliverable, selected: Bool) {
-            guard selected else {
-                targets.removeAll { $0 == deliverable }
-                return
-            }
-            guard !targets.contains(deliverable) else { return }
-            guard let rank = Deliverable.presets.firstIndex(of: deliverable) else {
-                targets.append(deliverable)
-                return
-            }
-            let insertAt =
-                targets.firstIndex {
-                    guard let other = Deliverable.presets.firstIndex(of: $0) else { return true }
-                    return other > rank
-                } ?? targets.count
-            targets.insert(deliverable, at: insertAt)
-        }
-
-        /// Saving a shape from the editor. An edit replaces the shape it was opened on, in place,
-        /// so the render order does not move; nil adds.
-        ///
-        /// THE ORIGINAL IS PASSED, NOT REMEMBERED. The editor used to find what it was editing in a
-        /// view variable that Add never cleared, so Add after Edit opened as that edit and Save
-        /// replaced the shape. An edit whose shape has since been removed adds rather than
-        /// dropping the save.
-        public mutating func save(_ deliverable: Deliverable, replacing original: Deliverable?) {
-            if let original, let index = targets.firstIndex(of: original) {
-                targets[index] = deliverable
-            } else {
-                targets.append(deliverable)
-            }
         }
     }
 
@@ -246,7 +215,7 @@ public struct Project: Equatable {
         self.activePreset = activePreset
         // A delivery passed in is a Custom one unless a preset is named; with neither, a new
         // project opens on Instagram Story, the no-fields choice.
-        self.customDelivery = delivery ?? Delivery()
+        self.customDelivery = delivery ?? Delivery(targets: [Deliverable.defaultCustom])
         self.exportPreset = exportPreset ?? (delivery == nil ? .instagramStory : .custom)
         self.clips = clips
         self.outputDirectory = outputDirectory
@@ -346,7 +315,7 @@ public struct Project: Equatable {
     /// never builds a filter string.
     public func environment(for clip: String, lookFile: URL) -> [String: String] {
         var env: [String: String] = ["LOOK_FILE": lookFile.path]
-        env["HEIGHT"] = String(delivery.height)
+        env["WIDTH"] = String(delivery.width)
         if let fps = delivery.fps { env["FPS_OUT"] = String(fps) }
         env["DELIVERY_CODEC"] = delivery.codec.rawValue
         env["DELIVERY_QUALITY"] = delivery.quality.rawValue
@@ -453,7 +422,7 @@ extension Project {
                 if d.cropOffset == .centre { entry["crop_offset"] = "centre" }
                 return entry
             },
-            "height": delivery.height,
+            "short_side": delivery.shortSide,
         ]
         if let fps = delivery.fps { deliveryBlock["fps"] = fps }
         var root: [String: Any] = [
@@ -573,9 +542,13 @@ extension Project {
             presets: loaded,
             activePreset: root["active_preset"] as? String ?? loaded.first?.name ?? "",
             delivery: Delivery(
-                targets: targets,
-                height: (d["height"] as? NSNumber)?.intValue
-                    ?? Delivery.defaultHeight,
+                // Custom renders one shape. A file from when shapes were ticked in any number keeps
+                // its first; one with none gets Custom's default rather than nothing to deliver.
+                targets: [targets.first ?? Deliverable.defaultCustom],
+                // A file from before the short edge stored the 9:16 reference height.
+                shortSide: (d["short_side"] as? NSNumber)?.intValue
+                    ?? (d["height"] as? NSNumber).map { $0.intValue * 9 / 16 }
+                    ?? Delivery.defaultShortSide,
                 fps: (d["fps"] as? NSNumber)?.intValue,
                 // A file from before the codec choice said `ten_bit`, which meant HEVC 10-bit.
                 codec: (d["codec"] as? String).flatMap(Delivery.Codec.init(rawValue:))
