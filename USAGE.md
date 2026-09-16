@@ -34,7 +34,6 @@ Nothing has to be downloaded: `luts/rendering/neutral.cube` is the shipped conve
 | `DELIVERY_QUALITY=auto\|high\|max` | encoder effort per codec, default auto; ProRes takes auto only |
 | `DELIVERY_CONTAINER=mp4\|mov` | default mp4 |
 | `DELIVERY_AUDIO=1\|0` | 0 delivers with no audio stream |
-| `DELIVERY_BITS=8\|10` | old spelling of h264 / hevc10; must agree with DELIVERY_CODEC |
 | `AUDIO_HIGHPASS_HZ=<hz\|0>` | delivered-audio high-pass, default 60; 0 off. Never applied to the master |
 | `CONVERT=<name>` | the conversion out of Apple Log, from `luts/rendering/` or `luts/film/`. Overrides `convert.cube` |
 | `GRAIN_STRENGTH=<n>` | overrides `look.json` |

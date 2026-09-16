@@ -910,7 +910,7 @@ JSON
 	[[ "$output" == *"format=yuv444p10le,scale=w=486:h=864:flags=area"*"fps=18,zscale="* ]] || fail "$output"
 	[[ "$output" == *",fps=24" ]] || fail "did not return to the clip's rate: $output"
 	# The clamp is in code values: at 10 bits the same tolerance is four times as many.
-	DELIVERY_BITS=10 DENOISE_STRENGTH=0 SHARPEN=1 GAUGE=none run delivery_image_chain 1080 1920 "" "" 1 24
+	DELIVERY_CODEC=hevc10 DENOISE_STRENGTH=0 SHARPEN=1 GAUGE=none run delivery_image_chain 1080 1920 "" "" 1 24
 	[[ "$output" == *"undershoot=8:overshoot=8"* ]] || fail "10-bit clamp not scaled: $output"
 	# A plain export has no gauge.
 	DENOISE_STRENGTH=0 SHARPEN=0.3 GAUGE=super8 run delivery_image_chain 1080 1920 "" "" 0 24
@@ -2697,7 +2697,7 @@ sys.exit("; ".join(problems) or None)
 	# mask and the flat plate are both in the graph.
 	local dir="$BATS_TEST_TMPDIR/plate10" w=64 h=64 src
 	mkdir -p "$dir"
-	DELIVERY_BITS=10
+	DELIVERY_CODEC=hevc10
 	src="nullsrc=s=${w}x${h}:d=0.1:r=24,geq=lum='64+876*X/W':cb=512:cr=512,format=yuv420p10le,${DELIVERY_SETPARAMS}"
 	ffmpeg -v error -y -f lavfi -i "$src" -frames:v 1 -f rawvideo -pix_fmt yuv420p10le "$dir/clean.yuv"
 	ffmpeg -v error -y -f lavfi -i "$src" -f lavfi -i "$(grain_plate "$w" "$h" 24)" \
@@ -2724,7 +2724,7 @@ DELIVERY_CONTAINER=mkv|DELIVERY_CONTAINER must be mp4 or mov
 DELIVERY_AUDIO=yes|DELIVERY_AUDIO must be 0 or 1
 DELIVERY_CODEC=prores422hq DELIVERY_CONTAINER=mp4|DELIVERY_CONTAINER=mp4 cannot hold prores422hq
 DELIVERY_CODEC=prores422 DELIVERY_CONTAINER=mov DELIVERY_QUALITY=max|a ProRes file's quality is its profile
-DELIVERY_CODEC=h264 DELIVERY_BITS=10|DELIVERY_BITS=10 contradicts DELIVERY_CODEC=h264
+DELIVERY_BITS=10|DELIVERY_BITS is gone: set DELIVERY_CODEC instead
 CASES
 }
 
@@ -2737,9 +2737,9 @@ CASES
 	out="$(_format)"
 	[[ "$out" == "yuv420p|"*"-map 0:a:0? -c:a aac -b:a 192k -c:v libx264 -profile:v high -preset medium -crf 18|d/c_s.mp4" ]] \
 		|| fail "the default encode moved: $out"
-	out="$(_format DELIVERY_BITS=10)"
+	out="$(_format DELIVERY_CODEC=hevc10)"
 	[[ "$out" == "yuv420p10le|"*"libx265 -preset slow -crf 18 -pix_fmt yuv420p10le -tag:v hvc1"* ]] \
-		|| fail "DELIVERY_BITS=10 is no longer hevc10: $out"
+		|| fail "hevc10 is not the 10-bit encode it was: $out"
 	out="$(_format DELIVERY_CODEC=hevc DELIVERY_QUALITY=high DELIVERY_AUDIO=0)"
 	[[ "$out" == "yuv420p|"*"-an -c:v libx265 -preset slow -crf 18 -pix_fmt yuv420p "* ]] || fail "hevc high, no audio: $out"
 	[[ "$out" != *"0:a:0"* ]] || fail "DELIVERY_AUDIO=0 still maps audio: $out"
@@ -2798,17 +2798,6 @@ CODECS
 	out=$(find "$work/.loggrade/proofs" -name '*.mp4')
 	[ "$(ffprobe -v error -show_entries stream=codec_type -of default=nw=1:nk=1 "$out")" = video ] \
 		|| fail "DELIVERY_AUDIO=0 still delivered audio"
-}
-
-@test "a DELIVERY_BITS that is not 8 or 10 is refused before anything renders" {
-	local work="$BATS_TEST_TMPDIR/bad-bits"
-	mkdir -p "$work/src"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	DELIVERY_BITS=12 FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
-		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-	[ "$status" -ne 0 ] || fail "rendered with DELIVERY_BITS=12"
-	[[ "$output" == *"DELIVERY_BITS must be 8 or 10"* ]] || fail "refused without naming DELIVERY_BITS: $output"
-	[ ! -d "$work/.loggrade/frames" ] || fail "DELIVERY_BITS=12 got as far as rendering"
 }
 
 @test "flat grain weights leave the mask out of the graph" {
