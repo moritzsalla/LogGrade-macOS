@@ -341,7 +341,7 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
     if window.firstResponder is NSTextView { return event }
     let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
     if event.type == .keyUp {
-        if key == "c" { grade.isComparing = false }
+        if key == "c" { grade.endCompare() }
         return event
     }
     // The crop, by the pixel. Arrow keys only mean the crop while something that crops is asked
@@ -367,7 +367,8 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
     // fires once on selection, so it stays here. Everything else moved to the menu bar, where
     // macOS draws the shortcut beside the name and people can find it without being told.
     if key == "c" {
-        grade.isComparing = grade.preview.comparison != nil
+        // Key repeat sends keyDown again while held; one compare per press.
+        if !event.isARepeat { grade.beginCompare() }
         return nil
     }
     return event

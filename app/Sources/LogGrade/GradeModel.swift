@@ -797,6 +797,81 @@ final class GradeModel: ObservableObject {
     /// About 11 MB each at 2560 × 1440; enough for a shoot's worth of switching back and forth.
     private static let exactRenderLimit = 24
 
+    // MARK: - compare
+
+    /// The look as it ships for this clip: the active preset with no Adjust, metered as by
+    /// default. What holding C compares against.
+    private var baselineLook: Look { defaultLook }
+
+    /// C went down. The live grade of the baseline goes up at once from the source frame; the
+    /// exact render replaces it when it lands, and is cached like any other.
+    func beginCompare() {
+        guard let clip = selectedClip, preview.image != nil else { return }
+        let look = baselineLook
+        let seconds = previewSeconds
+        isComparing = true
+        if let cached = exactRenders.last(where: {
+            $0.clip == clip.url && $0.seconds == seconds && $0.look == look && $0.match
+        }) {
+            preview.baseline = cached.image
+            return
+        }
+        preview.baseline = nil
+        let metered = measuredMetering[clip.url]
+        if let source = sourceImage, sourceClip == clip.url {
+            liveQueue.async { [weak self] in
+                guard let self else { return }
+                guard
+                    case .graded(let image, _, _, _) = self.grade(
+                        look, source: source, metered: metered)
+                else { return }
+                DispatchQueue.main.async {
+                    guard self.isComparing, self.selectedClip?.url == clip.url,
+                        self.preview.baseline == nil
+                    else { return }
+                    self.preview.baseline = NSImage(
+                        cgImage: LiveChain.forDisplay(image),
+                        size: NSSize(width: image.width, height: image.height))
+                }
+            }
+        }
+        let size = frameSizes[clip.stem]
+        queue.async { [weak self] in
+            guard let self else { return }
+            let hint =
+                self.lastSource.map {
+                    $0.clip == clip.url && $0.seconds == seconds
+                        && $0.referenceStops == look.matchReferenceStops
+                } == true ? self.lastSource?.frame.metered : nil
+            guard
+                let frame = try? self.renderer.render(
+                    clip: clip.url, seconds: seconds, look: look, match: true,
+                    knownSize: size, knownMetering: hint),
+                let pixels = NSImage(contentsOf: frame.url)?
+                    .cgImage(forProposedRect: nil, context: nil, hints: nil)
+            else { return }
+            let image = NSImage(
+                cgImage: LiveChain.forDisplay(pixels),
+                size: NSSize(width: pixels.width, height: pixels.height))
+            DispatchQueue.main.async {
+                self.exactRenders.append(
+                    ExactRender(
+                        clip: clip.url, seconds: seconds, look: look, match: true,
+                        image: image, scopes: Scopes.measure(pixels)))
+                if self.exactRenders.count > Self.exactRenderLimit {
+                    self.exactRenders.removeFirst()
+                }
+                if self.isComparing, self.selectedClip?.url == clip.url {
+                    self.preview.baseline = image
+                }
+            }
+        }
+    }
+
+    func endCompare() {
+        isComparing = false
+    }
+
     func renderPreview() {
         guard let clip = selectedClip, clip.isUsable else { return }
         let look = effectiveLook
@@ -809,8 +884,6 @@ final class GradeModel: ObservableObject {
             previewGeneration += 1
             if let running = previewProcess, running.isRunning { EngineRun.stop(running) }
             renderingLook = nil
-            preview.previous = preview.lastExact
-            preview.lastExact = cached.image
             preview.image = cached.image
             preview.scopes = cached.scopes
             renderedLook = look
@@ -877,11 +950,6 @@ final class GradeModel: ObservableObject {
                 }
                 DispatchQueue.main.async {
                     guard generation == self.previewGeneration else { return }
-                    // Compare holds the last EXACT frame, from its own slot. Taking it from
-                    // `preview.image` would sometimes take a live approximation instead, which
-                    // answers a question about the model rather than about the grade.
-                    self.preview.previous = self.preview.lastExact
-                    self.preview.lastExact = image
                     self.preview.image = image
                     self.preview.scopes = measured
                     self.renderedLook = look

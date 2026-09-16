@@ -49,8 +49,6 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
   (IMG_0444 ProRes 19 s in 78 s, IMG_0308 HEVC 17.5 s in 75 s; stabilisation and denoise off),
   accepted for short clips. Only if that Mac is slow too, measure VideoToolbox H.264: it saves at
   most the encode share, and loses quality that Instagram's re-encode compounds.
-- **Judge sharpen and grain at other heights by eye**, now that Custom exports any size. Grain stays
-  ~1 output px, 1.7× coarser relative to the picture at 960 than at 1920 (`docs/PIPELINE.md`).
 
 ## Not doing
 

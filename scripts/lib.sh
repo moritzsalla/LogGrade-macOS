@@ -1429,18 +1429,13 @@ scaled_crop() {  # scaled_crop <crop-prefix|empty> <scale> <frame-w> <frame-h>  
 # <finish> 0 leaves out the chroma denoise and the sharpener, for a plain export. What remains is the
 # stabiliser the caller chose, the crop and the dithered reduction, none of which is a look.
 delivery_image_chain() {  # delivery_image_chain <w> <h> <stab-prefix> <crop-prefix> <finish 0|1> [fps]
-	# The sharpener's 5x5 was measured at 1080x1920, and its radius is in PIXELS — so at another
-	# output height it sharpens a different real-world detail size and the look changes. The radius
-	# scales with height and the amount does not, which is an ASSUMPTION rather than a measurement:
-	# only 1920 has been looked at. It is stated here so the next reader knows which of the two
-	# numbers has evidence behind it.
-	#
-	# Measured at 960-2560 in PIPELINE.md (unjudged by eye): strength holds, but the residual widens
-	# less than the radius, and grain stays ~1px, so both change relative to the picture.
+	# The sharpener's 5x5 was tuned at 1080x1920, and its radius is in PIXELS, so it scales with the
+	# SHORT edge against 1080. It scaled with height, which gave a 1920x1080 landscape export a 3x3,
+	# sharpening finer detail than the look was judged with. The amount does not scale.
 	#
 	# unsharp needs odd sizes and rejects anything below 3.
-	local r
-	r=$(( 5 * $2 / 1920 ))
+	local r short=$(( $1 < $2 ? $1 : $2 ))
+	r=$(( 5 * short / 1080 ))
 	[ "$r" -ge 3 ] || r=3
 	[ $(( r % 2 )) -eq 1 ] || r=$(( r + 1 ))
 	if [ "$5" = 0 ]; then
@@ -1537,9 +1532,20 @@ gauge_super8_tail() {  # gauge_super8_tail [fps]
 # c0s is the one number that wants an eye rather than a measurement, so it is look.json's
 # grain.strength rather than a constant here. Clustered grain reads stronger per unit amplitude than
 # per-pixel, so a strength carried over from per-pixel grain renders heavier than it did.
+#
+# SIZED TO THE PICTURE, not to the pixel. The plate was always half the output, which was tuned at a
+# 1080 short edge; at 2160 that grain was half as big against the picture, at 720 half again as big.
+# It is now half resolution AT 1080 and scales with the short edge, so every size gets the grain the
+# look was judged with. 1080 x 1920 is byte-identical to before.
+#
+# NEVER LARGER THAN THE OUTPUT. Below a 540 short edge the scaled plate would be bigger than the
+# picture, and shrinking a flat 128 back down moved it by a code value (strength-0 grain stopped
+# being byte-identical at 64x64).
 grain_plate() {  # grain_plate <w> <h> <fps>
-	printf 'color=c=gray:s=%sx%s:r=%s,format=yuv420p,lutyuv=y=128:u=128:v=128' \
-		"$(( $1 / 2 ))" "$(( $2 / 2 ))" "$3"
+	local short=$(( $1 < $2 ? $1 : $2 )) pw ph
+	pw=$(( $1 * 540 / short )); ph=$(( $2 * 540 / short ))
+	[ "$pw" -le "$1" ] || { pw="$1"; ph="$2"; }
+	printf 'color=c=gray:s=%sx%s:r=%s,format=yuv420p,lutyuv=y=128:u=128:v=128' "$pw" "$ph" "$3"
 }
 
 delivery_grain_branch() {  # delivery_grain_branch <w> <h> <strength>

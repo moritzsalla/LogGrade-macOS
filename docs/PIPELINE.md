@@ -46,8 +46,9 @@ autocorrelation falls below 0.5.
 | 1920 | 5 | 3.00 | 1.21 | 3.04 | 0.043 |
 | 2560 | 7 | 2.94 | 1.26 | 2.95 | 0.038 |
 
-Grain stays about one output pixel, so it is 1.7× coarser relative to the picture at 960 than at
-1920. Sharpening keeps its strength but acts on relatively finer detail as height grows. About 1.6
+Measured when grain was a fixed half-resolution plate and the radius followed height: grain stayed
+about one output pixel, 1.7× coarser relative to the picture at 960 than at 1920. Both now scale
+with the short edge against 1080 (`grain_plate`, `delivery_image_chain`). About 1.6
 of each sharpen RMS is sky noise and encode disagreement.
 
 ## Tone shaping

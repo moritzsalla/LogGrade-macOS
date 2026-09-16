@@ -14,7 +14,6 @@ struct InspectorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 presetRow
-                convertNote
                 adjustStage
                 stabilisationStage
                 denoiseStage
@@ -27,51 +26,27 @@ struct InspectorView: View {
         .background(Palette.panel)
     }
 
-    /// A CAPTION, NOT A STAGE. It has no controls, but someone will ask where the colour comes from.
-    @ViewBuilder private var convertNote: some View {
-        HStack(spacing: Space.xs) {
-            Text(conversionNote)
-                .font(Type.caption)
-                .foregroundColor(Palette.inkTertiary)
-            HelpButton(text: conversionHelp)
-        }
-        .padding(.leading, Self.inset)
-        .padding(.bottom, Space.l)
-    }
-
-    private var conversionNote: String {
-        switch model.look.convertCube {
-        case Look.neutralConversion: return "Rendered from Apple Log, holding the highlights."
-        default: return "Rendered through film: \(model.look.convertCube)."
-        }
-    }
-
-    private var conversionHelp: String {
-        switch model.look.convertCube {
-        case Look.neutralConversion:
-            return "A finished picture from the log footage, keeping the highlights a normal "
-                + "iPhone video would clip. No film character."
-        default:
-            return "A film stock simulated from its datasheets (spektrafilm), rendered straight "
-                + "from the log footage so the highlights keep their latitude. Its grain comes "
-                + "with it."
-        }
-    }
-
     private var adjustStage: some View {
         stage(
             "Adjust", isOn: enabledBinding(.adjust),
             help: "For a clip that needs help, or a small move of your own. Each clip keeps its "
-                + "own. Switched off, every clip is the look as it ships.\n\nMatch exposure evens out brightness and "
-                + "white balance across a shoot. Turn it off for a scene meant to stay dark."
+                + "own. Switched off, every clip is the look as it ships."
         ) {
-            Toggle(
-                "Match exposure",
-                isOn: Binding(get: { model.adjust.match }, set: { model.setMatch($0) })
-            )
-            .toggleStyle(.checkbox)
-            .font(Type.label)
-            .foregroundColor(Palette.inkSecondary)
+            HStack(spacing: Space.xs) {
+                Toggle(
+                    "Match exposure",
+                    isOn: Binding(get: { model.adjust.match }, set: { model.setMatch($0) })
+                )
+                .toggleStyle(.checkbox)
+                .font(Type.label)
+                .foregroundColor(Palette.inkSecondary)
+                HelpButton(
+                    text: "Evens out brightness and colour between clips shot in different "
+                        + "light, so a shoot looks like one shoot.\n\nLeave it on for most "
+                        + "footage. Turn it off for a clip that should stay the way you exposed "
+                        + "it: a night scene meant to be dark, a bright beach meant to glow, a "
+                        + "sunset whose warm cast is the point.")
+            }
             control("Exposure", $model.adjust.exposure, -3...3, format: "%+.2f", default: 0)
             control("Warmth", $model.adjust.warmth, -1...1, default: 0)
             control("Tint", $model.adjust.tint, -1...1, default: 0)
