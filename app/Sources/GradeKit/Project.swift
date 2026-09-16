@@ -38,10 +38,10 @@ public struct Project: Equatable {
         /// A departure from the project's preset, for this clip alone. Nil means it follows.
         public var lookOverride: Look?
 
-        /// A clip nobody has decided about is stabilised, which is what the engine did for every
-        /// clip before the choice existed. One constant, because the interface, the environment
-        /// and the project reader each fell back to their own `true`.
-        public static let stabilisesByDefault = true
+        /// A clip nobody has decided about is not stabilised: the stabiliser crops and softens,
+        /// and a locked-off shot gains nothing for it. One constant, because the interface, the
+        /// environment and the project reader each fell back to their own value.
+        public static let stabilisesByDefault = false
 
         public init(
             cropOffset: Int? = nil, previewSeconds: Double = 1,

@@ -465,42 +465,37 @@ public struct Look: Equatable {
 
     /// A stage of the chain that can be switched off. The raw value is the inspector's title,
     /// which is also the key its open state is remembered under.
+    ///
+    /// Only what a person switches. Halation, hue curves and the tone internals belong to a
+    /// preset, not to the panel, so they have no bypass. The stabiliser is not here either: it is
+    /// switched per clip (`Project.ClipSettings.stabilise`).
     public enum Stage: String, CaseIterable {
-        case correct = "Correct"
-        case halation = "Halation"
-        case hue = "Hue curves"
-        case tone = "Tone"
-        case trims = "Trims"
-        case delivery = "Delivery"
+        case adjust = "Adjust"
+        case denoise = "Denoise"
+        case grain = "Grain"
     }
 
     /// This look with the given stages written as the values the engine leaves out, so a bypass
     /// is a look like any other and the live tier, the exact frame and the export all agree.
     ///
-    /// DELIVERY IS NOT OFF THROUGH THE LOOK ALONE either: grain is a look value, but the chroma
-    /// denoise and the sharpener are not, so the render also runs with `FINISH=0` — see
-    /// `finishes(bypassing:)`. The stabiliser has its own per-clip switch, and a second one
-    /// fighting it is worse than none.
+    /// ADJUST RESETS TO NEUTRAL, NOT TO THE PRESET. Every preset keeps correct, tone and colour
+    /// neutral (its character is the conversion cube), so the panel's sliders are the only thing
+    /// that moves them, and switching Adjust off is the preset as shipped.
     public func bypassing(_ stages: Set<Stage>) -> Look {
         var out = self
         for stage in stages {
             switch stage {
-            case .correct: out.correct = Correct()
-            case .halation: out.halation.strength = 0
-            case .hue: out.hue = Hue()
-            case .tone:
+            case .adjust:
+                out.correct = Correct()
                 out.tone = Tone(
                     gamma: 1, pivot: tone.pivot, contrast: 1, toe: 0, shoulder: 0,
                     black: 0)
-            case .trims: out.colour = Colour(saturation: 1, warmth: 0)
-            case .delivery: out.grainStrength = 0
+                out.colour = Colour(saturation: 1, warmth: 0)
+            case .denoise: out.finish.denoise = 0
+            case .grain: out.grainStrength = 0
             }
         }
         return out
-    }
-
-    public static func finishes(bypassing stages: Set<Stage>) -> Bool {
-        !stages.contains(.delivery)
     }
 
     /// Writes a complete look.json somewhere the engine can be pointed at with LOOK_FILE, so a

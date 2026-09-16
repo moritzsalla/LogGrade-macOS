@@ -1,48 +1,33 @@
 import GradeKit
 import SwiftUI
 
-/// The chain, one stage per section, ordered by how often a session reaches for it rather than by
-/// execution order — the everyday tonal moves first, the two lookup stages and the effect after,
-/// export settings last. Execution order is unchanged and stays in `grade_chain()` (scripts/lib.sh);
-/// nothing here decides it.
+/// A look, then optional sections, all closed at first. The preset is meant to be the finished
+/// picture, so everything under it is for a clip that needs help or a small creative move.
+///
+/// NO GRADING CONTROLS BEYOND THESE. Hue curves, wheels, halation and the tone internals belong to
+/// the presets and are tuned in their files, not here (docs/BACKLOG.md). Execution order stays in
+/// `grade_chain()` (scripts/lib.sh); nothing here decides it.
 struct InspectorView: View {
     @ObservedObject var model: GradeModel
-    /// Bound from `presetRow`'s name field. Clicking a slider or a button already moves focus
-    /// away on its own; this catches the rest of the panel — labels, padding, anywhere without its
-    /// own control — so the field does not keep the keyboard forever just because the next click
-    /// landed on inert space.
-    @FocusState private var presetNameFocused: Bool
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 presetRow
                 convertNote
-                correctStage
-                toneStage
-                trimsStage
-                hueStage
-                halationStage
-                deliveryStage
+                adjustStage
+                stabilisationStage
+                denoiseStage
+                grainStage
             }
             .padding(.vertical, 18)
             .padding(.trailing, 16)
             .frame(maxWidth: .infinity, alignment: .top)
         }
-        // ON THE SCROLL VIEW, not its content. Most stages start collapsed (`openStages`
-        // defaults to only Tone), so the content is far shorter than the panel; a gesture on the
-        // content alone misses every tap below the last row. The scroll view's own frame already
-        // fills the column, and giving its CONTENT `maxHeight: .infinity` instead would collapse
-        // scrolling to the viewport rather than the stages' true height.
-        .contentShape(Rectangle())
-        .onTapGesture { presetNameFocused = false }
         .background(Palette.panel)
     }
 
-    /// A CAPTION, NOT A STAGE. It has no controls — always on, nothing to switch or open — so a
-    /// full collapsible section made you skip past an empty row before reaching the first control
-    /// that does something. Still worth the one line, and the help button: it is real colour work
-    /// on the way to the picture, and someone will ask why nothing here is adjustable.
+    /// A CAPTION, NOT A STAGE. It has no controls, but someone will ask where the colour comes from.
     @ViewBuilder private var convertNote: some View {
         HStack(spacing: Space.xs) {
             Text(conversionNote)
@@ -62,265 +47,119 @@ struct InspectorView: View {
     }
 
     private var conversionHelp: String {
-        let metered =
-            "\n\nEach clip's exposure and white balance are metered from the log picture before "
-            + "this, so a shoot lands together; Correct adds to what it measured."
         switch model.look.convertCube {
         case Look.neutralConversion:
-            return "This app's own rendering, built from Apple's published formula: it takes the "
-                + "log picture to a finished one in a single step, so nothing downstream works on "
-                + "highlights that have already been squeezed. It is the starting point — the "
-                + "stages below adjust it, and a film preset replaces it." + metered
+            return "A finished picture from the log footage, keeping the highlights a normal "
+                + "iPhone video would clip. No film character."
         default:
-            return "This preset replaces the conversion with a film stock simulated from its "
-                + "datasheets (spektrafilm), rendered straight from the log picture so the "
-                + "highlights keep their latitude. The stock is the tone and colour, so keep "
-                + "tone moves small." + metered
+            return "A film stock simulated from its datasheets (spektrafilm), rendered straight "
+                + "from the log footage so the highlights keep their latitude. Its grain comes "
+                + "with it."
         }
     }
 
-    private var correctStage: some View {
+    private var adjustStage: some View {
         stage(
-            "Correct", bypass: .correct,
-            help: "Exposure, white balance and the three wheels — shadows, midtones and "
-                + "highlights, lift/gamma/gain in ASC CDL terms — run before the "
-                + "conversion, on the log picture, where the highlights above white "
-                + "still exist. Brightening here keeps the highlights instead of "
-                + "flattening them against a ceiling.\n\nLuminance mix decides how much "
-                + "of a wheel move lands on brightness against colour. At 0 the move is "
-                + "colour only, because separating channels shifts saturation whether "
-                + "you meant it to or not."
+            "Adjust", isOn: enabledBinding(.adjust),
+            help: "For a clip that needs help, or a small move of your own. Switched off, the "
+                + "picture is the look as it ships.\n\nMatch exposure evens out brightness and "
+                + "white balance across a shoot. Turn it off for a scene meant to stay dark."
         ) {
+            Toggle(
+                "Match exposure",
+                isOn: Binding(get: { model.matchExposure }, set: { model.setMatch($0) })
+            )
+            .toggleStyle(.checkbox)
+            .font(Type.label)
+            .foregroundColor(Palette.inkSecondary)
             control(
                 "Exposure", $model.look.correct.exposure, -3...3, format: "%+.2f",
                 default: model.defaultLook.correct.exposure)
             control(
-                "Temperature", $model.look.correct.temp, -1...1,
+                "Warmth", $model.look.correct.temp, -1...1,
                 default: model.defaultLook.correct.temp)
             control(
                 "Tint", $model.look.correct.tint, -1...1,
                 default: model.defaultLook.correct.tint)
-            wheel(.offset, "Shadows")
-            wheel(.power, "Midtones")
-            wheel(.slope, "Highlights")
-            control(
-                "Luminance", $model.look.correct.lumMix, 0...1,
-                default: model.defaultLook.correct.lumMix)
-        }
-    }
-
-    @State private var hueCurve: Look.Hue.Curve = .sat
-
-    /// Three curves in one space, switched, because they share an axis: the hue strip under them.
-    private var hueStage: some View {
-        stage(
-            "Hue curves", bypass: .hue,
-            help: "Move one colour without the others: its hue, its saturation or its "
-                + "lightness. The strip along the bottom is the colour each point acts on; "
-                + "drag a point up or down.\n\nThey act on the colours after the "
-                + "conversion, so the greens here are the greens on screen. Grey and near-grey "
-                + "are left alone, so skin and sky do not tint when a neighbouring colour "
-                + "moves. Double-click a curve to reset it."
-        ) {
-            Picker("", selection: $hueCurve) {
-                Text("Saturation").tag(Look.Hue.Curve.sat)
-                Text("Hue").tag(Look.Hue.Curve.rot)
-                Text("Lightness").tag(Look.Hue.Curve.lum)
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            HueCurveEditor(model: model, curve: hueCurve)
-                .padding(.trailing, Space.xs)
-        }
-    }
-
-    private var halationStage: some View {
-        stage(
-            "Halation", bypass: .halation,
-            help: "The warm glow film grows around bright things, where light reflects "
-                + "off the film base and exposes the red layer a second time.\n\nIt is "
-                + "added in linear light before the conversion, and only past edges: a "
-                + "bright field does not glow onto itself. Threshold is in scene light, "
-                + "where 1 is diffuse white. Radius is a fraction of the frame's height. "
-                + "Strength 0 leaves the stage out entirely."
-        ) {
-            control(
-                "Strength", $model.look.halation.strength, 0...1.5,
-                default: model.defaultLook.halation.strength)
-            control(
-                "Threshold", $model.look.halation.threshold, 0.25...6,
-                format: "%.2f", default: model.defaultLook.halation.threshold)
-            control(
-                "Radius", $model.look.halation.radius, 0.001...0.03, format: "%.4f",
-                default: model.defaultLook.halation.radius)
-            ForEach(Array(["R", "G", "B"].enumerated()), id: \.offset) { channel, name in
-                control(
-                    "Tint \(name)",
-                    Binding(
-                        get: { model.look.halation.tint(channel) },
-                        set: { model.look.halation.setTint(channel, $0) }),
-                    0...1, format: "%.2f",
-                    default: model.defaultLook.halation.tint(channel))
-            }
-        }
-    }
-
-    private var toneStage: some View {
-        stage(
-            "Tone", bypass: .tone,
-            help: "Brightness and contrast, applied to the luma plane only so the "
-                + "colour is untouched. Applying a curve per channel crushes a "
-                + "saturated colour's two low channels harder than its high one, which "
-                + "is what makes signage glow.\n\nMidtone is a gamma, so higher is "
-                + "darker. The graph beside the picture is this curve."
-        ) {
-            control(
-                "Midtone", $model.look.tone.gamma, 1...2.6,
-                default: model.defaultLook.tone.gamma)
             control(
                 "Contrast", $model.look.tone.contrast, 0.8...1.8,
                 default: model.defaultLook.tone.contrast)
             control(
-                "Pivot", $model.look.tone.pivot, 0.25...0.65,
-                default: model.defaultLook.tone.pivot)
-            control(
-                "Shoulder", $model.look.tone.shoulder, 0...0.8,
-                default: model.defaultLook.tone.shoulder)
-            control(
-                "Toe", $model.look.tone.toe, 0...0.8,
-                default: model.defaultLook.tone.toe)
-            control(
-                "Black", $model.look.tone.black, -0.08...0.08, format: "%+.3f",
-                default: model.defaultLook.tone.black)
-        }
-    }
-
-    private var trimsStage: some View {
-        stage(
-            "Colour", bypass: .trims,
-            help: "The last small moves, after the curve. Warmth acts on the midtones "
-                + "only, so it barely moves a bright sky or a deep shadow."
-        ) {
-            control(
                 "Saturation", $model.look.colour.saturation, 0.6...1.6,
                 default: model.defaultLook.colour.saturation)
-            control(
-                "Warmth", $model.look.colour.warmth, -0.12...0.12, format: "%+.3f",
-                default: model.defaultLook.colour.warmth)
         }
     }
 
-    private var deliveryStage: some View {
+    /// Per clip, because shake is a property of the shot. Strength is shared across the shoot.
+    private var stabilisationStage: some View {
         stage(
-            "Delivery", bypass: .delivery,
-            help: "Grain and stabilisation are applied to the video, never to the "
-                + "preview. Both need moving footage to judge, so a still leaves them "
-                + "out rather than showing a version that is not what renders.\n\n"
-                + "Grain shadows and highlights set how much grain reaches black and "
-                + "white, as film prints do: most in the midtones, less at either end. "
-                + "Both at 1 is flat grain.\n\nDenoise is for dim and night footage, and "
-                + "off otherwise: daylight iPhone footage is already clean once it is scaled "
-                + "down, and denoising 4K is most of a render's time.\n\nThe switch turns "
-                + "off grain, sharpening and denoise; the stabiliser is switched per clip. "
-                + "With every stage off, the export is the conversion alone.",
-            last: true
+            "Stabilisation",
+            isOn: Binding(get: { model.stabilise }, set: { model.stabilise = $0 }),
+            help: "Smooths handheld shake in this clip. It crops in slightly. Not shown in the "
+                + "still; it is in the export."
         ) {
             control(
-                "Grain", $model.look.grainStrength, 0...20, format: "%.0f",
-                default: model.defaultLook.grainStrength)
-            control(
-                "Grain shadows", $model.look.grainShadows, 0...1, format: "%.2f",
-                default: model.defaultLook.grainShadows)
-            control(
-                "Grain highs", $model.look.grainHighlights, 0...1, format: "%.2f",
-                default: model.defaultLook.grainHighlights)
-            control(
-                "Denoise", $model.look.finish.denoise, 0...2, format: "%.1f",
-                default: model.defaultLook.finish.denoise)
-            control(
-                "Stabiliser", $model.look.stabilisationSmoothing, 0...60, format: "%.0f",
+                "Strength", $model.look.stabilisationSmoothing, 0...60, format: "%.0f",
                 default: model.defaultLook.stabilisationSmoothing)
         }
+        .disabled(model.selectedClip == nil)
     }
 
-    /// One wheel, as three channel sliders.
-    ///
-    /// NOT A COLOUR WHEEL, deliberately. A wheel is quicker to throw a look with and worse at
-    /// repeating one, and repeatability is what this app is for: the same grade across nineteen
-    /// clips. Three rows you can also type into give that, and they reuse the drag-live-then-
-    /// render plumbing every other control already has.
-    ///
-    /// The ranges are the ones the engine's generator is sane over, and the generator refuses a
-    /// power of zero, which is why gamma starts above it.
-    @ViewBuilder private func wheel(_ which: Look.Correct.Wheel, _ title: String) -> some View {
-        let range: ClosedRange<Double> = which == .offset ? -0.2...0.2 : 0.5...2
-        ForEach(Array(["R", "G", "B"].enumerated()), id: \.offset) { channel, name in
+    private var denoiseStage: some View {
+        stage(
+            "Denoise",
+            isOn: Binding(
+                get: { !model.bypassed.contains(.denoise) },
+                set: { on in
+                    // A switch that turns on at strength 0 does nothing, which reads as broken.
+                    if on && model.look.finish.denoise == 0 { model.look.finish.denoise = 1 }
+                    model.setEnabled(.denoise, on)
+                }),
+            help: "For dim and night footage. Daylight footage is already clean. Not shown in "
+                + "the still, and it makes the export slower."
+        ) {
             control(
-                "\(title) \(name)",
-                Binding(
-                    get: { model.look.correct.value(which, channel) },
-                    set: { model.look.correct.setValue(which, channel, $0) }),
-                range, format: which == .offset ? "%+.3f" : "%.3f",
-                default: which.neutral)
+                "Strength", $model.look.finish.denoise, 0...2, format: "%.1f",
+                default: model.defaultLook.finish.denoise)
         }
     }
 
-    @State private var newPresetName = ""
+    /// A switch only. Each preset carries its own grain, and that is the point of it.
+    private var grainStage: some View {
+        stage(
+            "Grain", isOn: enabledBinding(.grain),
+            help: "The grain of this look's film stock. Not shown in the still; it is in the "
+                + "export.",
+            last: true
+        ) { EmptyView() }
+    }
 
-    /// The preset: a look cube with its tone and trims, switched as one. Above the chain, because
-    /// it is what the chain starts from.
+    private func enabledBinding(_ stage: Look.Stage) -> Binding<Bool> {
+        Binding(
+            get: { !model.bypassed.contains(stage) },
+            set: { model.setEnabled(stage, $0) })
+    }
+
     private var presetRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text("preset").font(Type.label).foregroundColor(Palette.inkSecondary)
-                Picker(
-                    "",
-                    selection: Binding(
-                        get: { model.project.activePreset },
-                        set: { model.apply(preset: $0) })
-                ) {
-                    ForEach(model.project.presets.map(\.name), id: \.self) { Text($0).tag($0) }
-                }
-                .labelsHidden().frame(width: 150)
-                // Back to the active preset, not to neutral: the preset is the finished starting
-                // point, and the controls are fine tuning on top of it.
-                //
-                // BORDERED, NOT TINTED. The accent is spent on the picture only — the selected
-                // clip's edge and the curve, not a control (docs/APP_DESIGN.md) — so prominence
-                // here comes from shape against "save"'s plain text, not colour.
-                //
-                // NO AUTO BUTTON. It stretched every clip to fill the histogram, which turned an
-                // overcast wall bright; the rendering and the per-clip metering are what make a
-                // clip right with no step at all.
-                Button("reset") { model.resetAdjustments() }
-                    .buttonStyle(.bordered).controlSize(.small).font(Type.label)
-                    .disabled(!model.hasAdjustments || model.project.active == nil)
-                if model.hasUnsavedChanges {
-                    Text("adjusted").font(Type.caption).foregroundColor(Palette.plate)
-                }
+        HStack(spacing: 8) {
+            Text("look").font(Type.label).foregroundColor(Palette.inkSecondary)
+            Picker(
+                "",
+                selection: Binding(
+                    get: { model.project.activePreset },
+                    set: { model.apply(preset: $0) })
+            ) {
+                ForEach(model.project.presets.map(\.name), id: \.self) { Text($0).tag($0) }
             }
-            HStack(spacing: 6) {
-                TextField("save the grade as…", text: $newPresetName)
-                    .textFieldStyle(.roundedBorder)
-                    .font(Type.label)
-                    .frame(width: 160)
-                    .focused($presetNameFocused)
-                    .onSubmit {
-                        model.savePreset(named: newPresetName)
-                        newPresetName = ""
-                        presetNameFocused = false
-                    }
-                Button("save") {
-                    model.savePreset(
-                        named: newPresetName.isEmpty
-                            ? model.project.activePreset
-                            : newPresetName)
-                    newPresetName = ""
-                    presetNameFocused = false
-                }
-                .buttonStyle(.borderless).font(Type.label)
-            }
+            .labelsHidden().frame(width: 150)
+            // BORDERED, NOT TINTED. The accent is spent on the picture only (docs/APP_DESIGN.md).
+            //
+            // NO AUTO BUTTON. It stretched every clip to fill the histogram, which turned an
+            // overcast wall bright; the rendering and the per-clip metering are what make a
+            // clip right with no step at all.
+            Button("reset") { model.resetAdjustments() }
+                .buttonStyle(.bordered).controlSize(.small).font(Type.label)
+                .disabled(!model.hasAdjustments || model.project.active == nil)
         }
         .padding(.leading, Self.inset)
         .padding(.bottom, 18)
@@ -328,30 +167,19 @@ struct InspectorView: View {
 
     static let inset: CGFloat = 18
 
-    /// One stage of the chain, collapsible, with a switch that takes it out of the grade.
+    /// One section, collapsible, with a switch. Which ones are open is remembered.
     ///
-    /// COLLAPSIBLE BECAUSE MOST OF IT IS NOT IN USE AT ONCE. Thirty-four controls in one column is
-    /// a wall, and a grading session touches one stage at a time. Which ones are open is
-    /// remembered, so the panel you left is the panel you come back to.
-    ///
-    /// The long explanation that used to sit under each stage is behind the help button now. Apple
-    /// puts reference text in a popover rather than in the panel, and a paragraph of prose under
-    /// every control is the fastest way to make a dense inspector unreadable.
-    ///
-    /// EVERY STAGE HERE BYPASSES. Convert doesn't — it has no controls — so it is `convertNote`,
-    /// not this.
-    ///
-    /// SWITCHED OFF, THE CONTROLS DIM BUT KEEP THEIR VALUES, so switching back is the grade you
-    /// had. A slider left live while its stage is off moves nothing, which reads as broken.
+    /// SWITCHED OFF, THE CONTROLS DIM BUT KEEP THEIR VALUES, so switching back is what you had. A
+    /// slider left live while its section is off moves nothing, which reads as broken.
     private func stage<Content: View>(
-        _ title: String, bypass: Look.Stage,
+        _ title: String, isOn: Binding<Bool>,
         help: String? = nil, last: Bool = false,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         let open = Binding(
             get: { model.openStages.contains(title) },
             set: { model.setStage(title, open: $0) })
-        let enabled = !model.bypassed.contains(bypass)
+        let enabled = isOn.wrappedValue
         return DisclosureGroup(isExpanded: open) {
             VStack(alignment: .leading, spacing: Space.s) { content() }
                 .padding(.top, Space.s)
@@ -364,11 +192,13 @@ struct InspectorView: View {
                     .foregroundColor(enabled ? Palette.ink : Palette.inkTertiary)
                 if let help { HelpButton(text: help) }
                 Spacer(minLength: 0)
-                bypassToggle(
-                    isOn: Binding(
-                        get: { enabled },
-                        set: { model.setEnabled(bypass, $0) }),
-                    label: title)
+                Toggle("", isOn: isOn)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    // Neutral, not the accent (docs/APP_DESIGN.md).
+                    .tint(Palette.inkSecondary)
+                    .help("Switch \(title.lowercased()) \(enabled ? "off" : "on")")
             }
             .contentShape(Rectangle())
         }
@@ -376,22 +206,8 @@ struct InspectorView: View {
         .padding(.bottom, last ? 0 : Space.l)
     }
 
-    /// The small switch beside a stage's name, and beside Print's inside Film look — same look
-    /// wherever a bypass is offered, built once so the two cannot drift.
-    private func bypassToggle(isOn: Binding<Bool>, label: String) -> some View {
-        Toggle("", isOn: isOn)
-            .labelsHidden()
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            // Neutral, not the accent (docs/APP_DESIGN.md).
-            .tint(Palette.inkSecondary)
-            .help(
-                isOn.wrappedValue
-                    ? "Switch \(label.lowercased()) off" : "Switch \(label.lowercased()) on")
-    }
-
     /// A label, a track, and a readout you can type into. Dragging finds a value; typing repeats
-    /// one, and a grading tool needs both.
+    /// one.
     private func control(
         _ label: String, _ value: Binding<Double>,
         _ range: ClosedRange<Double>, format: String = "%.3f",
@@ -429,10 +245,9 @@ struct InspectorView: View {
                     .font(Type.label)
                     .foregroundColor(Palette.inkSecondary)
                     .frame(width: 84, alignment: .leading)
-                    // DOUBLE-CLICK THE NAME TO PUT IT BACK. Every grading tool does this, and
-                    // without it the only way to undo one control is to remember the number it
-                    // held. The name is the target rather than the track, so the gesture cannot be
-                    // confused with a drag that happens to start with two quick clicks.
+                    // DOUBLE-CLICK THE NAME TO PUT IT BACK. The name is the target rather than the
+                    // track, so the gesture cannot be confused with a drag that starts with two
+                    // quick clicks.
                     .contentShape(Rectangle())
                     .onTapGesture(count: 2) {
                         guard let original else { return }
@@ -453,8 +268,8 @@ struct InspectorView: View {
                 }
                 .controlSize(.mini)
                 .tint(Palette.inkTertiary)
-                // DURING the drag, not only after it. A grading control that shows nothing until
-                // you let go is a control you cannot find a value with.
+                // DURING the drag, not only after it. A control that shows nothing until you let
+                // go is a control you cannot find a value with.
                 .onChange(of: value) { _ in model.liveUpdate() }
                 // A typed value is final, like a release, so it gets the exact render a release
                 // gets.
@@ -469,9 +284,8 @@ struct InspectorView: View {
     /// The number beside a slider: text until you click it, a field while you type.
     ///
     /// THE FIELD IS THE EXPENSIVE PART. A SwiftUI `TextField` on macOS is an `NSTextField` behind
-    /// a bridge, and the inspector rebuilds on every tick of a drag — so thirty-four live text
-    /// fields were being reconstructed sixty times a second, to show numbers nobody was typing
-    /// into. As `Text` they cost almost nothing, and the field appears on the one you click.
+    /// a bridge, rebuilt on every tick of a drag; as `Text` it costs almost nothing, and the field
+    /// appears on the one you click.
     private struct ValueField: View {
         @Binding var value: Double
         let format: String
@@ -527,7 +341,7 @@ struct InspectorView: View {
         // locale renders 2.02 as "2,02" and the readout then disagrees with the file it produces.
         f.locale = Locale(identifier: "en_US_POSIX")
         // FROM THE FORMAT'S OWN PRECISION, so typing into a field keeps as many digits as its
-        // readout shows. A fixed maximum of three rounded Radius ("%.4f") on every edit.
+        // readout shows.
         let precision =
             format.split(separator: ".").last
             .flatMap { Int($0.prefix(while: \.isNumber)) } ?? 3
@@ -535,17 +349,6 @@ struct InspectorView: View {
         f.maximumFractionDigits = precision
         f.positivePrefix = format.contains("+") ? "+" : ""
         return f
-    }
-}
-
-/// Small explanatory text, the same weight everywhere so it recedes behind the controls.
-private struct Note: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .font(Type.caption)
-            .foregroundColor(Palette.inkTertiary)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: 300, alignment: .leading)
     }
 }
 

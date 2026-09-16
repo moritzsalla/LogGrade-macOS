@@ -132,21 +132,21 @@ final class LookTests: XCTestCase {
         var look = try lookFixture()
         look.correct.exposure = 0.5
         look.halation.strength = 0.8
-        look.tone.toe = 0.3
+        look.tone.contrast = 1.4
+        look.finish.denoise = 1
         let off = look.bypassing(Set(Look.Stage.allCases))
         XCTAssertTrue(off.correct.isNeutral)
-        XCTAssertTrue(off.halation.isNeutral)
         XCTAssertEqual(off.colour, Look.Colour(saturation: 1, warmth: 0))
         XCTAssertEqual(off.grainStrength, 0)
+        XCTAssertEqual(off.finish.denoise, 0)
         let curve = ToneCurve.generated(tone: off.tone)
         for x in stride(from: 0.0, through: 1.0, by: 0.05) {
             XCTAssertEqual(
                 curve.value(at: x), x, accuracy: 1e-3, "tone off is not identity at \(x)")
         }
-        XCTAssertFalse(
-            Look.finishes(bypassing: [.delivery]),
-            "the sharpener and denoise are not look values, so zero grain alone still finishes")
-        XCTAssertTrue(Look.finishes(bypassing: [.tone]))
+        XCTAssertEqual(
+            off.halation, look.halation,
+            "halation belongs to the preset, so switching Adjust off must keep it")
         XCTAssertEqual(look.bypassing([]), look)
     }
 }
