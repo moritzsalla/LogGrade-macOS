@@ -14,7 +14,7 @@ public enum DeliverableResolution: Equatable {
         public let aspectHeight: String
         /// `-`, `centre`, or a pixel count.
         public let offset: String
-        /// What the output file is named after: `<clip>_<suffix>.mp4`.
+        /// What the output file is named after: `<clip>_<suffix>.<container>`.
         public let suffix: String
     }
 }
@@ -138,7 +138,7 @@ public enum ShapeRefusal: Equatable, CustomStringConvertible {
             // event stream; whether two shapes write one file is `sameOutputFile`'s question.
             return "A shape named '\(name)' already exists. Names are compared ignoring case."
         case .sameOutputFile(let other, let suffix):
-            return "This writes <clip>_\(suffix).mp4, which '\(other)' already writes."
+            return "This writes <clip>_\(suffix), which '\(other)' already writes."
         case .notAsWritten(let term):
             return "The engine did not read '\(term)' as one whole number as written. "
                 + "Enter each aspect term as plain digits."

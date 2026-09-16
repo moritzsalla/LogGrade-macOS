@@ -308,7 +308,7 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(project.environment(for: "B", lookFile: look)["CROP_OFFSET"], "centre")
         XCTAssertEqual(project.environment(for: "A", lookFile: look)["CROP_OFFSET"], "750")
         // The shape that does not crop needs no offset at all.
-        project.delivery.setTarget(.feed, selected: false)
+        project.customDelivery.setTarget(.feed, selected: false)
         XCTAssertNil(project.unframed(for: ["A", "B"]))
     }
 
@@ -323,7 +323,7 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(env["CROP_OFFSET"], "600")
         XCTAssertEqual(env["HEIGHT"], "1080")
         XCTAssertEqual(env["FPS_OUT"], "12")
-        XCTAssertEqual(env["DELIVERY_BITS"], "8")
+        XCTAssertEqual(env["DELIVERY_CODEC"], "h264")
         XCTAssertEqual(env["STAB"], "0")
         XCTAssertEqual(env["LOOK_FILE"], "/tmp/look.json")
         // The app sets variables the engine documents; it does not describe the image.
@@ -426,7 +426,9 @@ final class PresetTests: XCTestCase {
         var project = Project(
             presets: [.init(name: "shipped", look: try aLook())],
             activePreset: "shipped",
-            delivery: .init(targets: [.reels, .feed], height: 2560, fps: 24, tenBit: true))
+            delivery: .init(
+                targets: [.reels, .feed], height: 2560, fps: 24, codec: .hevc10,
+                quality: .max, container: .mov, audio: false))
         project.clips["IMG_0609"] = .init(cropOffset: 812, previewSeconds: 4, stabilise: false)
         project.clips["IMG_0610"] = .init(cropOffset: nil)
 
@@ -443,9 +445,60 @@ final class PresetTests: XCTestCase {
         XCTAssertEqual(reopened.clips["IMG_0609"]?.previewSeconds, 4)
         XCTAssertEqual(reopened.delivery.height, 2560)
         XCTAssertEqual(reopened.delivery.fps, 24)
-        XCTAssertTrue(reopened.delivery.tenBit)
+        XCTAssertEqual(reopened.exportPreset, .custom)
+        XCTAssertEqual(reopened.delivery.codec, .hevc10)
+        XCTAssertEqual(reopened.delivery.quality, .max)
+        XCTAssertEqual(reopened.delivery.container, .mov)
+        XCTAssertFalse(reopened.delivery.audio)
         XCTAssertEqual(reopened.presets.map(\.name), ["shipped"])
         XCTAssertEqual(reopened.active?.look.tone.gamma, 2.02)
+    }
+
+    /// A preset renders its own fixed settings and keeps Custom's for later; ProRes is forced to
+    /// mov and auto without overwriting what Custom holds.
+    func testExportPresetsRenderFixedSettingsAndKeepCustom() throws {
+        var project = Project(
+            presets: [.init(name: "p", look: try aLook())], activePreset: "p",
+            delivery: .init(
+                targets: [.feed], height: 3840, codec: .prores422hq, quality: .max,
+                container: .mp4))
+        let look = URL(fileURLWithPath: "/tmp/look.json")
+        var env = project.environment(for: "A", lookFile: look)
+        XCTAssertEqual(env["DELIVERY_CODEC"], "prores422hq")
+        XCTAssertEqual(env["DELIVERY_CONTAINER"], "mov", "the engine refuses ProRes in mp4")
+        XCTAssertEqual(env["DELIVERY_QUALITY"], "auto", "the engine refuses ProRes above auto")
+        XCTAssertEqual(project.customDelivery.container, .mp4, "Custom's own choice was lost")
+
+        project.exportPreset = .instagramStory
+        env = project.environment(for: "A", lookFile: look)
+        XCTAssertEqual(env["DELIVERABLES"], Deliverable.reels.spec)
+        XCTAssertEqual(env["HEIGHT"], String(Project.Delivery.defaultHeight))
+        XCTAssertEqual(env["DELIVERY_CODEC"], "h264")
+        XCTAssertEqual(env["DELIVERY_CONTAINER"], "mp4")
+        XCTAssertEqual(env["DELIVERY_AUDIO"], "1")
+        XCTAssertNil(env["DELIVERY_BITS"], "BITS must not be sent: it has to agree with CODEC")
+
+        let reread = try Project(data: try project.serialised())
+        XCTAssertEqual(reread.exportPreset, .instagramStory)
+        XCTAssertEqual(reread.customDelivery.height, 3840, "Custom was not kept behind the preset")
+        XCTAssertEqual(Project(presets: [], activePreset: "").exportPreset, .instagramStory)
+    }
+
+    /// A project from before the codec choice: `ten_bit` meant HEVC 10-bit, and hand-picked
+    /// shapes are Custom.
+    func testAnOlderDeliveryBlockOpensAsCustomWithItsCodec() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "version": 5, "active_preset": "p", "presets": [],
+            "delivery": [
+                "targets": [["name": "feed", "aspect_width": 4, "aspect_height": 5]],
+                "height": 1920, "ten_bit": true,
+            ],
+        ])
+        let opened = try Project(data: data)
+        XCTAssertEqual(opened.exportPreset, .custom)
+        XCTAssertEqual(opened.delivery.codec, .hevc10)
+        XCTAssertEqual(opened.delivery.container, .mp4)
+        XCTAssertTrue(opened.delivery.audio)
     }
 
 }

@@ -25,11 +25,17 @@ struct DeliveryPanel: View {
             Text("deliver")
                 .font(Type.heading)
                 .foregroundColor(Palette.ink)
-            shapeRow
-            customTargetsSection
-            sizeRow
-            sizeCostNote
-            depthRow
+            presetRow
+            if model.project.exportPreset == .custom {
+                shapeRow
+                customTargetsSection
+                sizeRow
+                sizeCostNote
+                codecRow
+                formatRow
+            } else {
+                presetSummary
+            }
             cropSection
             workloadNote
             saveRow
@@ -72,7 +78,7 @@ struct DeliveryPanel: View {
                     Spacer(minLength: 4)
                     Button("edit") { shapeEditor = .editing(deliverable) }
                     Button("remove") {
-                        model.project.delivery.targets.removeAll { $0 == deliverable }
+                        model.project.customDelivery.targets.removeAll { $0 == deliverable }
                     }
                 }
                 .buttonStyle(.borderless)
@@ -101,7 +107,7 @@ struct DeliveryPanel: View {
                 "",
                 selection: Binding(
                     get: { model.project.delivery.height },
-                    set: { model.project.delivery.height = $0 })
+                    set: { model.project.customDelivery.height = $0 })
             ) {
                 Text("1080 wide").tag(1920)
                 Text("1440 wide").tag(2560)
@@ -113,6 +119,7 @@ struct DeliveryPanel: View {
                 .fixedSize()
             Picker("", selection: fpsBinding) {
                 Text("source").tag(0)
+                Text("30").tag(30)
                 Text("24").tag(24)
                 Text("12").tag(12)
             }
@@ -147,28 +154,96 @@ struct DeliveryPanel: View {
         return String(format: ratio == ratio.rounded() ? "%.0f" : "%.1f", ratio)
     }
 
-    // Says where it helps and where it does not, because "10-bit" alone reads as simply better, and a
-    // file re-encoded by a platform gains nothing from it.
-    private var depthRow: some View {
+    private var presetRow: some View {
+        Picker(
+            "",
+            selection: Binding(
+                get: { model.project.exportPreset },
+                set: { model.project.exportPreset = $0 })
+        ) {
+            ForEach(Project.ExportPreset.allCases, id: \.self) { Text($0.label).tag($0) }
+        }
+        .labelsHidden()
+        .frame(width: 180)
+    }
+
+    /// What a preset renders, said once, because a preset with no fields otherwise reads as
+    /// nothing having been decided.
+    private var presetSummary: some View {
+        let d = model.project.delivery
+        let shape = d.targets.map { "\($0.aspectWidth):\($0.aspectHeight)" }.joined(separator: ", ")
+        return Text("\(shape), 1080 wide, \(d.codec.label), with sound.")
+            .font(Type.caption)
+            .foregroundColor(Palette.inkTertiary)
+    }
+
+    /// Custom's fields write `customDelivery` directly: `project.delivery` is what renders, with
+    /// ProRes's forced container and quality applied, and writing that back would lose the mp4
+    /// and quality someone set before trying ProRes.
+    private func custom<T>(_ path: WritableKeyPath<Project.Delivery, T>) -> Binding<T> {
+        Binding(
+            get: { model.project.customDelivery[keyPath: path] },
+            set: { model.project.customDelivery[keyPath: path] = $0 })
+    }
+
+    // Says where 10-bit and ProRes help, because they read as simply better, and a file a platform
+    // re-encodes gains nothing from either.
+    private var codecRow: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Toggle(
-                "10-bit file (HEVC)",
-                isOn: Binding(
-                    get: { model.project.delivery.tenBit },
-                    set: { model.project.delivery.tenBit = $0 })
-            )
-            .toggleStyle(.checkbox)
-            .font(Type.label)
-            .foregroundColor(Palette.inkSecondary)
-            if model.project.delivery.tenBit {
-                Text(
-                    "Smoother skies and gradients on a Mac, an iPhone or in an editor. Social "
-                        + "platforms convert uploads to 8-bit, so it gains nothing there."
-                )
-                .font(Type.caption)
-                .foregroundColor(Palette.inkTertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Text("codec").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
+                Picker("", selection: custom(\.codec)) {
+                    ForEach(Project.Delivery.Codec.allCases, id: \.self) {
+                        Text($0.label).tag($0)
+                    }
+                }
+                .labelsHidden().frame(width: 130)
+                Spacer(minLength: 4)
+                Text("quality").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
+                Picker("", selection: custom(\.quality)) {
+                    Text("auto").tag(Project.Delivery.Quality.auto)
+                    Text("high").tag(Project.Delivery.Quality.high)
+                    Text("max").tag(Project.Delivery.Quality.max)
+                }
+                .labelsHidden().frame(width: 76)
+                .disabled(model.project.customDelivery.codec.isProRes)
             }
+            if let note = codecNote {
+                Text(note)
+                    .font(Type.caption)
+                    .foregroundColor(Palette.inkTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var codecNote: String? {
+        switch model.project.customDelivery.codec {
+        case .h264: return nil
+        case .hevc: return "Smaller files than H.264 at the same quality. Plays on Apple devices."
+        case .hevc10:
+            return "Smoother skies and gradients on a Mac, an iPhone or in an editor. Social "
+                + "platforms convert uploads to 8-bit, so it gains nothing there."
+        case .prores422, .prores422hq:
+            return "For editing in Final Cut or Resolve: large files, always .mov, quality set by "
+                + "the codec."
+        }
+    }
+
+    private var formatRow: some View {
+        HStack(spacing: 8) {
+            Text("file").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
+            Picker("", selection: custom(\.container)) {
+                Text(".mp4").tag(Project.Delivery.Container.mp4)
+                Text(".mov").tag(Project.Delivery.Container.mov)
+            }
+            .labelsHidden().frame(width: 76)
+            .disabled(model.project.customDelivery.codec.isProRes)
+            Spacer(minLength: 4)
+            Toggle("sound", isOn: custom(\.audio))
+                .toggleStyle(.checkbox)
+                .font(Type.label)
+                .foregroundColor(Palette.inkSecondary)
         }
     }
 
@@ -184,9 +259,12 @@ struct DeliveryPanel: View {
             .foregroundColor(Palette.inkTertiary)
             .fixedSize(horizontal: false, vertical: true)
         } else {
+            // A preset has no shapes to tick, so only Custom is told how to get a crop.
             Text(
-                "Nothing selected crops this clip, so there is no crop to place. Tick a "
-                    + "shape that is not the clip's own and it appears here."
+                model.project.exportPreset == .custom
+                    ? "Nothing selected crops this clip, so there is no crop to place. Tick a "
+                        + "shape that is not the clip's own and it appears here."
+                    : "This clip already has that shape, so nothing is cropped."
             )
             .font(Type.caption)
             .foregroundColor(Palette.inkTertiary)
@@ -286,7 +364,7 @@ struct DeliveryPanel: View {
     private func binding(for deliverable: Deliverable) -> Binding<Bool> {
         Binding(
             get: { model.project.delivery.isSelected(deliverable) },
-            set: { model.project.delivery.setTarget(deliverable, selected: $0) })
+            set: { model.project.customDelivery.setTarget(deliverable, selected: $0) })
     }
 
     private var cropRow: some View {
@@ -372,7 +450,7 @@ struct DeliveryPanel: View {
     private var fpsBinding: Binding<Int> {
         Binding(
             get: { model.project.delivery.fps ?? 0 },
-            set: { model.project.delivery.fps = $0 == 0 ? nil : $0 })
+            set: { model.project.customDelivery.fps = $0 == 0 ? nil : $0 })
     }
 }
 

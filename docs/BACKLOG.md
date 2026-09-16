@@ -34,9 +34,7 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
 
 ## Next, in order
 
-1. **Export picker.** ProRes needs its own pix_fmt path: the finish dithers to 8/10-bit 4:2:0
-   before sharpen and grain.
-2. **Prune what the old app needed:** precursor parity (`tests/grade-parity.py`, ADR 0014's
+1. **Prune what the old app needed:** precursor parity (`tests/grade-parity.py`, ADR 0014's
    conformance), tests of removed controls, stale words in `CONTEXT.md`, README. Once the looks
    are tuned, delete the engine's wheels, hue curves, halation and tone internals that no preset
    uses.

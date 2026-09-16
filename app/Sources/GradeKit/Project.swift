@@ -60,22 +60,66 @@ public struct Project: Equatable {
         public var height: Int
         /// Nil keeps the source's rate, which is the only lossless answer.
         public var fps: Int?
-        /// HEVC Main 10 rather than 8-bit H.264. Off by default because the platforms re-encode to
-        /// 8-bit; a project file without the key predates the choice and was 8-bit.
-        public var tenBit: Bool
+        public var codec: Codec
+        public var quality: Quality
+        public var container: Container
+        public var audio: Bool
         /// 1080 wide at 9:16: what Instagram re-encodes to, and the size the grain and the
         /// sharpener were tuned at. A project that names no height gets it, and the interface
         /// warns about anything larger.
         public static let defaultHeight = 1920
 
+        /// The engine's `DELIVERY_CODEC` values, spelled as it spells them.
+        public enum Codec: String, CaseIterable {
+            case h264, hevc, hevc10, prores422, prores422hq
+
+            public var isProRes: Bool { self == .prores422 || self == .prores422hq }
+
+            public var label: String {
+                switch self {
+                case .h264: return "H.264"
+                case .hevc: return "HEVC"
+                case .hevc10: return "HEVC 10-bit"
+                case .prores422: return "ProRes 422"
+                case .prores422hq: return "ProRes 422 HQ"
+                }
+            }
+        }
+
+        /// `DELIVERY_QUALITY`. ProRes takes auto only: its profile is its quality.
+        public enum Quality: String, CaseIterable {
+            case auto, high, max
+        }
+
+        /// `DELIVERY_CONTAINER`. ProRes is refused in mp4 by the engine.
+        public enum Container: String, CaseIterable {
+            case mp4, mov
+        }
+
         public init(
             targets: [Deliverable] = [.reels], height: Int = defaultHeight,
-            fps: Int? = nil, tenBit: Bool = false
+            fps: Int? = nil, codec: Codec = .h264, quality: Quality = .auto,
+            container: Container = .mp4, audio: Bool = true
         ) {
             self.targets = targets
             self.height = height
             self.fps = fps
-            self.tenBit = tenBit
+            self.codec = codec
+            self.quality = quality
+            self.container = container
+            self.audio = audio
+        }
+
+        /// What renders: ProRes forced to mov and auto quality. Derived here rather than written
+        /// back when the codec changes, so switching to ProRes and back keeps the mp4 and the
+        /// quality someone chose.
+        public var normalised: Delivery {
+            var out = self
+            if codec.isProRes {
+                out.container = .mov
+                out.quality = .auto
+            }
+            return out
         }
 
         /// Whether anything selected crops this clip, and so has a box to draw. Per clip, because
@@ -152,21 +196,58 @@ public struct Project: Equatable {
         }
     }
 
+    /// The export picker. The two Instagram presets carry no fields: everything is chosen.
+    public enum ExportPreset: String, CaseIterable {
+        case instagramStory = "instagram_story"
+        case instagramPost = "instagram_post"
+        case custom
+
+        public var label: String {
+            switch self {
+            case .instagramStory: return "Instagram Story"
+            case .instagramPost: return "Instagram Post"
+            case .custom: return "Custom"
+            }
+        }
+
+        /// Nil for Custom, which is whatever was set.
+        public var fixed: Delivery? {
+            switch self {
+            case .instagramStory: return Delivery(targets: [.reels])
+            case .instagramPost: return Delivery(targets: [.feed])
+            case .custom: return nil
+            }
+        }
+    }
+
     public var presets: [Preset]
     public var activePreset: String
-    public var delivery: Delivery
+    public var exportPreset: ExportPreset
+    /// Custom's fields, kept while a preset is picked so switching back finds them as they were.
+    public var customDelivery: Delivery
+
+    /// What renders.
+    ///
+    /// DERIVED, NOT COPIED, and read-only. A preset's settings are never written into
+    /// `customDelivery`, and neither is the normalised form: writing it back would turn a Custom
+    /// mp4 into mov for good the moment ProRes was tried. Edits go to `customDelivery`.
+    public var delivery: Delivery { exportPreset.fixed ?? customDelivery.normalised }
     /// Keyed by clip stem, which is the join key back to the footage and to the camera's own
     /// capture order. Never renamed.
     public var clips: [String: ClipSettings]
     public var outputDirectory: URL?
 
     public init(
-        presets: [Preset], activePreset: String, delivery: Delivery = Delivery(),
+        presets: [Preset], activePreset: String, delivery: Delivery? = nil,
+        exportPreset: ExportPreset? = nil,
         clips: [String: ClipSettings] = [:], outputDirectory: URL? = nil
     ) {
         self.presets = presets
         self.activePreset = activePreset
-        self.delivery = delivery
+        // A delivery passed in is a Custom one unless a preset is named; with neither, a new
+        // project opens on Instagram Story, the no-fields choice.
+        self.customDelivery = delivery ?? Delivery()
+        self.exportPreset = exportPreset ?? (delivery == nil ? .instagramStory : .custom)
         self.clips = clips
         self.outputDirectory = outputDirectory
     }
@@ -267,7 +348,10 @@ public struct Project: Equatable {
         var env: [String: String] = ["LOOK_FILE": lookFile.path]
         env["HEIGHT"] = String(delivery.height)
         if let fps = delivery.fps { env["FPS_OUT"] = String(fps) }
-        env["DELIVERY_BITS"] = delivery.tenBit ? "10" : "8"
+        env["DELIVERY_CODEC"] = delivery.codec.rawValue
+        env["DELIVERY_QUALITY"] = delivery.quality.rawValue
+        env["DELIVERY_CONTAINER"] = delivery.container.rawValue
+        env["DELIVERY_AUDIO"] = delivery.audio ? "1" : "0"
         // The whole set, comma separated, in order. This was `FEED=1`, which could only ever say
         // one thing about one shape.
         env["DELIVERABLES"] = delivery.targets.map(\.spec).joined(separator: ",")
@@ -353,7 +437,14 @@ extension Project {
             }
             clipMap[name] = entry
         }
+        // Custom's fields, whichever preset is picked: `export_preset` says which renders.
+        let delivery = customDelivery
         var deliveryBlock: [String: Any] = [
+            "export_preset": exportPreset.rawValue,
+            "codec": delivery.codec.rawValue,
+            "quality": delivery.quality.rawValue,
+            "container": delivery.container.rawValue,
+            "audio": delivery.audio,
             "targets": delivery.targets.map { d in
                 var entry: [String: Any] = [
                     "name": d.name, "aspect_width": d.aspectWidth,
@@ -365,7 +456,6 @@ extension Project {
             "height": delivery.height,
         ]
         if let fps = delivery.fps { deliveryBlock["fps"] = fps }
-        if delivery.tenBit { deliveryBlock["ten_bit"] = true }
         var root: [String: Any] = [
             "version": Self.fileVersion,
             "presets": presetList,
@@ -487,7 +577,17 @@ extension Project {
                 height: (d["height"] as? NSNumber)?.intValue
                     ?? Delivery.defaultHeight,
                 fps: (d["fps"] as? NSNumber)?.intValue,
-                tenBit: (d["ten_bit"] as? NSNumber)?.boolValue ?? false),
+                // A file from before the codec choice said `ten_bit`, which meant HEVC 10-bit.
+                codec: (d["codec"] as? String).flatMap(Delivery.Codec.init(rawValue:))
+                    ?? ((d["ten_bit"] as? NSNumber)?.boolValue == true ? .hevc10 : .h264),
+                quality: (d["quality"] as? String).flatMap(Delivery.Quality.init(rawValue:))
+                    ?? .auto,
+                container: (d["container"] as? String)
+                    .flatMap(Delivery.Container.init(rawValue:)) ?? .mp4,
+                audio: (d["audio"] as? NSNumber)?.boolValue ?? true),
+            // A file from before the picker chose its shapes by hand, which is Custom.
+            exportPreset: (d["export_preset"] as? String).flatMap(ExportPreset.init(rawValue:))
+                ?? .custom,
             clips: clipMap,
             outputDirectory: (root["output_directory"] as? String).map {
                 URL(fileURLWithPath: $0)

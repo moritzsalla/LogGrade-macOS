@@ -201,7 +201,7 @@ final class DeliverableTests: XCTestCase {
         XCTAssertEqual(
             project.unframed(for: ["IMG_0609"]), nil,
             "a centred shape warned about a framing it ignores")
-        project.delivery.targets.append(.feed)
+        project.customDelivery.targets.append(.feed)
         XCTAssertEqual(
             project.unframed(for: ["IMG_0609"]),
             .init(deliverables: [.feed], clips: ["IMG_0609"]),
