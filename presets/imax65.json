@@ -5,9 +5,10 @@
     "stock's own. Each clip's exposure and white balance are metered in linear before the cube",
     "(scripts/solve-exposure.py) against match.reference_stops; correct.* still adds on top.",
     "",
-    "Vision3 250D scanned as a digital-intermediate 65mm finish: neutral, deep blacks, a sky",
-    "that holds. At 65mm the grain is barely there, and Vision3's rem-jet backing all but",
-    "stops halation, so both are faint; the sharpener is the strongest of the presets."
+    "Vision3 250D as a graded 65mm/IMAX finish, matched to daylight frames of Interstellar and",
+    "Oppenheimer: deep blacks, creamy highlights, olive greens, brick reds, never teal-orange.",
+    "At 65mm the grain is barely there, and Vision3's rem-jet backing all but stops halation,",
+    "so both are faint; the sharpener is the strongest of the presets."
   ],
   "convert": {
     "cube": "imax65"
