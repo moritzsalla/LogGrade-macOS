@@ -1381,7 +1381,7 @@ PY
 	local report expected
 	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
 	[ -n "$report" ] || fail "no run report was written: $output"
-	expected="[0:v]lut3d=file='$(resolve_conversion neutral)':interp=tetrahedral,${DELIVERY_SETPARAMS},zscale=w=72:h=128:f=lanczos:d=error_diffusion,format=yuv420p[o]"
+	expected="[0:v]zscale=w=72:h=128:f=lanczos,format=yuv444p10le,lut3d=file='$(resolve_conversion neutral)':interp=tetrahedral,${DELIVERY_SETPARAMS},zscale=w=72:h=128:f=lanczos:d=error_diffusion,format=yuv420p[o]"
 	grep -qxF -- "$expected" "$report" \
 		|| fail "the all-off graph is not the CST alone: $(grep -F '[0:v]' "$report")"
 }
@@ -2541,6 +2541,28 @@ hue, tone = c.find("hue.cube"), c.find("lut1d")
 sys.exit(None if 0 <= hue < tone else "order is hue@%d tone@%d" % (hue, tone))
 ' "$chain" || fail "the hue stage is out of order: $chain"
 	head -1 "$BATS_TEST_TMPDIR/hue.cube" | grep -q 'sat=0.0,0.0,0.0,0.0,-0.5,' || fail "the cube is not the look's curves"
+}
+
+# bats test_tags=slow
+@test "the one-pass render crops and shrinks before it grades, and sizes the glow for that frame" {
+	# The grade is per pixel or a fraction of the frame, so it runs at delivery size: a quarter of the
+	# work at 4K. The glow is in the shrunk frame's pixels, and a crop must not make it grow.
+	run delivery_geometry 1080 1350 "" "crop=2160:2700:0:750,"
+	[ "$output" = "crop=2160:2700:0:750,zscale=w=1080:h=1350:f=lanczos,format=yuv444p10le," ] || fail "$output"
+	run delivery_halation_sigma 2160 3840 0.006 "" 1920
+	[ "$output" = "11.52" ] || fail "full frame at half size: $output"
+	run delivery_halation_sigma 2160 3840 0.006 "crop=2160:2700:0:750," 1350
+	[ "$output" = "11.52" ] || fail "the 4:5 crop changed the glow's size: $output"
+	# And in the render itself, the reduction comes before the conversion, not after the grade.
+	local work="$BATS_TEST_TMPDIR/shrink-first" report
+	mkdir -p "$work/src"
+	cp "$FIXTURES/probe_mid.mov" "$work/src/CLIP.mov"
+	MATCH=0 STAB=0 HEIGHT=128 PROOF=0.1 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	[ "$status" -eq 0 ] || fail "render failed: $output"
+	report=$(ls "$work"/dist/reports/run-*.txt 2>/dev/null | head -1) || true
+	[ -n "$report" ] || fail "no run report: $output"
+	grep -qE "^\[0:v\]zscale=w=72:h=128:f=lanczos,format=yuv444p10le,.*lut3d=file='[^']*neutral\.cube'" "$report" \
+		|| fail "the graph does not shrink before the conversion: $(grep -F '[0:v]' "$report")"
 }
 
 @test "the hue generator refuses a curve it cannot mean" {

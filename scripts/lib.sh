@@ -1199,6 +1199,17 @@ halation_sigma() {  # halation_sigma <width> <height> <radius>  -> sigma in pixe
 	awk -v w="$1" -v h="$2" -v r="$3" 'BEGIN { printf "%.2f", (w > h ? w : h) * r }'
 }
 
+# The same glow in a deliverable's pixels, for a graph that crops and shrinks before it grades
+# (delivery_geometry): the source's sigma scaled by output height over the window's height, so a
+# crop does not make the glow grow. The window is the crop's, or the whole source without one.
+delivery_halation_sigma() {  # delivery_halation_sigma <src-w> <src-h> <radius> <crop-prefix|empty> <out-h>
+	local window_h="$2" dims
+	if [ -n "$4" ]; then
+		dims="${4#crop=}"; dims="${dims#*:}"; window_h="${dims%%:*}"
+	fi
+	awk -v s="$(halation_sigma "$1" "$2" "$3")" -v o="$5" -v h="$window_h" 'BEGIN { printf "%.2f", s * o / h }'
+}
+
 # Camera-motion analysis into a transform, staged. Both entry points write the same cache path, so
 # they must measure the same way: a settings change made in one would leave the transform depending
 # on which script happened to write it.
@@ -1245,6 +1256,19 @@ detect_transform() {  # detect_transform <input> <trf> [head-prefix]
 stab_prefix() {  # stab_prefix <trf> <smoothing>
 	printf "vidstabtransform=input='%s':smoothing=%s:optzoom=1:interpol=bicubic,unsharp=5:5:0.2:3:3:0.0," \
 		"$1" "$2"
+}
+
+# SHRINK FIRST, for the one-pass render: the stabiliser's warp and the crop at source resolution,
+# then the reduction to the deliverable, and only then the denoise, correction, halation, conversion
+# and grade. Every one of those is per pixel or sized as a fraction of the frame, so grading 1080p
+# instead of 4K costs a quarter of the work: IMG_0609's grade and encode went from 2.0 to 4.1 fps.
+# It also matches the live preview, which resamples and then grades.
+#
+# 10-bit 4:4:4 out, NOT DITHERED: the dither to the delivery depth stays in delivery_image_chain,
+# after the grade, where it has always been. The staged path grades its master at full resolution
+# and does not use this.
+delivery_geometry() {  # delivery_geometry <w> <h> <stab-prefix> <crop-prefix>  -> a prefix with its trailing comma
+	printf '%s%szscale=w=%s:h=%s:f=lanczos,format=yuv444p10le,' "$3" "$4" "$1" "$2"
 }
 
 # Grain and sharpen come AFTER the downscale, not before: grain sized for the 4K master is crushed
