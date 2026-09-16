@@ -20,8 +20,7 @@ SRC="$(source_path "$WORK" "$CLIP")"
 OUT="$(baseline_path "$WORK" "$CLIP")"
 
 [ -f "$SRC" ] || { echo "source not found: $SRC" >&2; exit 1; }
-# look.json's conversion, and its log denoise, which must run here before the cube: stage 3 drops
-# hqdn3d whenever finish.denoise is on. A film conversion's per-clip metering is grade.sh's only.
+# look.json's conversion, and its log denoise, which must run here before the cube. A film conversion's per-clip metering is grade.sh's only.
 CST="$(resolve_conversion "${CONVERT:-$(look .convert.cube)}")" || exit 1
 load_delivery_look || exit 1
 DENOISE_PREFIX=""

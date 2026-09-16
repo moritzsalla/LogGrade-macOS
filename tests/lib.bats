@@ -876,12 +876,11 @@ JSON
 		|| fail "$output"
 }
 
-@test "the finish follows finish.*: no hqdn3d under the log denoise, no sharpener at 0, Super 8 at 18 fps" {
+@test "the finish follows finish.*: no chroma denoise in delivery, no sharpener at 0, Super 8 at 18 fps" {
 	DENOISE_STRENGTH=1 SHARPEN=0 GAUGE=none run delivery_image_chain 1080 1920 "" "" 1 24
-	[[ "$output" != *hqdn3d* ]] || fail "hqdn3d on top of the log denoise: $output"
 	[[ "$output" != *unsharp* ]] || fail "sharpened at 0: $output"
 	DENOISE_STRENGTH=0 SHARPEN=1 GAUGE=super8 run delivery_image_chain 1080 1920 "" "" 1 24
-	[[ "$output" == *"hqdn3d="* ]] || fail "lost hqdn3d without the log denoise: $output"
+	[[ "$output" != *hqdn3d* ]] || fail "a chroma denoise came back with the log denoise off: $output"
 	[[ "$output" == *"unsharp=5:5:1:3:3:0.0[sh_sharp]"*"maskedclamp=planes=1:undershoot=2:overshoot=2"* ]] || fail "the limit did not follow the amount: $output"
 	# Pinned before the gauge: behind halation the picture is float RGB, where noise goes wild.
 	[[ "$output" == *"format=yuv444p10le,scale=w=486:h=864:flags=area"*"fps=18,zscale="* ]] || fail "$output"
@@ -1356,8 +1355,7 @@ PY
 		"$report" || fail "no encode speed: $(cat "$report")"
 	grep -qE -- '--- graph [0-9]+ \(reels-stories_9x16 encode, -filter_complex\) ---' "$report" \
 		|| fail "no delimited filter graph: $(cat "$report")"
-	# The head is the log denoise now, not the conversion, so the graph is matched end to end
-	# rather than by its first filter.
+	# Matched end to end rather than by its first filter, which a denoise or halation would change.
 	grep -qE '^\[0:v\].*lut3d=.*blend=all_mode=grainmerge:shortest=1\[o\]$' "$report" \
 		|| fail "the graph was not recorded whole: $(cat "$report")"
 	grep -qE '^finished .*, wall time [0-9]+\.[0-9]{3}s$' "$report" || fail "no wall time: $(cat "$report")"
@@ -2601,7 +2599,7 @@ if b[8] > 0.7 * f[8]: problems.append("the highlights keep %.2f of a flat %.2f" 
 if b[4] < 0.9 * f[4]: problems.append("the midtones lost grain: %.2f of a flat %.2f" % (b[4], f[4]))
 sys.exit("; ".join(problems) or None)
 ' "$flat" "$bands" || fail "grain is not weighted by brightness: flat $flat, weighted $bands"
-	# The plate is grey so grainmerge leaves chroma alone, and the hqdn3d pass depends on that.
+	# The plate is grey so grainmerge leaves chroma alone.
 	[ "$verdict" = "chroma-untouched" ] || fail "weighted grain moved the chroma planes"
 }
 

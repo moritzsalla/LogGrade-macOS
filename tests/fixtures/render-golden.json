@@ -6,7 +6,7 @@
     "This is the DEFAULT image this repo renders, recorded from its own chain. Moving it",
     "is allowed and takes a reason, which lands in recorded_because. See docs/adr/0014."
   ],
-  "recorded_because": "film look and print stages removed; the default render is byte-identical",
+  "recorded_because": "denoise off by default: 42 dB luma / 51 dB chroma against the denoised render, no visible difference; it cost 60% of render time",
   "clip": {
     "name": "IMG_0607.mov",
     "bytes": 399774249
@@ -14,17 +14,17 @@
   "proof_secs": 0.1,
   "ffmpeg": "ffmpeg version 9.0.1-tessus  https://evermeet.cx/ffmpeg/  Copyright (c) 2000-2026 the FFmpeg developers",
   "arch": "x86_64",
-  "stream_md5": "a377423e79a5e9f661f27cfe75bd4269",
+  "stream_md5": "3ac67e03dd1c363f2b2e13085afd69fc",
   "inputs": {
-    "look.json": "6cf5038a04ee6f13e67d28331dfb4bf02c0dff0be3affbcfb1967a3b00272755",
-    "scripts/00-stabilise-detect.sh": "1ba1b43b401ff73902db2304e6d1113da09c49edbcdc649c28d862dd9158a373",
-    "scripts/01-baseline.sh": "3ce305c632c8662925275ad8df348f333ea5467ca900c2d620d0c755b54c0e6c",
+    "look.json": "9b16acf56d3fcd8a61864d95968af31d9d4f3a829182865bba93f654f2c03d69",
+    "scripts/00-stabilise-detect.sh": "9dd18f45899418a1323984b02904c9373eef31d8eccbc893ab68307a3ac0fe5d",
+    "scripts/01-baseline.sh": "8575fdbfe2a5e528efef9b110468ed9c77d770a19698ce4a9b5a5a3cb4747f6b",
     "scripts/02-grade.sh": "025f444d42f2be6f0a94221e489c6fd5d3f5481d8f0617337a4405d8d939fe46",
     "scripts/03-final.sh": "9bd2f2b907cd07ecde1e7468c4d6edcd685e9fb385bc6850aa58f7dfad20a5ae",
     "scripts/applelog.py": "97be85a467ef03b9510a22ee8c3e93aaae02d17cad46397ea3669b8d3215b6ae",
     "scripts/cubefile.py": "b87f276f8579484d43c61683a2ca943acf9af59f7e750a1cc8ed0d53aecec13e",
     "scripts/grade.sh": "4791c49633660ed2624a0c49c568883a9ca7c38440eb30964ae751d0740c0792",
-    "scripts/lib.sh": "2f546533913e01c4fa76aef1e9fde5e81c473fec814a89e4f89cb232a126a763",
+    "scripts/lib.sh": "b62f9cffaf1ab2da37a6b11caa742bab6eec5855e099dca7d359a8fa12c3f8ed",
     "scripts/make-correct-lut.py": "93d79ee78266071ca6ca9195126bc67006cb2b7c66ce7eee44f73b8fec81e521",
     "scripts/make-filmic-lut.py": "e846834cdef9e82c2c57251b70bcd3b7a150bddbd691562290b914494c8e9135",
     "scripts/make-halation-luts.py": "574e21ef03435c9b6ee8f1d81cde19e06dafdd1bd38a6c54157767f911d3351a",
