@@ -258,8 +258,10 @@ struct DeliveryPanel: View {
             .font(Type.caption)
             .foregroundColor(Palette.inkTertiary)
             .fixedSize(horizontal: false, vertical: true)
-        } else {
-            // A preset has no shapes to tick, so only Custom is told how to get a crop.
+        } else if model.selectedFrameSize != nil {
+            // Only once the clip is measured: an unmeasured frame is answered as 9:16, which would
+            // tell a landscape clip it already has a portrait shape. A preset has no shapes to
+            // tick, so only Custom is told how to get a crop.
             Text(
                 model.project.exportPreset == .custom
                     ? "Nothing selected crops this clip, so there is no crop to place. Tick a "
