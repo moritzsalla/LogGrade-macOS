@@ -251,7 +251,7 @@ final class GradeModel: ObservableObject {
                         self.publishedTone = tone
                     }
                     self.preview.image = NSImage(
-                        cgImage: image,
+                        cgImage: LiveChain.forDisplay(image),
                         size: NSSize(
                             width: image.width,
                             height: image.height))
@@ -847,9 +847,14 @@ final class GradeModel: ObservableObject {
                     clip: clip.url, seconds: seconds, look: look, match: match,
                     onStart: { [weak self] process in self?.previewProcess = process })
                 guard generation == self.previewGeneration else { return }
-                let image = NSImage(contentsOf: frame.url)
-                let measured = image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
-                    .map { Scopes.measure($0) }
+                let pixels = NSImage(contentsOf: frame.url)?
+                    .cgImage(forProposedRect: nil, context: nil, hints: nil)
+                let measured = pixels.map { Scopes.measure($0) }
+                let image = pixels.map {
+                    NSImage(
+                        cgImage: LiveChain.forDisplay($0),
+                        size: NSSize(width: $0.width, height: $0.height))
+                }
                 DispatchQueue.main.async {
                     guard generation == self.previewGeneration else { return }
                     // Compare holds the last EXACT frame, from its own slot. Taking it from

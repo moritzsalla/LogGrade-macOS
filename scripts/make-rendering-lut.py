@@ -36,7 +36,7 @@ HOW IT WORKS, in order:
 THE NUMBERS:
     --contrast  the tone scale's exponent. 1.0 is flat, 1.35 is the shipped default.
     --saturation  chroma gain on the result, 1.0 leaves it as rendered.
-    --grey      where scene 0.18 lands, in display code values.
+    --grey      where scene 0.18 lands, in display code values for Apple playback (cubefile.py).
     --peak      the scene value that reaches display white, in stops above 0.18. Apple Log's code
                 1.0 decodes to 12.0, which is 6.06 stops above 0.18 and 3.6 above diffuse white, so
                 anything below that clips the top of what the camera recorded.
@@ -47,7 +47,7 @@ NOT: the app reads the generated .cube, exactly as it reads Apple's and the film
 only ever one implementation of it.
 
 USAGE
-    ./make-rendering-lut.py OUT.cube [--contrast 1.35] [--saturation 1.05] [--grey 0.42]
+    ./make-rendering-lut.py OUT.cube [--contrast 1.35] [--saturation 1.05] [--grey 0.332]
                                      [--peak 6.06] [--black 0.0] [--size 65]
     ./make-rendering-lut.py --stdout ...
 """
@@ -59,7 +59,7 @@ import sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from applelog import decode  # noqa: E402
-from cubefile import is_current, number, title, write_staged  # noqa: E402
+from cubefile import display_decode, display_encode, is_current, number, title, write_staged  # noqa: E402
 
 BT2020_TO_709 = ((1.6605, -0.5876, -0.0728),
                  (-0.1246, 1.1329, -0.0083),
@@ -70,7 +70,6 @@ OK_M1 = ((0.4122214708, 0.5363325363, 0.0514459929),
 OK_M2 = ((0.2104542553, 0.7936177850, -0.0040720468),
          (1.9779984951, -2.4285922050, 0.4505937099),
          (0.0259040371, 0.7827717662, -0.8086757660))
-DISPLAY_GAMMA = 2.4
 # The scene value reaching display white, as a multiple of 0.18. Apple Log's own ceiling is 12.0.
 GREY = 0.18
 FLARE = 0.01
@@ -84,7 +83,7 @@ GAMUT_KNEE = 0.75
 # here as everywhere (scripts/cubefile.py), and the parameters alone do not describe the cube: a
 # change to the rendering itself left every committed cube "already current" and silently stale.
 # Raise it whenever this file's output changes for unchanged parameters.
-REVISION = 2
+REVISION = 3
 GAMUT_THRESHOLD, GAMUT_LIMIT, GAMUT_POWER = 0.9, 1.15, 1.2
 
 
@@ -194,7 +193,7 @@ def render(lin, params):
     L = black + L * (1.0 - black)
     C = fit_chroma(L, C, ca, cb)
     out = from_oklab((L, C * ca, C * cb))
-    return tuple(min(1.0, max(0.0, c)) ** (1.0 / DISPLAY_GAMMA) for c in out)
+    return tuple(display_encode(c) for c in out)
 
 
 def gamut_chroma(L, ca, cb):
@@ -226,7 +225,7 @@ def fit_chroma(L, C, ca, cb):
 
 
 def parameters(a):
-    s0, s1 = solve_tonescale(a.contrast, a.grey ** DISPLAY_GAMMA, GREY * 2 ** a.peak)
+    s0, s1 = solve_tonescale(a.contrast, display_decode(a.grey), GREY * 2 ** a.peak)
     return (a.contrast, s0, s1, a.saturation, a.black)
 
 
@@ -243,7 +242,7 @@ def main():
     ap.add_argument("--stdout", action="store_true")
     ap.add_argument("--contrast", type=float, default=1.35)
     ap.add_argument("--saturation", type=float, default=1.05)
-    ap.add_argument("--grey", type=float, default=0.42, help="where scene 0.18 lands, in code values")
+    ap.add_argument("--grey", type=float, default=0.332, help="where scene 0.18 lands, in code values")
     ap.add_argument("--peak", type=float, default=6.06,
                     help="stops above 0.18 that reach display white; 6.06 is Apple Log's own ceiling")
     ap.add_argument("--black", type=float, default=0.0, help="display black lift, in code values")
