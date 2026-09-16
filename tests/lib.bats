@@ -907,8 +907,9 @@ JSON
 	[[ "$output" != *hqdn3d* ]] || fail "a chroma denoise came back with the log denoise off: $output"
 	[[ "$output" == *"unsharp=5:5:1:3:3:0.0[sh_sharp]"*"maskedclamp=planes=1:undershoot=2:overshoot=2"* ]] || fail "the limit did not follow the amount: $output"
 	# Pinned before the gauge: behind halation the picture is float RGB, where noise goes wild.
-	[[ "$output" == *"format=yuv444p10le,scale=w=486:h=864:flags=area"*"fps=18,zscale="* ]] || fail "$output"
+	[[ "$output" == *"format=yuv444p10le,scale=w=324:h=576:flags=area"*"fps=18,zscale="* ]] || fail "$output"
 	[[ "$output" == *",fps=24" ]] || fail "did not return to the clip's rate: $output"
+	[[ "$output" != *"hue=b="* ]] || fail "the frame-to-frame brightness flicker came back: $output"
 	# The clamp is in code values: at 10 bits the same tolerance is four times as many.
 	DELIVERY_CODEC=hevc10 DENOISE_STRENGTH=0 SHARPEN=1 GAUGE=none run delivery_image_chain 1080 1920 "" "" 1 24
 	[[ "$output" == *"undershoot=8:overshoot=8"* ]] || fail "10-bit clamp not scaled: $output"

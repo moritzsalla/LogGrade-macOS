@@ -54,9 +54,16 @@ public final class RenderQueue: ObservableObject {
     /// How many renders at once. One clip does not saturate a modern machine, because several
     /// filters in this chain are serial — so two to four is close to a linear gain on a batch, and
     /// it is the largest cheap win available. More than four and they fight for memory bandwidth.
-    public var concurrency: Int = 2 {
-        didSet { concurrency = min(4, max(1, concurrency)) }
+    ///
+    /// PUBLISHED, or the picker bound to it never redraws: choosing "2 at a time" set 2 and the
+    /// menu kept showing 1, which reads as the choice being undone.
+    /// The clamp is in the setter of a plain property over the published storage: clamping in a
+    /// `didSet` of the published property itself re-entered it and crashed.
+    public var concurrency: Int {
+        get { publishedConcurrency }
+        set { publishedConcurrency = min(4, max(1, newValue)) }
     }
+    @Published private var publishedConcurrency = 2
 
     private let engine: EngineLocation
     private let lock = NSLock()
@@ -153,14 +160,20 @@ public final class RenderQueue: ObservableObject {
         // A PLAIN CLOSURE, not a reference to anything in the app. This package knows nothing
         // about windows or notifications, and should not start now; the app decides what a
         // finished run looks like on screen.
-        let summary = jobs.reduce(into: (done: 0, failed: 0)) { total, job in
-            if case .done = job.state {
-                total.done += 1
-            } else if job.state.isFinished {
-                total.failed += 1
+        //
+        // COUNTED ON THE MAIN QUEUE. `update` applies each job's final state there asynchronously,
+        // so counting here, right after the last render, read states not yet written: a run that
+        // delivered a clip announced "0 clips delivered". Queued after those updates, this sees them.
+        DispatchQueue.main.async {
+            let summary = self.jobs.reduce(into: (done: 0, failed: 0)) { total, job in
+                if case .done = job.state {
+                    total.done += 1
+                } else if job.state.isFinished {
+                    total.failed += 1
+                }
             }
+            self.onFinished?(summary.done, summary.failed)
         }
-        DispatchQueue.main.async { self.onFinished?(summary.done, summary.failed) }
     }
 
     private func run(_ job: Job, environment: [String: String]) {
