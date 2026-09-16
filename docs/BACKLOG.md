@@ -8,18 +8,17 @@ Footage in, pick a look, and it looks finished. The better it does by itself, th
 touches. Two users: Moritz and a non-technical photographer. Adjustment is optional and out of the
 way for whoever doesn't want it. Judge every entry by that.
 
-**Looks.** Five fixed presets, each owning its grain (not editable, only switchable):
+**Looks.** Four fixed presets, each owning its grain (not editable, only switchable):
 
 | Look | Grain | Judged against |
 |---|---|---|
 | Neutral: our own rendering, finished, nothing clipped for effect | off | eye |
 | **Portra 160**, the one that matters most | on | the partner's analog scans |
 | Portra 800 | coarse | public references, then eye |
-| IMAX | fine | public references, then eye |
 | Super 8 | heavy | public references, then eye |
 
 Sign-off is both users calling a look good enough. It stays improvable. Moritz called Portra 800,
-IMAX, Super 8 and the brighter Neutral good enough for now, not exceptional; the partner has not
+Super 8 and the brighter Neutral good enough for now, not exceptional; the partner has not
 judged them.
 
 **Right panel.** Look picker, one per batch. Adjust, per clip: Exposure, Warmth, Tint, Contrast,

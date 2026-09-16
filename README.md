@@ -12,7 +12,7 @@ alongside footage from professional cinema cameras.
 Getting there requires an understanding of colour spaces, LUTs and exposure, and usually
 professional software. This tool gets about as much image quality out of iPhone footage as the
 format actually holds, without opening an NLE. Pick a look (Neutral, or a film stock: Portra 160,
-Portra 800, IMAX, Super 8) and the footage comes out finished.
+Portra 800, Super 8) and the footage comes out finished.
 
 **Why not an existing app?** Log files are ordinary video, so any app opens them, but they look
 flat and grey until they are converted and graded. The free tool that does that properly is
@@ -97,7 +97,7 @@ log picture so the highlights keep their latitude. What reads as film beyond col
 - **Halation** — the warm glow bright things spill past their edges, added in linear light before
   the conversion, where a sky and a white car are still different amounts of light.
 - **Grain that follows the picture** — most in the midtones, receding into shadow and highlight,
-  coarse for Portra 800 and fine for IMAX.
+  coarse for Portra 800 and heavy for Super 8.
 
 You pick the stock; its halation and grain are not sliders. The looks are judged by eye against real
 film: Portra 160 against analog scans, the others against reference frames.

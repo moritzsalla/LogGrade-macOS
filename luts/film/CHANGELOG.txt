@@ -19,7 +19,7 @@ baked on 2026-09-16 the same way, so their TITLEs carry it too.
 
 What was modified
 -----------------
-imax65.cube, portra160.cube, portra800.cube
+portra160.cube, portra800.cube
   spektrafilm produces the developed negative's CMY dye densities only (its
   own scan of a negative is not inverted). The positive is NOT spektrafilm's:
   a lab-scan model written here inverts each channel's density, balances it
@@ -32,12 +32,6 @@ imax65.cube, portra160.cube, portra800.cube
   subtractive density, a gamut fit that reduces chroma at constant lightness
   and hue instead of clipping, and a display black lift. DIR coupler amount
   raised above the profile default (the "dir" value in each TITLE).
-    imax65          kodak_vision3_250d negative, +0.5 stop, graded as a DI
-                    finish: highlights rolled off later ("peak" 48), red
-                    chroma pulled back ("red_sat", a third window on the
-                    hue-vs-chroma curve), and a yellow-green cast in Oklab
-                    ("cast_a"/"cast_b") rising from neutral black to full at
-                    lightness 0.6
     portra160       kodak_portra_160, +1 stop, scanned
     portra800       kodak_portra_800, +1 stop, scanned
 

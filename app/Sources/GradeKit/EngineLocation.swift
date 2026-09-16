@@ -44,7 +44,7 @@ public struct EngineLocation {
     /// The picker's order, by preset file stem: the look that matters most first
     /// (docs/BACKLOG.md). A stem not named here follows, alphabetically, so a new preset file
     /// still appears without an edit.
-    public static let presetOrder = ["portra160", "portra800", "imax65", "super8"]
+    public static let presetOrder = ["portra160", "portra800", "super8"]
 
     /// The presets the engine ships, `presets/*.json`, each a complete look with a `name`, in
     /// `presetOrder`. A file that is not a complete look is left out rather than offered half-read.
