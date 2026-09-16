@@ -17,7 +17,6 @@ final class LiveChainTests: XCTestCase {
         let clip: URL
         let look: Look
         let conversion: Cube3D
-        let lookCube: Cube3D?
     }
 
     private func rig() throws -> Rig {
@@ -36,11 +35,10 @@ final class LiveChainTests: XCTestCase {
         let look = try Look(data: Data(contentsOf: engine.lookFile))
         let conversion = try Cube3D(
             contentsOf: try XCTUnwrap(engine.conversionCube(named: look.convertCube)))
-        let lookCube = engine.lookCube(named: look.lookLUT).flatMap { try? Cube3D(contentsOf: $0) }
         return Rig(
             engine: engine,
             renderer: PreviewRenderer(engine: engine, workDirectory: work),
-            clip: clip, look: look, conversion: conversion, lookCube: lookCube)
+            clip: clip, look: look, conversion: conversion)
     }
 
     private func image(_ frame: PreviewRenderer.Frame) throws -> CGImage {
@@ -132,11 +130,6 @@ final class LiveChainTests: XCTestCase {
                     look.halation,
                     frameLongEdge: max(sourceImage.width, sourceImage.height)),
                 conversion: conversion,
-                look: look.lookLUT == "none" ? nil : rig.lookCube,
-                lookStrength: look.lookStrength,
-                print: rig.engine.printCube(named: look.printLUT)
-                    .flatMap { try? Cube3D(contentsOf: $0) },
-                printStrength: look.printStrength,
                 hue: look.hue.isNeutral ? nil : HueCube.cube(for: look.hue, size: 33)),
             grade: LiveGrade(
                 curve: ToneCurve.generated(tone: tone),
@@ -157,25 +150,14 @@ final class LiveChainTests: XCTestCase {
     /// live glow removed entirely the same case reads 46 at the percentile and 179 at the worst,
     /// so the percentile bound is what catches a preview that has lost the stage.
     ///
-    /// A PRINT GETS A WIDER PERCENTILE, and the reason is measured, not assumed. The live tier
+    /// STEEP GRADES GET A WIDER PERCENTILE, and the reason is measured, not assumed. The live tier
     /// resamples and then grades, the render grades and then resamples, and those disagree at hard
-    /// edges; a print roughly doubles the contrast those edges are graded through. Measured with
-    /// ffmpeg alone, no Swift at all, on this frame: grading before or after the resample differs by
-    /// 19 at the 99.9th percentile without the 2383 print and by 49 with it. The case below read mean
-    /// 1.98, percentile 33, worst 57. What catches a wrong print is the mean: dropping the print from
-    /// the live chain read 25.4, and ignoring both strengths read 25.4 as well.
+    /// edges; a steep grade raises the contrast those edges are graded through.
     func testTheLivePictureMatchesTheRender() throws {
         let rig = try rig()
         var withCorrection = rig.look
         withCorrection.correct.exposure = 0.6
         withCorrection.correct.temp = 0.25
-        var withoutLook = rig.look
-        withoutLook.lookLUT = "none"
-        // A print over a weakened look, so both blends are exercised against ffmpeg's own `mix`.
-        var withPrint = rig.look
-        withPrint.lookStrength = 0.7
-        withPrint.printLUT = "kodak_2383_constlmap"
-        withPrint.printStrength = 0.6
         // Strong enough to see, so the tolerance below is spent on the glow rather than on nothing.
         var withHalation = rig.look
         withHalation.halation = Look.Halation(
@@ -189,10 +171,9 @@ final class LiveChainTests: XCTestCase {
             rot: "30,30,0,-20,-20,-20,0,0,0,0,30,30", sat: "1,1,0,-1,-1,-1,0,0,-1,-1,1,1",
             lum: "0,0,0,-0.4,-0.4,-0.4,0,0,0,0,0,0")
 
-        // The percentile each case is held to; see above for why a print needs more.
+        // The percentile each case is held to; see above for why a steep grade needs more.
         let edgeBound = 24.0
-        let printedEdgeBound = 42.0
-        // No rig per case: `compare` leaves the look cube out for a look of "none" by itself.
+        let steepEdgeBound = 42.0
         let cases: [(String, Look, Double)] = [
             ("the shipped look", rig.look, edgeBound),
             // THE ONE THE OLD TIER COULD NOT DO AT ALL. A correction runs before Apple's
@@ -203,15 +184,13 @@ final class LiveChainTests: XCTestCase {
             // resolution copy of the 4K frame with ffmpeg's recursive approximation; this blurs the
             // 480-line frame with a true Gaussian.
             ("halation", withHalation, edgeBound),
-            ("a print over a weakened look", withPrint, printedEdgeBound),
-            ("no film look", withoutLook, edgeBound),
             // The conversion swapped for a film cube, with the engine's metered exposure and white
             // balance in the correction.
             ("a film preset", filmPreset, edgeBound),
-            // Every curve pushed hard, so edges are graded through steep moves, as through a
-            // print: measured percentile 25. With the live hue stage dropped the same case read
+            // Every curve pushed hard, so edges are graded through steep moves: measured
+            // percentile 25. With the live hue stage dropped the same case read
             // mean 13.2, percentile 91, worst 137.
-            ("hue curves", withHue, printedEdgeBound),
+            ("hue curves", withHue, steepEdgeBound),
         ]
         for (name, look, percentileBound) in cases {
             let (mean, p999, worst) = try compare(rig, look: look)

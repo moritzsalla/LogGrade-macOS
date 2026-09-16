@@ -6,7 +6,7 @@
     "This is the DEFAULT image this repo renders, recorded from its own chain. Moving it",
     "is allowed and takes a reason, which lands in recorded_because. See docs/adr/0014."
   ],
-  "recorded_because": "the shipped look drops its halation: the staged path cannot apply a pre-conversion stage, and a glow belongs to the film presets rather than to a neutral default",
+  "recorded_because": "film look and print stages removed; the default render is byte-identical",
   "clip": {
     "name": "IMG_0607.mov",
     "bytes": 399774249
@@ -16,33 +16,22 @@
   "arch": "x86_64",
   "stream_md5": "a377423e79a5e9f661f27cfe75bd4269",
   "inputs": {
-    "look.json": "46d70440c3e98632979f2e79ab920c270bce19b21597d1e6b5595347556317a5",
+    "look.json": "6cf5038a04ee6f13e67d28331dfb4bf02c0dff0be3affbcfb1967a3b00272755",
     "scripts/00-stabilise-detect.sh": "1ba1b43b401ff73902db2304e6d1113da09c49edbcdc649c28d862dd9158a373",
     "scripts/01-baseline.sh": "3ce305c632c8662925275ad8df348f333ea5467ca900c2d620d0c755b54c0e6c",
-    "scripts/02-grade.sh": "c5db045f1b90ff843b00e2e09a5be04fa14fe91c72c41d7fa7c52813ef891ae0",
+    "scripts/02-grade.sh": "025f444d42f2be6f0a94221e489c6fd5d3f5481d8f0617337a4405d8d939fe46",
     "scripts/03-final.sh": "9bd2f2b907cd07ecde1e7468c4d6edcd685e9fb385bc6850aa58f7dfad20a5ae",
     "scripts/applelog.py": "97be85a467ef03b9510a22ee8c3e93aaae02d17cad46397ea3669b8d3215b6ae",
     "scripts/cubefile.py": "b87f276f8579484d43c61683a2ca943acf9af59f7e750a1cc8ed0d53aecec13e",
-    "scripts/grade.sh": "fabb39208e34f536347c7c5d00bee2df56fd36f21479a965ed8b3be8ff2f273e",
-    "scripts/lib.sh": "49f99e6010f6b4b716779a44a27d66b8312d4a868954b32ad4be51a6c3d09939",
+    "scripts/grade.sh": "4791c49633660ed2624a0c49c568883a9ca7c38440eb30964ae751d0740c0792",
+    "scripts/lib.sh": "2f546533913e01c4fa76aef1e9fde5e81c473fec814a89e4f89cb232a126a763",
     "scripts/make-correct-lut.py": "93d79ee78266071ca6ca9195126bc67006cb2b7c66ce7eee44f73b8fec81e521",
-    "scripts/make-filmic-lut.py": "11e1c469a9db30711e18a44ea5c4cbc8a73b7a51ae6141c79b1eee19f90dffab",
+    "scripts/make-filmic-lut.py": "e846834cdef9e82c2c57251b70bcd3b7a150bddbd691562290b914494c8e9135",
     "scripts/make-halation-luts.py": "574e21ef03435c9b6ee8f1d81cde19e06dafdd1bd38a6c54157767f911d3351a",
-    "scripts/make-hue-lut.py": "c5e456d4ad2c308669023e882b7e673bd81618855ceb991c423ea965bbcd7f36",
+    "scripts/make-hue-lut.py": "9db049a38672e22d62f155ce0b5d901d06a8400d2216b84afc232bd48c428d04",
     "scripts/make-rendering-lut.py": "6708834ddb98cd930d4f402b416c35b07720b43049affc5739ef4f5b7ce91693",
     "scripts/make-tone-lut.py": "0d9060944255d01c280202bb8d95cec91c2f3664100f9d238dd49e8abb4f3b33",
     "scripts/solve-exposure.py": "69b2d5fc6a5ae3edb1064c4b900f248628445f8e4373984fce7106dbcc829143",
-    "luts/rendering/neutral.cube": "56a71ca3fb3bad12d9cfab00e5104524a8d90e2c233e1571ce8f3685d32abc34",
-    "luts/looks/kodak_portra_400_nc.cube": "5c90749ee3976a84636d88fcbc7588758f24042dc62e3335515fd18353bd48bc",
-    "luts/looks/negative_color_kodak_portra_160_vc.cube": "9dfc81b0d45773924c88ddd21a00ad27c51ccbcfa455899aa41b1de36a82cc2e",
-    "luts/looks/negative_new_kodak_portra_400.cube": "d370833399f38de59f42386757b18832c68d10a8877c89ad7428e3791ad266d3",
-    "luts/looks/negative_new_kodak_portra_400_++.cube": "143d36a113f0f5d1654044a74503a9437270bfb26922b478805ec6f537b93871",
-    "luts/looks/negative_new_kodak_portra_400_+.cube": "aa0175e243c1b5df122db2f53b6eb27ec037d208d631e23925fe79fa95ea4298",
-    "luts/looks/negative_new_kodak_portra_800_hc.cube": "1c84e7f2fe7d78cd7c5c0d6784684372fc5c3c26e89efe4143ee8415d17fc4ab",
-    "luts/looks/negative_old_kodak_portra_400_uc.cube": "e388d81ae6a38fc6f4891ec4e240211d31e340c48e7a72005c06253e38e97048",
-    "luts/print/fuji_3510_constlmap.cube": "0ce432cf63d0d531c0700d9e41333a4c8c508840ff6bf50eeb4b4cee6b7ef508",
-    "luts/print/fuji_3513_constlmap.cube": "9f497ef6a048178b4b7686c209cd743e756aa83a2b4e9d30a1287b7f1083a982",
-    "luts/print/kodak_2383_constlmap.cube": "242267cf501543c1eefabfe801886d4e9f3ad74fb8634a8123687f3279ee5719",
-    "luts/print/kodak_2393_constlmap.cube": "8eada4ed23949efbc565ba9b17dc1ef4d995d26d8512dd2c3fcb0dd9f76c0786"
+    "luts/rendering/neutral.cube": "56a71ca3fb3bad12d9cfab00e5104524a8d90e2c233e1571ce8f3685d32abc34"
   }
 }

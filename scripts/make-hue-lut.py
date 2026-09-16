@@ -3,8 +3,8 @@
 Generate a 3D .cube LUT for the hue curves: hue against hue, hue against saturation and hue against
 lightness, the per-colour controls a grading app gives as three curves.
 
-WHAT IT ACTS ON. Display-referred Rec.709 code values (BT.1886, gamma 2.4), after the conversion,
-the film look and the print, and before the tone curve: the colours as the stock rendered them, so
+WHAT IT ACTS ON. Display-referred Rec.709 code values (BT.1886, gamma 2.4), after the conversion
+and before the tone curve: the colours as the rendering or the stock left them, so
 "the greens" means the greens on screen. The tone stage that follows is luma-only and merges this
 stage's chroma back unchanged.
 

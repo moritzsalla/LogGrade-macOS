@@ -10,12 +10,11 @@ terms on with any copy, along with the Required Notice line above, so the work
 stays attributed. Selling it, or using it in or for a business, needs separate
 permission — ask.
 
-Two things this licence does NOT cover:
+What this licence does NOT cover:
 
-  * luts/looks/*.cube are not mine. They are from
-    https://github.com/YahiaAngelo/Film-Luts and are MIT licensed; their terms
-    are in luts/looks/LICENSE_FILM_LUTS.txt and they continue to apply,
-    including for commercial use. Nothing here narrows them.
+  * luts/film/*.cube are baked from spektrafilm; its terms are in
+    luts/film/SPEKTRAFILM_LICENSE.txt and they continue to apply. Nothing here
+    narrows them.
 
 ----------------------------------------------------------------------------
 

@@ -270,16 +270,10 @@ def sample_offsets(n):
 def chain_string(tone, sat, warm, look="real"):
     """The production chain, out of lib.sh.
 
-    `look` is "real" for look.json's own choice, which grade_chain loads itself when nothing is
-    set, or anything resolve_look_lut accepts — "none" being the one the floor run uses. Any look
-    other than "real" also means no print: the floor run measures the round trip with no cube in
-    it, and a print named in look.json would otherwise arrive through the same unset-means-ask
-    rule. That rule exists because a chain read out of lib.sh once came back with NO look filter
-    at all; the fingerprint guard is what caught it, which is why it hashes the chain."""
+    `look` no longer changes the chain — the film look stage is gone — and is kept only because the
+    golden records it per case."""
     r = subprocess.run(["bash", "-c",
                         'set -euo pipefail; source "$1"; '
-                        'if [ "$5" != "real" ]; then '
-                        '  LOOK_LUT="$(resolve_look_lut "$5" "$6")"; PRINT_LUT=""; fi; '
                         'grade_chain "$2" "$3" "$4"',
                         "_", LIB, tone, sat, warm, look, ROOT],
                        capture_output=True, text=True)

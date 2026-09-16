@@ -25,8 +25,6 @@ public struct EngineLocation {
     public var halationGenerator: URL {
         root.appendingPathComponent("scripts/make-halation-luts.py")
     }
-    public var lookCubes: URL { root.appendingPathComponent("luts/looks") }
-    public var printCubes: URL { root.appendingPathComponent("luts/print") }
     public var filmCubes: URL { root.appendingPathComponent("luts/film") }
     public var renderingCubes: URL { root.appendingPathComponent("luts/rendering") }
     public var presetFolder: URL { root.appendingPathComponent("presets") }
@@ -119,37 +117,6 @@ public struct EngineLocation {
         Self.resolveTool(name, extraPaths: [root.path], fileManager: fileManager)
     }
 
-    /// The cube for a look's stem, or nil for "none" and for a stem that is not on disk.
-    public func lookCube(
-        named stem: String,
-        fileManager: FileManager = .default
-    ) -> URL? {
-        guard stem != "none", !stem.isEmpty else { return nil }
-        let url = lookCubes.appendingPathComponent("\(stem).cube")
-        return fileManager.fileExists(atPath: url.path) ? url : nil
-    }
-
-    /// The film-emulation cubes on disk, by stem, so the interface offers what is actually there
-    /// rather than a list someone has to remember to update. "none" is not in here: it is the
-    /// absence of a look, and the engine leaves the filter out of the graph for it.
-    public func availableLooks(fileManager: FileManager = .default) -> [String] {
-        stems(in: lookCubes, fileManager: fileManager)
-    }
-
-    /// The print-film cube for a stem, resolved exactly as a look's is but from `luts/print/`.
-    public func printCube(
-        named stem: String,
-        fileManager: FileManager = .default
-    ) -> URL? {
-        guard stem != "none", !stem.isEmpty else { return nil }
-        let url = printCubes.appendingPathComponent("\(stem).cube")
-        return fileManager.fileExists(atPath: url.path) ? url : nil
-    }
-
-    public func availablePrints(fileManager: FileManager = .default) -> [String] {
-        stems(in: printCubes, fileManager: fileManager)
-    }
-
     private func stems(
         in folder: URL, fileManager: FileManager, extension ext: String = "cube"
     ) -> [String] {
@@ -172,7 +139,7 @@ public struct EngineLocation {
                 problems.append(.notExecutable(url))
             }
         }
-        for url in [lookFile, lookCubes] where !fileManager.fileExists(atPath: url.path) {
+        for url in [lookFile] where !fileManager.fileExists(atPath: url.path) {
             problems.append(.missingFile(url))
         }
         // ONLY THE CONVERSION THE LOOK ASKS FOR: every cube a render can reach is committed now

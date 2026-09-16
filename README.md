@@ -167,5 +167,5 @@ Nothing to download: the app renders Apple Log with its own conversion.
 macOS on Intel, bash 3.2. Built for my footage and my deliverables.
 
 [PolyForm Noncommercial 1.0.0](LICENSE). Run it, change it, share it, keep the attribution.
-Commercial use needs permission. The film-emulation cubes in `luts/looks/` and `luts/print/` are
-MIT-licensed work by someone else and keep their own terms.
+Commercial use needs permission. The film stocks in `luts/film/` are baked from spektrafilm and
+keep its terms (`luts/film/SPEKTRAFILM_LICENSE.txt`).

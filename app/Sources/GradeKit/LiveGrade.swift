@@ -17,7 +17,7 @@ import Foundation
 /// bench did for months.
 ///
 /// WHERE IT SITS. This is the second half of the live preview: `LiveChain` puts the source frame
-/// through the correction, Apple's conversion and the film look, and hands the result here. So
+/// through the correction, the conversion and the hue curves, and hands the result here. So
 /// this models exactly the part of the chain that follows those — the tone LUT and the two trims —
 /// and nothing else.
 public struct LiveGrade {

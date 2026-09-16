@@ -11,8 +11,8 @@ import Foundation
 /// makes every control live, and it also means the base frame never needs re-rendering: it is the
 /// clip, not a stage of the grade.
 ///
-/// WHAT IS IMPLEMENTED TWICE, AND WHAT HOLDS EACH COPY. Apple's conversion, the film look and the
-/// print are the same `.cube` files the render hands to `lut3d`. Everything else is a second
+/// WHAT IS IMPLEMENTED TWICE, AND WHAT HOLDS EACH COPY. The conversion and the hue curves are the
+/// same `.cube` files the render hands to `lut3d`. Everything else is a second
 /// implementation, each licensed by its own test: the sampling in `Cube3D` (`Cube3DTests`), the
 /// correction cube in `CorrectionCube` (`CorrectionCubeTests`), the tone curve in
 /// `ToneCurve.generated` (`ToneCurvePortTests`), halation's arithmetic in `LiveHalation`
@@ -20,16 +20,14 @@ import Foundation
 /// against the parity golden). `LiveChainTests` then holds the assembled chain to the engine's own
 /// render of real footage. This type only wires them together in the engine's order.
 public struct LiveChain {
-    /// The colour stages in the order the chain applies them: the correction, halation, Apple's
-    /// conversion, the film look, then the print. Absent stages are simply absent, which is the
-    /// same thing the engine does — it leaves a neutral correction, a neutral halation and a look
-    /// or print of "none" out of the filter graph rather than passing an identity.
+    /// The colour stages in the order the chain applies them: the correction, halation, the
+    /// conversion, then the hue curves. Absent stages are simply absent, which is the same thing the
+    /// engine does — it leaves a neutral correction, halation or hue curve out of the filter graph
+    /// rather than passing an identity.
     ///
     /// SAMPLED IN SEQUENCE, NOT COMPOSED INTO ONE. Flattening them into a single lookup was tried
-    /// and it cost accuracy: the composite has to be resampled on one grid, and the film look's is
-    /// only 13 points, so a steep region of Apple's conversion landed 55 code values out on the
-    /// worst pixel against 48 for the sequence. Three lookups per pixel is 6ms on a preview frame,
-    /// which is not worth an approximation the render does not make.
+    /// and it cost accuracy: the composite has to be resampled on one grid, and a steep region of
+    /// the conversion landed further out on the worst pixel than the sequence does.
     public let stages: ColourStages
     public let grade: LiveGrade
 
@@ -45,61 +43,21 @@ public struct LiveChain {
         public let correction: Cube3D?
         public let halation: LiveHalation?
         public let conversion: Cube3D
-        public let look: Cube3D?
-        public let lookStrength: Float
-        /// The print follows the look, as it does in the engine's `grade_chain`.
-        public let print: Cube3D?
-        public let printStrength: Float
-        /// The hue curves follow the print, as in `grade_chain`.
+        /// The hue curves follow the conversion, as in `grade_chain`.
         public let hue: Cube3D?
 
-        var cubes: [StageCube] { (correction.map { [StageCube($0)] } ?? []) + afterHalation }
-        var afterHalation: [StageCube] {
-            [
-                StageCube(conversion), StageCube(look, lookStrength),
-                StageCube(print, printStrength), StageCube(hue, 1),
-            ]
-            .compactMap { $0 }
-        }
-    }
-
-    /// A cube at a strength. The engine blends a film cube back toward its input with `mix`; this
-    /// is the same weighted sum, and at full strength it is the cube alone, as the engine's graph is.
-    struct StageCube {
-        let cube: Cube3D
-        let strength: Float
-
-        init(_ cube: Cube3D) {
-            self.cube = cube
-            strength = 1
-        }
-
-        /// Nil for an absent cube or a strength of zero, which the engine leaves out of the graph.
-        init?(_ cube: Cube3D?, _ strength: Float) {
-            guard let cube, strength > 0 else { return nil }
-            self.cube = cube
-            self.strength = strength
-        }
-
-        @inline(__always)
-        func sample(_ c: SIMD3<Float>) -> SIMD3<Float> {
-            let full = cube.sample(c)
-            return strength == 1 ? full : c + (full - c) * strength
-        }
+        var cubes: [Cube3D] { (correction.map { [$0] } ?? []) + afterHalation }
+        var afterHalation: [Cube3D] { [conversion] + (hue.map { [$0] } ?? []) }
     }
 
     public static func colourStages(
-        correction: Cube3D?, halation: LiveHalation? = nil,
-        conversion: Cube3D, look: Cube3D?, lookStrength: Double = 1,
-        print: Cube3D? = nil, printStrength: Double = 1, hue: Cube3D? = nil
+        correction: Cube3D?, halation: LiveHalation? = nil, conversion: Cube3D,
+        hue: Cube3D? = nil
     ) -> ColourStages {
-        ColourStages(
-            correction: correction, halation: halation, conversion: conversion, look: look,
-            lookStrength: Float(lookStrength), print: print,
-            printStrength: Float(printStrength), hue: hue)
+        ColourStages(correction: correction, halation: halation, conversion: conversion, hue: hue)
     }
 
-    /// The source through the colour stages only: correction, halation, conversion, look, print.
+    /// The source through the colour stages only: correction, halation, conversion, hue curves.
     /// The result is what the tone curve and the trims act on.
     ///
     /// SEPARATE FROM THE GRADE BECAUSE OF WHAT CHANGES. Dragging midtone or saturation does not
@@ -168,7 +126,7 @@ public struct LiveChain {
         // ACROSS CORES. Each pixel is independent of every other, so this is the one place in the
         // app where the machine's other cores are free money: rows are handed out in bands and no
         // two bands touch the same bytes. Measured at about four times faster on this machine, and
-        // it is the difference between a film look switching in ten milliseconds and in three.
+        // it is the difference between a preset switching in ten milliseconds and in three.
         source.withUnsafeBufferPointer { src in
             rgb.withUnsafeMutableBufferPointer { out in
                 Self.inBands(height: height) { rows in

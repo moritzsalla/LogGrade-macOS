@@ -52,7 +52,7 @@ Query one field at a time with `-of default=nw=1:nk=1`, and validate the answer 
 ## Code rules
 
 - Look values live only in `look.json`. `look()` has no fallbacks: a missing key stops the run.
-- Unset ≠ empty: empty `LOOK_LUT` means no look, unset means read `look.json`.
+- Unset ≠ empty: a loader keeps a set `SAT` or `HUE_LUT`, even empty; only an unset one reads `look.json`.
 - Generated cubes are fresh by content (the `TITLE` stamp), never by mtime.
 - The grade chain, the delivery chain, encode flags, stage paths and generator flags are spelled once, in `lib.sh`. A test fails on a copy.
 - Take a generator's verdict first: `state="$(correction_state)" || exit 1`.

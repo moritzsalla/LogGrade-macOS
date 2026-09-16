@@ -43,10 +43,6 @@ non-technical photographer could use the result.
 
 ## Considered and declined
 
-- **A better Portra LUT.** Every free one is the same 13³ G'MIC grid; the scans are the reference
-  instead. Kodak 2383 is the `print` stage (`luts/print/SOURCE.txt`).
 - **The filmic route.** It lost on colour (`docs/PIPELINE.md`).
-- **Collapsing tone and trims into the shared cube.** 55 code values of error against 48 sampled in
-  sequence, because the look's grid is 13 points.
 - **A native render in AVFoundation.** ADR 0008.
 - **Python linting.** Run `ruff` once if it bothers you.

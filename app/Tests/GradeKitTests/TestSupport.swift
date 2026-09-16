@@ -23,9 +23,6 @@ func stubEngine(script: String) throws -> EngineLocation {
     let scripts = root.appendingPathComponent("scripts")
     try FileManager.default.createDirectory(at: scripts, withIntermediateDirectories: true)
     try FileManager.default.createDirectory(
-        at: root.appendingPathComponent("luts/looks"),
-        withIntermediateDirectories: true)
-    try FileManager.default.createDirectory(
         at: root.appendingPathComponent("luts/rendering"),
         withIntermediateDirectories: true)
     try "{}".write(
@@ -90,12 +87,11 @@ func libSh(_ engine: EngineLocation, _ function: String, _ arguments: [String]) 
 /// A complete look.json, so a test that needs a `Look` does not depend on the checkout's file —
 /// which is re-tuned — and does not repeat the whole key set, which is a contract that grows.
 /// Every key is present because `Look` refuses a missing one, as the engine does.
-func lookFixture(gamma: Double = 2.02, lut: String = "kodak_portra_400_nc") throws -> Look {
+func lookFixture(gamma: Double = 2.02) throws -> Look {
     let json = """
         {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
          "power":"1,1,1","lum_mix":1},
          "halation":{"strength":0,"threshold":1,"radius":0.006,"tint":"1,0.3,0.05"},
-         "look":{"lut":"\(lut)","strength":1},"print":{"lut":"none","strength":1},
          "tone":{"gamma":\(gamma),"pivot":0.39,"contrast":1.09,"toe":0,"shoulder":0.1,"black":0.025},
          "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8,"shadows":1,"highlights":1},
          "hue":{"rot":"0,0,0,0,0,0,0,0,0,0,0,0","sat":"0,0,0,0,0,0,0,0,0,0,0,0","lum":"0,0,0,0,0,0,0,0,0,0,0,0"},

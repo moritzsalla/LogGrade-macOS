@@ -14,7 +14,7 @@ final class LookTests: XCTestCase {
         func field(_ block: String, _ key: String) -> Any? {
             (raw[block] as? [String: Any])?[key]
         }
-        XCTAssertEqual(look.lookLUT, field("look", "lut") as? String)
+        XCTAssertEqual(look.convertCube, field("convert", "cube") as? String)
         XCTAssertEqual(look.tone.gamma, (field("tone", "gamma") as? NSNumber)?.doubleValue)
         XCTAssertEqual(
             look.colour.saturation,
@@ -132,14 +132,10 @@ final class LookTests: XCTestCase {
         var look = try lookFixture()
         look.correct.exposure = 0.5
         look.halation.strength = 0.8
-        look.printLUT = "kodak_2383"
         look.tone.toe = 0.3
         let off = look.bypassing(Set(Look.Stage.allCases))
         XCTAssertTrue(off.correct.isNeutral)
         XCTAssertTrue(off.halation.isNeutral)
-        XCTAssertEqual(off.lookLUT, "none")
-        XCTAssertEqual(off.convertCube, Look.neutralConversion, "the film stock stayed in")
-        XCTAssertEqual(off.printLUT, "none")
         XCTAssertEqual(off.colour, Look.Colour(saturation: 1, warmth: 0))
         XCTAssertEqual(off.grainStrength, 0)
         let curve = ToneCurve.generated(tone: off.tone)
@@ -184,8 +180,6 @@ final class ProjectTests: XCTestCase {
             as? [String: Any] ?? [:]
         preset.removeValue(forKey: "halation")
         preset["grain"] = ["strength": 8]
-        preset.removeValue(forKey: "print")
-        preset["look"] = ["lut": "kodak_portra_400_nc"]
         func project(version: Int) throws -> Data {
             try JSONSerialization.data(withJSONObject: [
                 "version": version, "active_preset": "old",
@@ -201,8 +195,6 @@ final class ProjectTests: XCTestCase {
             opened.clips["IMG_0609"]?.lookOverride?.halation.isNeutral, true,
             "a per-clip look was not upgraded like the preset it sits beside")
         XCTAssertEqual(opened.presets.first?.look.grainShadows, 1, "old grain came back weighted")
-        XCTAssertEqual(opened.presets.first?.look.printLUT, "none", "an old look came back printed")
-        XCTAssertEqual(opened.presets.first?.look.lookStrength, 1, "an old look came back weakened")
         XCTAssertEqual(
             opened.presets.first?.look.grainHighlights, 1, "old grain came back weighted")
         XCTAssertThrowsError(
@@ -212,7 +204,7 @@ final class ProjectTests: XCTestCase {
         let written =
             try JSONSerialization.jsonObject(with: try opened.serialised())
             as? [String: Any]
-        XCTAssertEqual(written?["version"] as? Int, 4)
+        XCTAssertEqual(written?["version"] as? Int, Project.fileVersion)
     }
 
     /// A project saved before the conversion and finish existed rendered through Apple's cube,
@@ -238,6 +230,24 @@ final class ProjectTests: XCTestCase {
         XCTAssertThrowsError(
             try Project(data: try project(version: 3)),
             "a current project missing the conversion was quietly repaired")
+    }
+
+    /// A project saved while the film look and print stages existed opens without them, and does
+    /// not carry the dead blocks forward: `Look` keeps unknown keys verbatim, so only the upgrade
+    /// can drop them.
+    func testAProjectFromBeforeTheFilmLookWasRemovedDropsIt() throws {
+        var preset =
+            try JSONSerialization.jsonObject(with: try aLook().serialised())
+            as? [String: Any] ?? [:]
+        preset["look"] = ["lut": "kodak_portra_400_nc", "strength": 0.4]
+        preset["print"] = ["lut": "kodak_2383_constlmap", "strength": 0.1]
+        let data = try JSONSerialization.data(withJSONObject: [
+            "version": 4, "active_preset": "old", "presets": [["name": "old", "look": preset]],
+        ])
+        let look = try XCTUnwrap(try Project(data: data).presets.first?.look)
+        XCTAssertNil(look.preserved["look"], "the film look block was carried forward")
+        XCTAssertNil(look.preserved["print"], "the print block was carried forward")
+        XCTAssertEqual(look, try aLook(), "the rest of the look changed on the way")
     }
 
     func testACroppedRenderIsBlockedUntilEveryClipHasAnOffset() throws {

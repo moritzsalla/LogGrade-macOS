@@ -172,19 +172,3 @@ final class EngineLocateTests: XCTestCase {
                 workingDirectory: URL(fileURLWithPath: "/")))
     }
 }
-
-final class AvailableLooksTests: XCTestCase {
-    func testTheLookListComesFromTheFolder() throws {
-        let engine = try engineCheckout()
-        let looks = engine.availableLooks()
-        XCTAssertTrue(
-            looks.contains("kodak_portra_400_nc"),
-            "the shipped look should be offered, got \(looks)")
-        XCTAssertFalse(
-            looks.contains("none"),
-            "none is the absence of a look, not a cube on disk")
-        XCTAssertTrue(looks.allSatisfy { !$0.hasSuffix(".cube") }, "offer stems, not filenames")
-        // A folder the engine can point at, so a cube dropped in shows up without a code change.
-        XCTAssertEqual(looks, looks.sorted(), "a stable order, or the menu reshuffles itself")
-    }
-}

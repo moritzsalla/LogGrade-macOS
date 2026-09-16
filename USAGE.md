@@ -33,8 +33,6 @@ Nothing has to be downloaded: `luts/rendering/neutral.cube` is the shipped conve
 | `DELIVERY_BITS=8\|10` | 8: H.264, default. 10: HEVC Main 10, for a destination that keeps it (a Mac, a phone, an editor); social platforms re-encode to 8-bit |
 | `AUDIO_HIGHPASS_HZ=<hz\|0>` | delivered-audio high-pass, default 60; 0 off. Never applied to the master |
 | `CONVERT=<name>` | the conversion out of Apple Log, from `luts/rendering/` or `luts/film/`. Overrides `convert.cube` |
-| `LOOK=<name\|none>` | film cube from `luts/looks/` |
-| `PRINT=<name\|none>` | print cube from `luts/print/` |
 | `GRAIN_STRENGTH=<n>` | overrides `look.json` |
 | `CORRECT_SIZE=<n>` | correction cube size, default 33 |
 | `LOOK_FILE=<path>` | alternative `look.json` |

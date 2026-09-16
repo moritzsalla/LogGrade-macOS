@@ -321,13 +321,6 @@ public struct Look: Equatable {
     public var convertCube: String
     public var correct: Correct
     public var halation: Halation
-    /// The film-emulation cube's stem in `luts/looks/`, or "none".
-    public var lookLUT: String
-    /// How far the look's cube moves the picture, 0 to 1. At 1 there is no blend in the render.
-    public var lookStrength: Double
-    /// The print-film cube's stem in `luts/print/`, or "none". It follows the look.
-    public var printLUT: String
-    public var printStrength: Double
     public var hue: Hue
     public var tone: Tone
     public var colour: Colour
@@ -345,9 +338,7 @@ public struct Look: Equatable {
 
     public static func == (a: Look, b: Look) -> Bool {
         a.convertCube == b.convertCube && a.correct == b.correct && a.halation == b.halation
-            && a.lookLUT == b.lookLUT
-            && a.lookStrength == b.lookStrength && a.printLUT == b.printLUT
-            && a.printStrength == b.printStrength && a.hue == b.hue && a.tone == b.tone
+            && a.hue == b.hue && a.tone == b.tone
             && a.colour == b.colour && a.grainStrength == b.grainStrength
             && a.grainShadows == b.grainShadows && a.grainHighlights == b.grainHighlights
             && a.stabilisationSmoothing == b.stabilisationSmoothing
@@ -399,12 +390,6 @@ public struct Look: Equatable {
             radius: try number(halationBlock, "radius", "halation.radius"),
             tint: try text(halationBlock, "tint", "halation.tint"))
         convertCube = try text(try block("convert"), "cube", "convert.cube")
-        let lookBlock = try block("look")
-        lookLUT = try text(lookBlock, "lut", "look.lut")
-        lookStrength = try number(lookBlock, "strength", "look.strength")
-        let printBlock = try block("print")
-        printLUT = try text(printBlock, "lut", "print.lut")
-        printStrength = try number(printBlock, "strength", "print.strength")
         let hueBlock = try block("hue")
         hue = Hue(
             rot: try text(hueBlock, "rot", "hue.rot"), sat: try text(hueBlock, "sat", "hue.sat"),
@@ -438,8 +423,8 @@ public struct Look: Equatable {
 
         var extra = root
         for known in [
-            "convert", "correct", "halation", "look", "print", "hue", "tone", "colour", "grain",
-            "stabilisation", "match", "finish",
+            "convert", "correct", "halation", "hue", "tone", "colour", "grain", "stabilisation",
+            "match", "finish",
         ] {
             extra.removeValue(forKey: known)
         }
@@ -458,8 +443,6 @@ public struct Look: Equatable {
             "strength": halation.strength, "threshold": halation.threshold,
             "radius": halation.radius, "tint": halation.tint,
         ]
-        root["look"] = ["lut": lookLUT, "strength": lookStrength]
-        root["print"] = ["lut": printLUT, "strength": printStrength]
         root["hue"] = ["rot": hue.rot, "sat": hue.sat, "lum": hue.lum]
         root["tone"] = [
             "gamma": tone.gamma, "pivot": tone.pivot, "contrast": tone.contrast,
@@ -485,8 +468,6 @@ public struct Look: Equatable {
     public enum Stage: String, CaseIterable {
         case correct = "Correct"
         case halation = "Halation"
-        case filmLook = "Film look"
-        case print = "Print"
         case hue = "Hue curves"
         case tone = "Tone"
         case trims = "Trims"
@@ -506,12 +487,6 @@ public struct Look: Equatable {
             switch stage {
             case .correct: out.correct = Correct()
             case .halation: out.halation.strength = 0
-            // A film stock is the conversion too, so switching the look off falls back to the
-            // app's own neutral rendering rather than leaving the stock in the picture.
-            case .filmLook:
-                out.lookLUT = "none"
-                out.convertCube = Self.neutralConversion
-            case .print: out.printLUT = "none"
             case .hue: out.hue = Hue()
             case .tone:
                 out.tone = Tone(
