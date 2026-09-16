@@ -48,7 +48,8 @@ super8_kodachrome64.cube
   an Oklab trim: lightness S-curve (contrast 1.15 about 0.55), chroma x1.8
   faded out below lightness 0.2-0.45 so the warm toe keeps its blue channel,
   a cast toward blue (Oklab b -0.018, rising from neutral black) that takes
-  out the stock's warm cast, and the same gamut fit.
+  out the stock's warm cast, reds turned 14 degrees toward scarlet (they read
+  magenta in sun), sky blue chroma x1.3, and the same gamut fit.
 
 Not reproducible from this repo alone: the bake scripts import spektrafilm
 (GPLv3) and are kept out of it. The TITLE lines record every parameter.
