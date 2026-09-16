@@ -773,7 +773,11 @@ final class GradeModel: ObservableObject {
 
     /// What would stop a render, named before one starts.
     var blockers: [Project.Blocker] {
-        project.blockers(for: clipNames, sizes: frameSizes)
+        project.blockers(for: clipNames)
+    }
+
+    var unframed: Project.Unframed? {
+        project.unframed(for: clipNames, sizes: frameSizes)
     }
 
     func renderPreview() {

@@ -290,21 +290,26 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(folder.path, "/shoot/LogGrade export 2026-09-16 14.05")
     }
 
-    func testACroppedRenderIsBlockedUntilEveryClipHasAnOffset() throws {
+    func testAnUnplacedCropRendersCentredAndIsNamed() throws {
         var project = Project(
             presets: [.init(name: "Portra", look: try aLook())],
             activePreset: "Portra",
             delivery: .init(targets: [.reels, .feed]))
         project.clips["A"] = .init(cropOffset: 750)
         project.clips["B"] = .init(cropOffset: nil)
-        let blockers = project.blockers(for: ["A", "B"])
-        XCTAssertEqual(blockers, [.cropWithoutOffset(deliverables: [.feed], clips: ["B"])])
+        // Named, but not blocking: an unplaced clip renders centred, and says so to the engine.
+        XCTAssertTrue(project.blockers(for: ["A", "B"]).isEmpty)
+        let unframed = try XCTUnwrap(project.unframed(for: ["A", "B"]))
+        XCTAssertEqual(unframed, .init(deliverables: [.feed], clips: ["B"]))
         XCTAssertTrue(
-            blockers[0].description.contains("per-clip"),
-            "the reason matters more than the fact: \(blockers[0].description)")
+            unframed.description.contains("centre"),
+            "the warning must say what the render will do: \(unframed.description)")
+        let look = URL(fileURLWithPath: "/tmp/look.json")
+        XCTAssertEqual(project.environment(for: "B", lookFile: look)["CROP_OFFSET"], "centre")
+        XCTAssertEqual(project.environment(for: "A", lookFile: look)["CROP_OFFSET"], "750")
         // The shape that does not crop needs no offset at all.
         project.delivery.setTarget(.feed, selected: false)
-        XCTAssertTrue(project.blockers(for: ["A", "B"]).isEmpty)
+        XCTAssertNil(project.unframed(for: ["A", "B"]))
     }
 
     func testTheEnvironmentCarriesOnlyVariables() throws {

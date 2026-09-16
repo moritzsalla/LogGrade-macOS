@@ -70,7 +70,7 @@ final class DeliverableTests: XCTestCase {
         XCTAssertTrue(Deliverable.feed.crops(nil))
     }
 
-    func testALandscapeClipBlocksReelsUntilItHasAnOffset() throws {
+    func testALandscapeClipIsNamedAsUnframedForReels() throws {
         let project = Project(
             presets: [.init(name: "p", look: try lookFixture())],
             activePreset: "p", delivery: .init(targets: [.reels]))
@@ -79,8 +79,8 @@ final class DeliverableTests: XCTestCase {
             "TALL": FrameSize(width: 2160, height: 3840),
         ]
         XCTAssertEqual(
-            project.blockers(for: ["WIDE", "TALL"], sizes: sizes),
-            [.cropWithoutOffset(deliverables: [.reels], clips: ["WIDE"])],
+            project.unframed(for: ["WIDE", "TALL"], sizes: sizes),
+            .init(deliverables: [.reels], clips: ["WIDE"]),
             "only the landscape clip has a window to place")
     }
 
@@ -199,13 +199,13 @@ final class DeliverableTests: XCTestCase {
             presets: [.init(name: "p", look: try lookFixture())],
             activePreset: "p", delivery: .init(targets: [centred]))
         XCTAssertEqual(
-            project.blockers(for: ["IMG_0609"]), [],
-            "a centred shape blocked Convert on a framing it ignores")
+            project.unframed(for: ["IMG_0609"]), nil,
+            "a centred shape warned about a framing it ignores")
         project.delivery.targets.append(.feed)
         XCTAssertEqual(
-            project.blockers(for: ["IMG_0609"]),
-            [.cropWithoutOffset(deliverables: [.feed], clips: ["IMG_0609"])],
-            "the blocker must name only the shape that takes the clip's offset")
+            project.unframed(for: ["IMG_0609"]),
+            .init(deliverables: [.feed], clips: ["IMG_0609"]),
+            "the warning must name only the shape that takes the clip's offset")
     }
 
     func testTheEngineReadsACentreShapeAsCentred() throws {
