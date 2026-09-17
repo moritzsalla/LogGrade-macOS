@@ -83,11 +83,18 @@ transform_path()     { printf '%s/stabilisation/%s.trf\n' "$(work_cache "$1")" "
 
 # EVERYTHING THAT IS NOT A DELIVERABLE lives in one folder per work dir: the stabilisation
 # analysis, generated cubes, run reports, preview frames, proofs and the staged path's masters.
-# By default a hidden `.loggrade` in the work dir. LOGGRADE_CACHE puts it elsewhere: the app passes
-# a folder under ~/Library/Caches, one per destination, because the user found the hidden folders
-# in their footage. Still ONE PER WORK DIR either way: a transform is fresh by timestamp against a
-# clip NAME, so two shoots' IMG_0609 must not share one.
-work_cache() { printf '%s\n' "${LOGGRADE_CACHE:-$1/.loggrade}"; }  # <work>
+# By default a hidden `.loggrade` in the work dir. LOGGRADE_CACHE is a ROOT elsewhere (the app passes
+# ~/Library/Caches/LogGrade, because the user found the hidden folders in their footage), under which
+# each work dir gets its own folder, named by a checksum of its path. ONE PER WORK DIR either way: a
+# transform is fresh by timestamp against a clip NAME, so two shoots' IMG_0609 must not share one,
+# even when one exported LOGGRADE_CACHE serves both.
+work_cache() {  # <work>
+	if [ -n "${LOGGRADE_CACHE:-}" ]; then
+		printf '%s/%s\n' "$LOGGRADE_CACHE" "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"
+	else
+		printf '%s/.loggrade\n' "$1"
+	fi
+}
 
 # Where a run's deliverables go: one folder per export, named for when it started, so an export
 # never overwrites an earlier one and the folder says what it is. EXPORT_DIR names it outright,

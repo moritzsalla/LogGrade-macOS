@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 /// One project per shoot, holding what is per-clip and what is shared.
@@ -234,19 +233,12 @@ public struct Project: Equatable {
         return destination.appendingPathComponent("LogGrade export \(format.string(from: date))")
     }
 
-    /// Where the engine keeps its working files for a destination (`LOGGRADE_CACHE`): under the
-    /// user's Caches, not beside the footage, where the user found them. ONE FOLDER PER DESTINATION,
-    /// named by a hash of its path, because the stabilisation cache is fresh against a clip NAME
-    /// and two shoots' IMG_0609 must not share one.
-    public static func cacheFolder(
-        for destination: URL,
-        caches: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-    ) -> URL {
-        let digest = SHA256.hash(data: Data(destination.standardizedFileURL.path.utf8))
-        let name = digest.prefix(8).map { String(format: "%02x", $0) }.joined()
-        return caches.appendingPathComponent("LogGrade", isDirectory: true)
-            .appendingPathComponent(name, isDirectory: true)
-    }
+    /// The root the engine keeps its working files under (`LOGGRADE_CACHE`): the user's Caches,
+    /// not beside the footage, where the user found them. The engine gives each work dir its own
+    /// folder beneath it (`work_cache` in scripts/lib.sh).
+    public static let cacheRoot = FileManager.default.urls(
+        for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("LogGrade", isDirectory: true)
 
     /// Replaces the saved presets with the app's own, keeping the active choice where it still
     /// exists and falling back where it does not.

@@ -51,7 +51,7 @@ Nothing has to be downloaded: `luts/rendering/neutral.cube` is the shipped conve
 | `DRY=1` | plan only |
 | `JSON=1` | one event per line on stdout |
 | `GRADE_WORK_DIR=<path>` | work outside the repo; also read from `.workdir` |
-| `LOGGRADE_CACHE=<path>` | working files (reports, cubes, stabilisation, proofs) here instead of `<work>/.loggrade`; one per work dir. The app uses `~/Library/Caches/LogGrade/<hash>` |
+| `LOGGRADE_CACHE=<path>` | working files (reports, cubes, stabilisation, proofs) under this root instead of `<work>/.loggrade`, one folder per work dir. The app uses `~/Library/Caches/LogGrade` |
 | `ACCEPT_STALE=1` | `03-final.sh`: deliver despite a stale transform |
 
 Presets: `reels` is 9:16, `<clip>_reels-stories_9x16.mp4`; `feed` is 4:5, `<clip>_feed_4x5.mp4`.

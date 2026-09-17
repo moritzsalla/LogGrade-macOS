@@ -323,15 +323,19 @@ _exports() {  # _exports <work>
 
 @test "LOGGRADE_CACHE moves every working file out of the work dir" {
 	# The app points it under ~/Library/Caches: the user found hidden folders in their footage.
-	local work="$BATS_TEST_TMPDIR/cache-elsewhere" cache="$BATS_TEST_TMPDIR/caches/one-shoot"
+	local work="$BATS_TEST_TMPDIR/cache-elsewhere" other="$BATS_TEST_TMPDIR/another-shoot"
+	local root="$BATS_TEST_TMPDIR/caches" a b
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	LOGGRADE_CACHE="$cache" MATCH=0 STAB=0 DRY=1 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+	LOGGRADE_CACHE="$root" MATCH=0 STAB=0 DRY=1 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "$output"
 	[ ! -e "$work/.loggrade" ] || fail "a .loggrade was still made in the work dir: $(ls -A "$work/.loggrade")"
-	[ -n "$(ls "$cache"/reports/run-*.txt 2>/dev/null)" ] || fail "no report in the cache: $(ls -A "$cache" 2>&1)"
-	run bash -c "source '$SCRIPTS/lib.sh'; LOGGRADE_CACHE='$cache' transform_path '$work' CLIP"
-	[ "$output" = "$cache/stabilisation/CLIP.trf" ] || fail "a stage path ignored the cache: $output"
+	[ -n "$(ls "$root"/*/reports/run-*.txt 2>/dev/null)" ] || fail "no report under the cache: $(ls -R "$root" 2>&1)"
+	# One folder per work dir under one root: two shoots' IMG_0609 must not share a transform.
+	a="$(LOGGRADE_CACHE="$root" transform_path "$work" CLIP)"
+	b="$(LOGGRADE_CACHE="$root" transform_path "$other" CLIP)"
+	[[ "$a" == "$root/"*"/stabilisation/CLIP.trf" ]] || fail "a stage path ignored the cache: $a"
+	[ "$a" != "$b" ] || fail "two work dirs share one cache: $a"
 }
 
 @test "every stage checks free space on the volume it writes to" {
