@@ -136,4 +136,38 @@ final class MetalChainTests: XCTestCase {
             )
         }
     }
+
+    /// A cube is never mistaken for one that lived at the same address before it. The GPU chain
+    /// cached cubes by their storage's address, and a builder released between exports freed the
+    /// last preset's cube: the next preset's cube, allocated where it had been, rendered with the old
+    /// one. A Portra 800 export after a Neutral one came out 15 codes darker.
+    func testAPresetSwitchUsesTheNewCube() throws {
+        let engine = try engineCheckout()
+        let metal: MetalChain
+        do { metal = try MetalChain() } catch { throw XCTSkip("\(error)") }
+        let width = 64
+        let height = 64
+        var rng = SplitMix64(seed: 11)
+        let source = (0..<(width * height * 4)).map { i in
+            i % 4 == 3 ? UInt16.max : UInt16(truncatingIfNeeded: rng.next() >> 48)
+        }
+        let neutral = try Look(data: Data(contentsOf: engine.lookFile))
+        let presets = try engine.shippedPresets().map(\.look)
+        for look in ([neutral] + presets + [neutral] + presets) {
+            // A fresh builder each time, as each export makes, so the previous cube is freed.
+            let chain = try ChainBuilder(engine: engine).build(
+                look, metered: nil, frameLongEdge: width, sourceLongEdge: width
+            ).chain
+            let cpu = LiveChain.gradedPixels(
+                try XCTUnwrap(
+                    LiveChain.converted(
+                        rgba16: source, width: width, height: height, through: chain.stages)),
+                with: chain.grade)
+            let gpu = try metal.graded(rgba16: source, width: width, height: height, chain: chain)
+            let worst = zip(cpu, gpu).map { abs(Int($0) - Int($1)) }.max() ?? 0
+            // Random 16-bit input reaches the cubes' steepest cells, which real footage does not:
+            // worst 2 here (Portra 160) against 1 on a frame. The stale cube read 155-170.
+            XCTAssertLessThanOrEqual(worst, 2, "\(look.convertCube): \(worst) codes off")
+        }
+    }
 }

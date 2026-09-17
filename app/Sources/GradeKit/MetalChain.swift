@@ -31,7 +31,11 @@ public final class MetalChain {
     public let device: MTLDevice
     let queue: MTLCommandQueue
     private let pipelines: [String: MTLComputePipelineState]
-    private var cubes: [CubeKey: MTLTexture] = [:]
+    /// Uploaded cubes, by the address of their samples' storage. The entry HOLDS that storage, so
+    /// the address cannot be freed and handed to another cube while the texture is cached: keyed on
+    /// the address alone, a Portra 800 export after a Neutral one rendered with Neutral's cube
+    /// (`MetalChainTests.testAPresetSwitchUsesTheNewCube`).
+    private var cubes: [CubeKey: (samples: [SIMD3<Float>], texture: MTLTexture)] = [:]
     /// The last `graded` call's time on the GPU itself, without upload or readback.
     public private(set) var lastGPUTime: CFTimeInterval = 0
 
@@ -237,7 +241,7 @@ public final class MetalChain {
         let key = cube.samples.withUnsafeBufferPointer {
             CubeKey(address: Int(bitPattern: $0.baseAddress), count: $0.count)
         }
-        if let cached = cubes[key] { return cached }
+        if let cached = cubes[key] { return cached.texture }
         let d = MTLTextureDescriptor()
         d.textureType = .type3D
         d.pixelFormat = .rgba32Float
@@ -260,7 +264,7 @@ public final class MetalChain {
                 bytesPerRow: cube.size * 16, bytesPerImage: cube.size * cube.size * 16)
         }
         if cubes.count > 16 { cubes.removeAll() }
-        cubes[key] = t
+        cubes[key] = (cube.samples, t)
         return t
     }
 
