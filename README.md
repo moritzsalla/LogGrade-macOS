@@ -1,6 +1,7 @@
 # ffgrade-macOS
 
-One stop grading tool for iPhone Apple Log footage. Built for my own shoots.
+One stop grading tool for iPhone ProRes + AppleLog footage. **This is a personal use tool, not a
+product.**
 
 ![LogGrade](docs/app.png)
 
@@ -39,6 +40,8 @@ picture, dragged or settled, with the whole chain, and tests hold it to the expo
 is no preview button and no slower "exact" render replacing it.
 
 → [`adr/0009`](docs/adr/0009_THE_PREVIEW_STAYS_EXACT_UNTIL_THE_DIVERGENCE_IS_EXPLAINED.md)
+
+![Tone ladder](docs/grade-ladder-tone.png)
 
 ---
 
