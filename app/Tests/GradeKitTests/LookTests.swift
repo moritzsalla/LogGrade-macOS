@@ -300,6 +300,22 @@ final class ProjectTests: XCTestCase {
     }
 
     /// One folder per Convert, dated, beside nothing else a person has to recognise.
+    /// Outside the destination, stable for one destination, different for another.
+    func testTheCacheFolderIsOnePerDestinationAndNotBesideTheFootage() {
+        let caches = URL(fileURLWithPath: "/tmp/caches")
+        let shoot = URL(fileURLWithPath: "/Users/x/Movies/Mexico")
+        let a = Project.cacheFolder(for: shoot, caches: caches)
+        XCTAssertEqual(
+            a,
+            Project.cacheFolder(
+                for: URL(fileURLWithPath: "/Users/x/Movies/Mexico/"), caches: caches))
+        XCTAssertNotEqual(
+            a,
+            Project.cacheFolder(for: URL(fileURLWithPath: "/Users/x/Movies/Nina"), caches: caches))
+        XCTAssertTrue(a.path.hasPrefix("/tmp/caches/LogGrade/"), a.path)
+        XCTAssertFalse(a.path.hasPrefix(shoot.path), "the cache landed beside the footage")
+    }
+
     func testAnExportFolderIsNamedForWhenItStarted() throws {
         var parts = DateComponents()
         parts.year = 2026

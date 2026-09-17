@@ -33,6 +33,9 @@
 # Exit: 0 matches or recorded, 1 moved or a render failed, 2 bad usage, 3 skipped (no footage,
 #       no cube, or the golden came from a different ffmpeg or architecture).
 set -euo pipefail
+# The proof is read from the temp work dir's own .loggrade below, so an inherited cache override
+# would send it somewhere this script does not look.
+unset LOGGRADE_CACHE
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GOLDEN="${GOLDEN:-$ROOT/tests/fixtures/render-golden.json}"
 KEEP="$ROOT/dist/golden"
