@@ -132,46 +132,17 @@ final class GradeModel: ObservableObject {
     // Exposure drag, which spent the frame the slider's thumb needed to redraw. `liveQueue` is
     // serial, so no two grades touch them at once.
 
-    /// Conversion cubes, read on first use and kept. There are a handful.
-    private var filmCubeCache: [URL: Cube3D] = [:]
-    /// The correction cube and what it was built from, so an unchanged correction is not rebuilt
-    /// 60 times a second.
-    private var correctionCube: Cube3D?
-    private var correctionFor: Look.Correct?
-    /// The hue curves' cube and the curves it was built from, rebuilt only when a knot moves.
-    private var hueCube: Cube3D?
-    private var hueFor: Look.Hue?
-    private var gradeCurve: ToneCurve?
-    private var gradeCurveFor: Look.Tone?
-    /// The engine's own default (`CORRECT_SIZE` in grade.sh), because the preview has to be
-    /// built from the cube the render builds. The error at 17, 33 and 65 is measured in
-    /// `make-correct-lut.py`.
-    private static let correctionCubeSize = 33
+    /// The chain's stages, built and cached in GradeKit so the export assembles them the same way.
+    private lazy var chainBuilder = ChainBuilder(engine: engine)
     /// The source through the colour stages, kept so a tone or trim drag costs only the curve.
     /// Dragging midtone does not move the correction, the conversion or the hue curves, and those
     /// are most of the work.
     private var convertedFrame: LiveChain.Converted?
-    private var convertedFor: ColourKey?
+    private var convertedFor: ChainBuilder.ColourKey?
     /// Which source pixels `convertedFrame` came from, compared by identity. A new clip replaces
     /// `sourceImage` on the main thread, and this lets the live queue notice that without the main
     /// thread reaching into its cache.
     private var convertedFrom: CGImage?
-
-    /// Everything the colour stages depend on, so a tone drag reuses them and nothing else does.
-    private struct ColourKey: Equatable {
-        let convertCube: String
-        let correct: Look.Correct
-        let halation: Look.Halation
-        let hue: Look.Hue
-
-        /// `look`'s correction is the one the frame was converted with, metering included.
-        init(_ look: Look) {
-            convertCube = look.convertCube
-            correct = look.correct
-            halation = look.halation
-            hue = look.hue
-        }
-    }
 
     /// Everything a graded picture depends on. Two requests with the same key are the same pixels.
     private struct FrameKey: Equatable {
@@ -180,21 +151,6 @@ final class GradeModel: ObservableObject {
         let look: Look
         /// Nil when the grade is unmetered: matching off, or a meter that failed.
         let metered: PreviewRenderer.Metered?
-    }
-
-    /// The rendering or a film stock, cached: each is 65 points, and parsing one costs more than a
-    /// frame does, so it is read once rather than on a drag. Keyed by the resolved file, which is
-    /// unique across `luts/rendering/` and `luts/film/` where a stem need not be.
-    private func conversionCube(for stem: String) -> Cube3D? {
-        filmCube(at: engine.conversionCube(named: stem))
-    }
-
-    private func filmCube(at url: URL?) -> Cube3D? {
-        guard let url else { return nil }
-        if let cached = filmCubeCache[url] { return cached }
-        guard let cube = try? Cube3D(contentsOf: url) else { return nil }
-        filmCubeCache[url] = cube
-        return cube
     }
 
     /// Makes the selected clip's source frame the one graded: from `recentSources` at once, or
@@ -409,72 +365,32 @@ final class GradeModel: ObservableObject {
         _ requested: Look, source: CGImage, metered: PreviewRenderer.Metered?,
         sourceLongEdge: Int?
     ) -> LiveOutcome {
-        // The engine adds what it metered to the look's correction before building the cube, so
-        // the preview does the same.
-        var wanted = requested
-        if let metered { wanted.correct = metered.applied(to: wanted.correct) }
-        guard let conversion = conversionCube(for: wanted.convertCube) else {
-            return .refused("The conversion “\(wanted.convertCube)” couldn’t be read.")
+        let built: ChainBuilder.Built
+        do {
+            built = try chainBuilder.build(
+                requested, metered: metered, frameLongEdge: max(source.width, source.height),
+                sourceLongEdge: sourceLongEdge)
+        } catch let refusal as ChainBuilder.Refusal {
+            return .refused(refusal.description)
+        } catch {
+            return .failed
         }
-        if correctionFor != wanted.correct {
-            correctionCube =
-                wanted.correct.isNeutral
-                ? nil
-                : CorrectionCube.cube(for: wanted.correct, size: Self.correctionCubeSize)
-            correctionFor = wanted.correct
-        }
-        // A correction the engine would refuse gets no picture, rather than a picture of
-        // something it will not render.
-        if !wanted.correct.isNeutral && correctionCube == nil {
-            return .refused("That correction isn’t a value the engine accepts.")
-        }
-        // Built against the SOURCE frame's height, because the look stores the glow's radius as a
-        // fraction of the frame and the frame this grades is the preview-sized one.
-        let halation = LiveHalation(
-            wanted.halation, frameLongEdge: max(source.width, source.height),
-            sourceLongEdge: sourceLongEdge)
-        if !wanted.halation.isNeutral && halation == nil {
-            return .refused("That halation tint isn’t a value the engine accepts.")
-        }
-        if hueFor != wanted.hue {
-            hueCube =
-                wanted.hue.isNeutral
-                ? nil : HueCube.cube(for: wanted.hue, size: Self.correctionCubeSize)
-            hueFor = wanted.hue
-        }
-        if !wanted.hue.isNeutral && hueCube == nil {
-            return .refused("Those hue curves aren’t values the engine accepts.")
-        }
-
-        let tone = wanted.tone
-        if gradeCurveFor != tone {
-            gradeCurve = ToneCurve.generated(tone: tone)
-            gradeCurveFor = tone
-        }
-        guard let curve = gradeCurve else { return .failed }
-
-        let key = ColourKey(wanted)
         let converted: LiveChain.Converted?
-        if convertedFor == key, convertedFrom === source, let reused = convertedFrame {
+        if convertedFor == built.colourKey, convertedFrom === source, let reused = convertedFrame {
             converted = reused
         } else {
-            let stages = LiveChain.colourStages(
-                correction: correctionCube, halation: halation,
-                conversion: conversion, hue: hueCube)
-            converted = LiveChain.converted(source, through: stages)
+            converted = LiveChain.converted(source, through: built.chain.stages)
             if let converted {
                 convertedFrame = converted
-                convertedFor = key
+                convertedFor = built.colourKey
                 convertedFrom = source
             }
         }
-        let grade = LiveGrade(
-            curve: curve, saturation: wanted.colour.saturation,
-            warmth: wanted.colour.warmth)
-        guard let graded = converted.flatMap({ LiveChain.graded($0, with: grade) }) else {
+        guard let graded = converted.flatMap({ LiveChain.graded($0, with: built.chain.grade) })
+        else {
             return .failed
         }
-        return .graded(graded, tone, curve)
+        return .graded(graded, built.tone, built.curve)
     }
 
     // MARK: - metering

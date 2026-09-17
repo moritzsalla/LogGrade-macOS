@@ -111,30 +111,12 @@ final class LiveChainTests: XCTestCase {
     ) {
         let exact = try rig.renderer.render(clip: rig.clip, seconds: 4, look: look, height: height)
         let exactImage = try image(exact)
-        let tone = look.tone
-        // The engine adds what it metered to the correction, as the app does.
-        let correct = exact.metered.applied(to: look.correct)
-        let correction =
-            correct.isNeutral
-            ? nil
-            : CorrectionCube.cube(for: correct, size: 33)
-        let conversion =
-            look.convertCube == rig.look.convertCube
-            ? rig.conversion
-            : try Cube3D(contentsOf: XCTUnwrap(rig.engine.conversionCube(named: look.convertCube)))
         let sourceImage = try source(rig, height: height)
-        let chain = LiveChain(
-            stages: LiveChain.colourStages(
-                correction: correction,
-                halation: LiveHalation(
-                    look.halation,
-                    frameLongEdge: max(sourceImage.width, sourceImage.height),
-                    sourceLongEdge: exact.sourceSize.map { max($0.width, $0.height) }),
-                conversion: conversion,
-                hue: look.hue.isNeutral ? nil : HueCube.cube(for: look.hue, size: 33)),
-            grade: LiveGrade(
-                curve: ToneCurve.generated(tone: tone),
-                saturation: look.colour.saturation, warmth: look.colour.warmth))
+        // Assembled by the builder the app and the export use, so this holds that assembly too.
+        let chain = try ChainBuilder(engine: rig.engine).build(
+            look, metered: exact.metered, frameLongEdge: max(sourceImage.width, sourceImage.height),
+            sourceLongEdge: exact.sourceSize.map { max($0.width, $0.height) }
+        ).chain
         guard let live = chain.apply(to: sourceImage) else {
             throw XCTSkip("the live chain produced no image")
         }
