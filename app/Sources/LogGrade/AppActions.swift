@@ -80,6 +80,6 @@ final class AppActions {
         }
     }
 
-    func convert() { grade?.convert(queue: queue) }
+    func export(_ scope: GradeModel.ExportScope) { grade?.convert(queue: queue, scope) }
     func step(_ direction: Int) { grade?.step(direction, in: clips.usable) }
 }

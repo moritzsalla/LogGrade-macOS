@@ -30,7 +30,7 @@ struct InspectorView: View {
         stage(
             "Adjust", isOn: enabledBinding(.adjust),
             help: "For a clip that needs help, or a small move of your own. Each clip keeps its "
-                + "own. Switched off, every clip is the look as it ships."
+                + "own. Switched off, this clip is the look as it ships."
         ) {
             HStack(spacing: Space.xs) {
                 Toggle(
@@ -57,7 +57,7 @@ struct InspectorView: View {
         .disabled(model.selectedClip == nil)
     }
 
-    /// Per clip, because shake is a property of the shot. Strength is shared across the shoot.
+    /// Per clip, because shake is a property of the shot.
     private var stabilisationStage: some View {
         stage(
             "Stabilisation",
@@ -66,7 +66,7 @@ struct InspectorView: View {
                 + "still; it is in the export."
         ) {
             control(
-                "Strength", $model.look.stabilisationSmoothing, 0...60, format: "%.0f",
+                "Strength", $model.stabilisationStrength, 0...60, format: "%.0f",
                 default: model.defaultLook.stabilisationSmoothing)
         }
         .disabled(model.selectedClip == nil)
@@ -74,21 +74,15 @@ struct InspectorView: View {
 
     private var denoiseStage: some View {
         stage(
-            "Denoise",
-            isOn: Binding(
-                get: { !model.bypassed.contains(.denoise) },
-                set: { on in
-                    // A switch that turns on at strength 0 does nothing, which reads as broken.
-                    if on && model.look.finish.denoise == 0 { model.look.finish.denoise = 1 }
-                    model.setEnabled(.denoise, on)
-                }),
+            "Denoise", isOn: enabledBinding(.denoise),
             help: "For dim and night footage. Daylight footage is already clean. Not shown in "
                 + "the still, and it makes the export slower."
         ) {
             control(
-                "Strength", $model.look.finish.denoise, 0...2, format: "%.1f",
+                "Strength", $model.denoiseStrength, 0...2, format: "%.1f",
                 default: model.defaultLook.finish.denoise)
         }
+        .disabled(model.selectedClip == nil)
     }
 
     /// A switch only. Each preset carries its own grain, and that is the point of it.
@@ -99,6 +93,7 @@ struct InspectorView: View {
                 + "export.",
             last: true
         ) { EmptyView() }
+        .disabled(model.selectedClip == nil)
     }
 
     private func enabledBinding(_ stage: Look.Stage) -> Binding<Bool> {
@@ -113,7 +108,7 @@ struct InspectorView: View {
             Picker(
                 "",
                 selection: Binding(
-                    get: { model.project.activePreset },
+                    get: { model.lookName },
                     set: { model.apply(preset: $0) })
             ) {
                 ForEach(model.project.presets.map(\.name), id: \.self) { Text($0).tag($0) }
@@ -126,7 +121,7 @@ struct InspectorView: View {
             // clip right with no step at all.
             Button("reset") { model.resetAdjustments() }
                 .buttonStyle(.bordered).controlSize(.small).font(Type.label)
-                .disabled(!model.hasAdjustments || model.project.active == nil)
+                .disabled(!model.hasAdjustments)
         }
         .padding(.leading, Self.inset)
         .padding(.bottom, 18)

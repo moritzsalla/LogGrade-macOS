@@ -391,6 +391,58 @@ final class ProjectTests: XCTestCase {
             reread.ignoringAdjustments.clips["A"]?.adjust, Look.Adjust(),
             "the panels that ignore Adjust would rebuild on every drag tick")
     }
+
+    /// Two clips of one project render different looks with different switches, and survive a
+    /// save. A clip given no look follows the one last picked.
+    func testEachClipRendersItsOwnLook() throws {
+        var neutral = try aLook()
+        neutral.convertCube = Look.neutralConversion
+        var film = try aLook()
+        film.convertCube = "portra160"
+        var project = Project(
+            presets: [.init(name: "Neutral", look: neutral), .init(name: "Film", look: film)],
+            activePreset: "Neutral")
+        project.clips["A"] = .init(look: "Film", adjustOff: true, denoise: 1.5, grain: false)
+        project.clips["B"] = .init(stabilisationStrength: 12)
+        let reread = try Project(data: try project.serialised())
+        XCTAssertEqual(reread.clips, project.clips)
+
+        let a = try XCTUnwrap(reread.look(for: "A"))
+        XCTAssertEqual(a.convertCube, "portra160")
+        XCTAssertEqual(a.finish.denoise, 1.5)
+        XCTAssertEqual(a.grainStrength, 0, "grain switched off on a film look")
+        XCTAssertEqual(reread.bypassed(for: "A"), [.adjust, .grain])
+        let look = URL(fileURLWithPath: "/tmp/look.json")
+        XCTAssertEqual(
+            reread.environment(for: "A", lookFile: look)["MATCH"], "0",
+            "Adjust off takes metering with it")
+
+        let b = try XCTUnwrap(reread.look(for: "B"))
+        XCTAssertEqual(b.convertCube, Look.neutralConversion)
+        XCTAssertEqual(b.finish.denoise, 0, "denoise is off unless the clip turned it on")
+        XCTAssertEqual(b.stabilisationSmoothing, 12)
+        XCTAssertEqual(reread.bypassed(for: "B"), [.denoise, .grain])
+
+        var followed = reread
+        followed.activePreset = "Film"
+        XCTAssertEqual(followed.look(for: "B")?.convertCube, "portra160")
+        XCTAssertFalse(followed.bypassed(for: "B").contains(.grain), "grain follows a film look")
+        XCTAssertEqual(followed.look(for: "A")?.finish.denoise, 1.5)
+    }
+
+    /// A clip whose saved look the app no longer ships falls back, rather than blocking export.
+    func testAClipsDeletedLookFallsBackWhenOpened() throws {
+        var project = Project(presets: [], activePreset: "Neutral")
+        project.clips["A"] = .init(look: "Mamiya RZ67 Portra 400")
+        project.clips["B"] = .init(look: "Film")
+        project.adopt(
+            presets: [
+                .init(name: "Neutral", look: try aLook()), .init(name: "Film", look: try aLook()),
+            ],
+            fallback: "Neutral")
+        XCTAssertEqual(project.clips["A"]?.look, "Neutral")
+        XCTAssertEqual(project.clips["B"]?.look, "Film")
+    }
 }
 
 /// The loop the unit tests cannot close: a look written by the app, handed to the real engine,
