@@ -1,7 +1,8 @@
 # Usage
 
 Every knob is an environment variable. The app sets the same ones and never builds a filter graph
-itself ([ADR 0008](docs/adr/0008_THE_APP_DRIVES_THE_CHAIN_AND_NEVER_REBUILDS_IT.md)).
+itself. It renders an H.264 export on the GPU instead where it can, held to this engine's output
+([ADR 0008](docs/adr/0008_THE_APP_DRIVES_THE_CHAIN_AND_NEVER_REBUILDS_IT.md)).
 
 ## Commands
 

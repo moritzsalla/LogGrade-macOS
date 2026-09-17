@@ -1,4 +1,4 @@
-# ffgrade-macOS
+# LogGrade-macOS
 
 One stop grading tool for iPhone ProRes + AppleLog footage. **This is a personal use tool, not a
 product.**
@@ -26,7 +26,8 @@ of them is quick: footage in, a good look, a file out.
 ```
 
 Build it optimised: the preview grades every frame with the whole chain, and a debug build is
-unusable. → [`USAGE.md`](USAGE.md) for the controls and the CLI underneath.
+unusable. H.264 exports render on the GPU where they can, about 1.5 times faster than the ffmpeg
+engine they are tested against, which renders everything else. → [`USAGE.md`](USAGE.md) for the controls and the CLI underneath.
 
 ---
 

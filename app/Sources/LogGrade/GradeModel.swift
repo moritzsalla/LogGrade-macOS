@@ -684,19 +684,28 @@ final class GradeModel: ObservableObject {
         queue.enqueue(clips.map { (url: $0.url, stem: $0.stem, frames: $0.fields?.frameCount) })
         // Off the main thread: `start` returns only when the whole queue has run.
         DispatchQueue.global(qos: .userInitiated).async {
-            queue.start(environment: { stem in
-                // A stem with no file here can only be one queued after this export started.
-                // It gets a path that does not exist, which the engine refuses by name, rather
-                // than another clip's grade or a crash.
-                let file =
-                    lookFiles[stem]
-                    ?? missingLook.appendingPathComponent("no-look-for-\(stem).json")
-                var env = project.environment(for: stem, lookFile: file)
-                env["GRADE_WORK_DIR"] = destination.path
-                env["LOGGRADE_CACHE"] = Project.cacheRoot.path
-                env["EXPORT_DIR"] = export.path
-                return env
-            })
+            queue.start(
+                environment: { stem in
+                    // A stem with no file here can only be one queued after this export started.
+                    // It gets a path that does not exist, which the engine refuses by name, rather
+                    // than another clip's grade or a crash.
+                    let file =
+                        lookFiles[stem]
+                        ?? missingLook.appendingPathComponent("no-look-for-\(stem).json")
+                    var env = project.environment(for: stem, lookFile: file)
+                    env["GRADE_WORK_DIR"] = destination.path
+                    env["LOGGRADE_CACHE"] = Project.cacheRoot.path
+                    env["EXPORT_DIR"] = export.path
+                    return env
+                },
+                // The native export where it can take the clip, the engine otherwise: the same
+                // effective look the engine's look file holds, into the same folder.
+                native: { stem in
+                    guard let look = project.look(for: stem) else { return nil }
+                    return RenderQueue.NativeRequest(
+                        look: look, delivery: project.delivery,
+                        clip: project.settings(for: stem), outputDirectory: export)
+                })
         }
     }
 

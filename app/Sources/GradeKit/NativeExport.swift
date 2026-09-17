@@ -27,6 +27,7 @@ public enum NativeExport {
         case writer(String)
         case naming(String)
         case frame
+        case cancelled
 
         public var description: String {
             switch self {
@@ -36,6 +37,7 @@ public enum NativeExport {
             case .writer(let s): return "encoding failed: \(s)"
             case .naming(let s): return "no file name for \(s)"
             case .frame: return "a frame could not be graded"
+            case .cancelled: return "cancelled"
             }
         }
     }
@@ -54,7 +56,8 @@ public enum NativeExport {
 
     public static func export(
         source: URL, look: Look, delivery: Project.Delivery, clip: Project.ClipSettings,
-        proofSeconds: Double?, outputDirectory: URL, engine: EngineLocation
+        proofSeconds: Double?, outputDirectory: URL, engine: EngineLocation,
+        progress: ((Int) -> Void)? = nil, isCancelled: (() -> Bool)? = nil
     ) throws -> [URL] {
         if let why = unsupported(look: look, delivery: delivery, clip: clip) {
             throw Failure.unsupported(why)
@@ -137,6 +140,11 @@ public enum NativeExport {
         var index = 0
         var failure: Error?
         while failure == nil, let sample = video.copyNextSampleBuffer() {
+            if isCancelled?() == true {
+                failure = Failure.cancelled
+                break
+            }
+            progress?(index)
             guard let buffer = CMSampleBufferGetImageBuffer(sample) else { continue }
             let time = CMSampleBufferGetPresentationTimeStamp(sample)
             do {

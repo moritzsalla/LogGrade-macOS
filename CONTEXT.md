@@ -98,5 +98,8 @@ stretched (ADR 0010). _Avoid_: stretched
 **Engine**: `scripts/`, the LUTs and `look.json`. It owns the image; the app sets variables, spawns it
 and reads its events, and never builds a filter graph. _Avoid_: backend
 
+**Native export**: an export rendered in the app on the GPU instead of by the engine, for the
+deliverables it can take, held to the engine's file. _Avoid_: fast export, GPU render
+
 **Grading session**: one sitting over a shoot: a look picked, clips adjusted and framed, saved as a
 project.
