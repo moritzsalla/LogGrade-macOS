@@ -54,6 +54,10 @@ final class ExportParityTests: XCTestCase {
         let rig = try Rig()
         let reference = try rig.renders(engineExporter(rig.engine))
         let candidate = try Self.candidate.map { try rig.renders($0(rig.engine)) } ?? reference
+        if Self.candidate != nil {
+            // The CPU path is a silent fallback; a parity pass on it says nothing about the GPU's.
+            XCTAssertTrue(NativeExport.lastRenderedOnGPU, "the native export fell back to the CPU")
+        }
         let m = try Measurement(reference: reference, candidate: candidate)
 
         XCTAssertEqual(

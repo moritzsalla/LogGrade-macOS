@@ -97,24 +97,26 @@ public final class MetalChain {
 
     /// Encodes the whole chain from `source` (normalised log RGB) into `out` (8-bit RGBA), for a
     /// caller that keeps its frames on the GPU.
+    ///
+    /// `turns` quarter turns clockwise are applied as the correction reads the source, so a
+    /// sideways source is `out` with its sides swapped and no pass is spent on turning it.
     func encode(
-        source: MTLTexture, into out: MTLTexture, chain: LiveChain, buffer: MTLCommandBuffer
-    )
-        throws
-    {
-        let width = source.width
-        let height = source.height
+        source: MTLTexture, into out: MTLTexture, chain: LiveChain, turns: Int = 0,
+        buffer: MTLCommandBuffer
+    ) throws {
+        let width = out.width
+        let height = out.height
         let stages = chain.stages
-        let log = try texture(.rgba32Float, width, height, usage: [.shaderRead, .shaderWrite])
+        let log = try scratch("log", .rgba32Float, width, height)
         let identity = try cubeTexture(nil)
         try run("correct", buffer, width, height) { e in
             e.setTexture(source, index: 0)
             e.setTexture(log, index: 1)
             e.setTexture(try self.cubeTexture(stages.correction) ?? identity!, index: 2)
-            var use: Int32 = stages.correction == nil ? 0 : 1
-            var size = Int32(stages.correction?.size ?? 2)
-            e.setBytes(&use, length: 4, index: 0)
-            e.setBytes(&size, length: 4, index: 1)
+            var params = SIMD3<Int32>(
+                stages.correction == nil ? 0 : 1, Int32(stages.correction?.size ?? 2),
+                Int32(turns % 4))
+            e.setBytes(&params, length: MemoryLayout<SIMD3<Int32>>.stride, index: 0)
         }
 
         var converting = log
@@ -122,7 +124,7 @@ public final class MetalChain {
             converting = try halated(log, halation, buffer)
         }
 
-        let codes = try texture(.rgba32Float, width, height, usage: [.shaderRead, .shaderWrite])
+        let codes = try scratch("codes", .rgba32Float, width, height)
         try run("convert", buffer, width, height) { e in
             e.setTexture(converting, index: 0)
             e.setTexture(codes, index: 1)
@@ -155,7 +157,7 @@ public final class MetalChain {
         let f = h.reduction
         let sw = max(1, width / f)
         let sh = max(1, height / f)
-        let highlight = try texture(.r32Float, sw, sh, usage: [.shaderRead, .shaderWrite])
+        let highlight = try scratch("highlight", .r32Float, sw, sh)
         var params = SIMD3<Float>(Float(h.threshold), 0, 0)
         try run("highlight", buffer, sw, sh) { e in
             e.setTexture(log, index: 0)
@@ -170,14 +172,14 @@ public final class MetalChain {
             let total = kernel.reduce(0, +)
             kernel = kernel.map { $0 / total }
             var r = Int32(radius)
-            let across = try texture(.r32Float, sw, sh, usage: [.shaderRead, .shaderWrite])
+            let across = try scratch("across", .r32Float, sw, sh)
             try run("blurAcross", buffer, sw, sh) { e in
                 e.setTexture(highlight, index: 0)
                 e.setTexture(across, index: 1)
                 e.setBytes(&kernel, length: kernel.count * 4, index: 0)
                 e.setBytes(&r, length: 4, index: 1)
             }
-            blurred = try texture(.r32Float, sw, sh, usage: [.shaderRead, .shaderWrite])
+            blurred = try scratch("blurred", .r32Float, sw, sh)
             try run("blurDown", buffer, sw, sh) { e in
                 e.setTexture(across, index: 0)
                 e.setTexture(blurred, index: 1)
@@ -185,7 +187,7 @@ public final class MetalChain {
                 e.setBytes(&r, length: 4, index: 1)
             }
         }
-        let lit = try texture(.rgba32Float, width, height, usage: [.shaderRead, .shaderWrite])
+        let lit = try scratch("lit", .rgba32Float, width, height)
         var gain = h.tint * h.strength
         try run("glow", buffer, width, height) { e in
             e.setTexture(log, index: 0)
@@ -199,13 +201,28 @@ public final class MetalChain {
 
     // MARK: plumbing
 
-    func texture(_ format: MTLPixelFormat, _ w: Int, _ h: Int, usage: MTLTextureUsage) throws
-        -> MTLTexture
+    private var scratches: [String: MTLTexture] = [:]
+
+    /// A working texture kept between frames: every frame of an export has the same sizes, and
+    /// making seven textures a frame was a measurable share of the time.
+    func scratch(_ name: String, _ format: MTLPixelFormat, _ w: Int, _ h: Int) throws -> MTLTexture
     {
+        if let t = scratches[name], t.width == w, t.height == h, t.pixelFormat == format {
+            return t
+        }
+        let t = try texture(format, w, h, usage: [.shaderRead, .shaderWrite], storage: .private)
+        scratches[name] = t
+        return t
+    }
+
+    func texture(
+        _ format: MTLPixelFormat, _ w: Int, _ h: Int, usage: MTLTextureUsage,
+        storage: MTLStorageMode = .managed
+    ) throws -> MTLTexture {
         let d = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: format, width: w, height: h, mipmapped: false)
         d.usage = usage
-        d.storageMode = .managed
+        d.storageMode = storage
         guard let t = device.makeTexture(descriptor: d) else { throw Failure.texture }
         return t
     }
@@ -325,11 +342,18 @@ public final class MetalChain {
         kernel void correct(texture2d<float, access::read> src [[texture(0)]],
                             texture2d<float, access::write> dst [[texture(1)]],
                             texture3d<float, access::read> cube [[texture(2)]],
-                            constant int &use [[buffer(0)]], constant int &size [[buffer(1)]],
+                            constant int3 &params [[buffer(0)]],
                             uint2 id [[thread_position_in_grid]]) {
-            if (id.x >= dst.get_width() || id.y >= dst.get_height()) return;
-            float3 c = src.read(id).rgb;
-            if (use != 0) c = tetra(cube, size, c);
+            uint w = dst.get_width(), h = dst.get_height();
+            if (id.x >= w || id.y >= h) return;
+            // The source pixel this upright one comes from, the source turned params.z quarter
+            // turns clockwise to stand it up.
+            uint2 at = id;
+            if (params.z == 1) at = uint2(id.y, w - 1 - id.x);
+            else if (params.z == 2) at = uint2(w - 1 - id.x, h - 1 - id.y);
+            else if (params.z == 3) at = uint2(h - 1 - id.y, id.x);
+            float3 c = src.read(at).rgb;
+            if (params.x != 0) c = tetra(cube, params.y, c);
             dst.write(float4(c, 1), id);
         }
 

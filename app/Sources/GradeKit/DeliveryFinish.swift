@@ -32,21 +32,28 @@ public struct DeliveryFinish {
 
     /// `unsharp` on luma at the engine's radius, clamped to within `limit` code values of the
     /// unsharpened picture's 3x3 minimum and maximum (`erosion`, `dilation`, `maskedclamp`).
-    func sharpened(_ y: inout [UInt8], width: Int, height: Int) {
+    /// The sharpener's integers at a size, shared with the GPU finish: binomial passes, the shift
+    /// that normalises them (weights sum to 4^steps per axis), the amount in 1/65536ths as ffmpeg's
+    /// `unsharp` holds it, and the clamp's allowance past the local range.
+    func sharpenGeometry(width: Int, height: Int) -> (
+        steps: Int, shift: Int, amount: Int, limit: Int
+    ) {
         let short = min(width, height)
         var r = 5 * short / 1080
         if r < 3 { r = 3 }
         if r % 2 == 0 { r += 1 }
-        let limit = max(1, Int(sharpen * 2 + 0.5))
-        let steps = r / 2
+        return (
+            r / 2, 4 * (r / 2), Int((sharpen * 65536).rounded()), max(1, Int(sharpen * 2 + 0.5))
+        )
+    }
+
+    func sharpened(_ y: inout [UInt8], width: Int, height: Int) {
+        let (steps, shiftBy, amount, limit) = sharpenGeometry(width: width, height: height)
         let original = y
-        // Binomial weights sum to 4^steps per axis, so the blur is `blur / 16^steps`.
         let blur = Self.binomial(original, width, height, steps)
-        let shift = UInt32(4 * steps)
+        let shift = UInt32(shiftBy)
         let lo = Self.extreme(original, width, height, max: false)
         let hi = Self.extreme(original, width, height, max: true)
-        // Amount in 1/65536ths, as ffmpeg's `unsharp` holds it.
-        let amount = Int((sharpen * 65536).rounded())
         let half = 1 << (Int(shift) - 1)
         original.withUnsafeBufferPointer { o in
             blur.withUnsafeBufferPointer { b in
@@ -146,7 +153,19 @@ public struct DeliveryFinish {
     /// Gaussian noise on a plate half the picture's size at a 1080 short edge (`grain_plate`), sd
     /// strength/√3 rounded to whole code values as ffmpeg's `noise` makes it, scaled up bilinearly,
     /// faded toward zero by the brightness weight, and added (`grainmerge` about 128).
-    func grained(_ y: inout [UInt8], width: Int, height: Int, frame: Int) {
+    /// A frame's grain before it meets the picture: the plate's whole code values and, for every
+    /// output column and row, the two plate samples it falls between and the weight of the second
+    /// in 1/256ths. Shared with the GPU finish, so both add the same grain.
+    public struct Plate {
+        public let width: Int
+        public let height: Int
+        public let values: [Int32]
+        public let columns: [(Int, Int, Int32)]
+        public let rows: [(Int, Int, Int32)]
+    }
+
+    public func plate(width: Int, height: Int, frame: Int) -> Plate? {
+        guard grainStrength > 0 else { return nil }
         let short = min(width, height)
         var pw = width * 540 / short
         var ph = height * 540 / short
@@ -154,16 +173,23 @@ public struct DeliveryFinish {
             pw = width
             ph = height
         }
-        var rng = SplitMix64(seed: 0x9E37_79B9_7F4A_7C15 &+ UInt64(frame))
+        // A generator per row, seeded by frame and row, so the rows fill across cores: one
+        // generator for the plate was 30 ms of a 1080x1920 frame.
         let sd = grainStrength / 3.0.squareRoot()
-        var plate = [Int32](repeating: 0, count: pw * ph)
-        for i in 0..<plate.count {
-            plate[i] = Int32(min(127, max(-128, (rng.gaussian() * sd).rounded())))
+        var values = [Int32](repeating: 0, count: pw * ph)
+        values.withUnsafeMutableBufferPointer { out in
+            LiveChain.inBands(height: ph) { rows in
+                for row in rows {
+                    var rng = SplitMix64(
+                        seed: 0x9E37_79B9_7F4A_7C15 &+ UInt64(frame) &* 0x1_0000_0001
+                            &+ UInt64(row))
+                    for x in 0..<pw {
+                        out[row * pw + x] = Int32(
+                            min(127, max(-128, (rng.gaussian() * sd).rounded())))
+                    }
+                }
+            }
         }
-        // The mask per code value, in 1/255ths, as `lutyuv` tabulates it.
-        let weighted = !(grainShadows == 1 && grainHighlights == 1)
-        let mask = (0..<256).map { Int32((255 * weight(Double($0))).rounded()) }
-        // Bilinear sample positions in 1/256ths, per column and per row.
         func positions(_ out: Int, _ plateSize: Int) -> [(Int, Int, Int32)] {
             let s = Double(plateSize) / Double(out)
             return (0..<out).map { i in
@@ -172,9 +198,28 @@ public struct DeliveryFinish {
                 return (i0, min(plateSize - 1, i0 + 1), Int32(((f - Double(i0)) * 256).rounded()))
             }
         }
-        let cols = positions(width, pw)
-        let rowsAt = positions(height, ph)
-        plate.withUnsafeBufferPointer { p in
+        return Plate(
+            width: pw, height: ph, values: values, columns: positions(width, pw),
+            rows: positions(height, ph))
+    }
+
+    /// Whether the grain is faded by brightness at all; both weights at 1 leave the mask out.
+    public var isWeighted: Bool { !(grainShadows == 1 && grainHighlights == 1) }
+
+    /// The mask per code value, in 1/255ths, as `lutyuv` tabulates it.
+    public var mask: [Int32] { (0..<256).map { Int32((255 * weight(Double($0))).rounded()) } }
+
+    /// Gaussian noise on a plate half the picture's size at a 1080 short edge (`grain_plate`), sd
+    /// strength/√3 rounded to whole code values as ffmpeg's `noise` makes it, scaled up bilinearly,
+    /// faded toward zero by the brightness weight, and added (`grainmerge` about 128).
+    func grained(_ y: inout [UInt8], width: Int, height: Int, frame: Int) {
+        guard let plate = plate(width: width, height: height, frame: frame) else { return }
+        let pw = plate.width
+        let weighted = isWeighted
+        let mask = self.mask
+        let cols = plate.columns
+        let rowsAt = plate.rows
+        plate.values.withUnsafeBufferPointer { p in
             mask.withUnsafeBufferPointer { m in
                 y.withUnsafeMutableBufferPointer { out in
                     LiveChain.inBands(height: height) { band in
