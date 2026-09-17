@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shared safety helpers for every stage script. Source this, don't copy it —
+# Shared safety helpers for grade.sh and everything that sources it. Source this, don't copy it —
 # the retag/verify pattern exists because both mistakes below actually happened once:
 #
 #   1. prores_ks (and libx264) don't reliably stamp -color_primaries/-color_trc/-colorspace
@@ -12,12 +12,12 @@
 #      following `mv` isn't conditional on success, it moves the failed (0-byte) output over a
 #      good file, destroying it. This happened for real and cost one full re-render.
 #
-# Every stage script below must: encode -> check output is non-empty -> verify/fix tags via
+# Every render must: encode -> check output is non-empty -> verify/fix tags via
 # explicit stream mapping -> mv only after confirming the retag succeeded.
 
 set -euo pipefail
 
-# Resolved relative to lib.sh itself, so every stage sees the same file regardless of cwd.
+# Resolved relative to lib.sh itself, so every caller sees the same file regardless of cwd.
 LIB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOOK_FILE="${LOOK_FILE:-$LIB_ROOT/look.json}"
 
@@ -73,16 +73,12 @@ probe_scene_exposure() {  # probe_scene_exposure <src> <reference-stops>
 		-f rawvideo - 2>/dev/null | "$LIB_ROOT/scripts/solve-exposure.py" 160 160 "$2"
 }
 
-# Where each stage writes, by clip. Spelled once because two stages read what a third wrote, and a
-# path that differs by one component is a cache nobody hits: grade.sh once built the transform path
-# from the wrong root and paid a second analysis per clip to redo what stage 00 had already done.
-source_path()        { printf '%s/src/%s.mov\n' "$1" "$2"; }                      # <work> <clip>
-baseline_path()      { printf '%s/baseline/%s_baseline.mov\n' "$(work_cache "$1")" "$2"; }  # <work> <clip>
-graded_master_path() { printf '%s/masters/%s_graded.mov\n' "$(work_cache "$1")" "$2"; }    # <work> <clip>
-transform_path()     { printf '%s/stabilisation/%s.trf\n' "$(work_cache "$1")" "$2"; }     # <work> <clip>
+# Where a clip's transform is cached. Spelled once because a path that differs by one component is
+# a cache nobody hits: grade.sh once built it from the wrong root and paid a second analysis per clip.
+transform_path() { printf '%s/stabilisation/%s.trf\n' "$(work_cache "$1")" "$2"; }  # <work> <clip>
 
 # EVERYTHING THAT IS NOT A DELIVERABLE lives in one folder per work dir: the stabilisation
-# analysis, generated cubes, run reports, preview frames, proofs and the staged path's masters.
+# analysis, generated cubes, run reports, preview frames and proofs.
 # By default a hidden `.loggrade` in the work dir. LOGGRADE_CACHE is a ROOT elsewhere (the app passes
 # ~/Library/Caches/LogGrade, because the user found the hidden folders in their footage), under which
 # each work dir gets its own folder, named by a checksum of its path. ONE PER WORK DIR either way: a
@@ -175,9 +171,7 @@ safe_retag() {
 
 	# VERIFY BEFORE REWRITING. This function exists because encoders don't reliably stamp the
 	# tags — but they don't reliably get them wrong either, and remuxing unconditionally meant a
-	# full read+write of two ~2.3GB ProRes masters per clip on the staged path, roughly 9GB of I/O
-	# to change nothing. The header above has always described verify-then-fix; this makes the code
-	# agree with it. Every caller that needs -movflags +faststart also passes it at encode time, so
+	# full read and write of every file to change nothing. Every caller that needs -movflags +faststart also passes it at encode time, so
 	# skipping the remux loses nothing.
 	if verify_bt709 "$file" 2>/dev/null; then
 		return 0
@@ -212,8 +206,8 @@ check_disk_space() {
 	local dir="$1"
 	local need_gb="$2"
 	local probe="$dir" avail_kb avail_gb
-	# The stages call this BEFORE `mkdir -p`, so on a first run into a fresh work dir the path does
-	# not exist yet. df then fails, the arithmetic below gets an empty operand, and the stage dies
+	# grade.sh calls this BEFORE `mkdir -p`, so on a first run into a fresh work dir the path does
+	# not exist yet. df then fails, the arithmetic below gets an empty operand, and the run dies
 	# with a bash syntax error instead of a disk verdict — the guard aborting the run it exists to
 	# protect. Walk up to the nearest existing ancestor: it sits on the same volume, and the volume
 	# is the only thing being measured.
@@ -303,10 +297,9 @@ require_numbers() {  # require_numbers <label> <value>  -> echoes the value, or 
 # (`lut1d=file='<cache>/<clip>_tone.cube'`) and the transform (`vidstabtransform=input='...'`).
 #
 # Two refusals, for two different failures:
-#   - `/` makes the name a path. Stage outputs are built as "<folder>/${CLIP}_x.mov", and
-#     since the stages started calling `mkdir -p "$(dirname "$OUT")"` — needed once the work dir
-#     stopped being the repo — a traversing name is no longer stopped by the directory not
-#     existing. It gets created.
+#   - `/` makes the name a path. Outputs are built as "<folder>/${CLIP}_x.ext" and their folders
+#     are made with `mkdir -p`, so a traversing name is not stopped by the directory not existing.
+#     It gets created.
 #   - A quote or a filter separator closes ffmpeg's `file='...'` quoting from the inside.
 #
 # Refuse rather than sanitise. Rewriting someone's argument into a different one silently renders
@@ -434,8 +427,8 @@ fmt_ms() {  # fmt_ms <ms>  -> "4.217s" or "3m12.004s"
 }
 
 # Writes to the run report and nowhere else. `say` prints to the terminal as well; these lines are
-# too long and too many for that — a filter graph is thousands of characters. Scripts that keep no
-# report (the staged ones) leave REPORT unset, and then this does nothing.
+# too long and too many for that — a filter graph is thousands of characters. A caller that keeps
+# no report leaves REPORT unset, and then this does nothing.
 report_line() {
 	[ -n "${REPORT:-}" ] || return 0
 	printf '%s\n' "$*" >> "$REPORT"
@@ -526,32 +519,10 @@ look() {  # look <jq-path>
 	printf '%s\n' "$v"
 }
 
-# The shipped tone LUT is GENERATED from look.json's tone block, so the .cube can never silently
-# disagree with the numbers that claim to describe it.
-#
-# FRESHNESS IS BY CONTENT, NOT MTIME. This used to skip regeneration when the cube was newer than
-# look.json. git does not preserve mtimes, so on every fresh clone the committed cube lands newer
-# and is trusted forever — verified: with look.json backdated and contrast changed to 0.5, the
-# stale curve stayed in place in silence, and the guarantee held only on the machine where the edit
-# happened. make-tone-lut.py now stamps its parameters into the cube's TITLE and skips the write
-# itself when they already match, so this calls it unconditionally. Generating the 4096-entry
-# table costs ~0.1s; there was never anything to save by guessing.
-ensure_tone_lut() {
-	# Two lines, not one: bash expands the whole command line BEFORE `local` performs its
-	# assignments, so `local a="$1" b="$a"` sees an unset $a — and under `set -u` that aborts.
-	local root="$1" gamma shape
-	local cube="$root/luts/tone/shipped.cube"
-	gamma="$(require_number tone.gamma "$(look .tone.gamma)")" || return 1
-	shape="$(tone_shape_args)" || return 1
-	# shellcheck disable=SC2086  # a flag list of validated numbers, split on purpose
-	"$root/scripts/make-tone-lut.py" "$cube" --gamma "$gamma" $shape >/dev/null
-}
-
 # --- look.json -> generator arguments -------------------------------------------------------
 # Each generator's flags are spelled ONCE, here. They were spelled at every call site, and the
-# copies had drifted: the staged path's neutrality check left out --lum-mix, and the tone block was
-# mapped to flags twice, so a key added on one path would have reached the generator's argparse
-# DEFAULT on the other — a different look, rendered in silence.
+# copies had drifted by a flag, so a key added at one call site would have reached the generator's
+# argparse DEFAULT at another — a different look, rendered in silence.
 #
 # EVERY VALUE IS VALIDATED INSIDE, AND EVERY CALLER MUST ASSIGN FIRST: `args="$(tone_shape_args)"
 # || exit 1`. Spliced straight into a command, a failed read inside `$(...)` is swallowed, the
@@ -876,7 +847,7 @@ deliverable_spec() {  # deliverable_spec <spec>  -> "<name> <aw> <ah> <offset|->
 }
 
 # Whether this deliverable takes a crop out of a source of the given size, which is a fact about
-# the SOURCE's shape rather than about the deliverable's name: 4:5 is a crop of a 9:16 master and
+# the SOURCE's shape rather than about the deliverable's name: 4:5 is a crop of a 9:16 source and
 # the whole frame of a 4:5 one, and 9:16 is a crop of a landscape one. It exists beside crop_prefix
 # because the refusal that needs it has to fire before any clip is opened, where there is no offset
 # to validate yet.
@@ -908,9 +879,7 @@ deliverable_height() {  # deliverable_height <width> <aw> <ah>  -> <h>
 }
 
 # The shared delivery width. HEIGHT is the knob it always was — the 9:16 reference frame — and the
-# width falls out of it, so a run that says neither renders 1080 wide. Both delivery paths read it
-# here: stage 3 used to default to a literal 1080 and ignore HEIGHT, so HEIGHT=1440 gave the two
-# paths different files under the same name.
+# width falls out of it, so a run that says neither renders 1080 wide.
 delivery_width() {  # delivery_width  -> <w>, from WIDTH, else HEIGHT (default 1920) at 9:16
 	local h w
 	h="$(require_number HEIGHT "${HEIGHT:-1920}")" || return 1
@@ -930,35 +899,6 @@ crop_offset() {  # crop_offset <label> <value>  -> <px>|centre|-
 	esac
 }
 
-# The middle value, for deriving an exposure reference from a shoot rather than from one frame of
-# one clip. LOWER median on an even count: picking a real clip's measurement beats averaging two
-# into a number no clip has, and it makes the choice reproducible rather than dependent on how the
-# list happened to be ordered.
-median() {  # median  (values on stdin, one per line)  -> the middle one
-	local sorted n
-	sorted="$(sort -n)"
-	n="$(printf '%s\n' "$sorted" | grep -c .)"
-	[ "$n" -gt 0 ] || return 1
-	printf '%s\n' "$sorted" | sed -n "$(( (n + 1) / 2 ))p"
-}
-
-# Refuses a clip whose decoded frame cannot be measured: every crop and the halation radius are
-# computed from those two numbers, and a guess at either renders a confidently wrong file.
-#
-# Any orientation is accepted. A deliverable of another shape is cropped to it (crop_window), never
-# scaled into it, so nothing is squashed. There is deliberately NO rotation logic — orientation is
-# an ingest concern and the source is trusted (docs/adr/0005). A portrait shot stored lying on its
-# side renders sideways, and the preview is where that shows.
-require_frame_size() {  # require_frame_size <file>  -> "W H"
-	local file="$1" size
-	if ! size="$(source_frame_size "$file")"; then
-		echo "REFUSING: could not measure a decoded frame from $file." >&2
-		echo "  Refusing rather than guessing — a wrong guess here misframes the delivery." >&2
-		return 1
-	fi
-	printf '%s\n' "$size"
-}
-
 require_nonempty() {
 	local file="$1"
 	local label="$2"
@@ -975,13 +915,12 @@ require_nonempty() {
 #
 # This is the one freshness check in the pipeline that is still mtime-based, and deliberately so:
 # a .trf has no content fingerprint to compare, and "was it measured after the footage" is exactly
-# what an mtime answers. shipped.cube went the other way for a reason that does not apply here —
-# git does not preserve mtimes, so a COMMITTED artefact cannot use them. A .trf is never committed.
+# what an mtime answers. The generated cubes went the other way for a reason that does not apply
+# here — git does not preserve mtimes, so a COMMITTED artefact cannot use them. A .trf is never
+# committed.
 #
-# The reference is always the SOURCE CLIP, never an intermediate. Transforms are motion-only and
-# survive a re-grade, so a re-rendered master says nothing about whether the camera moved — and
-# comparing against one made every transform grade.sh wrote go stale the moment a master
-# re-rendered, silently sending the delivery out unstabilised.
+# The reference is always the SOURCE CLIP. Transforms are motion-only and survive a re-grade, so
+# nothing downstream of the source says whether the camera moved.
 #
 # No source, no verdict: refuse. A stale transform fights footage it was never measured on, which
 # is visibly wrong output, where dropping stabilisation is merely less good.
@@ -999,11 +938,7 @@ transform_is_fresh() {  # transform_is_fresh <trf> <source-clip>
 # ONE definition of the tail every deliverable shares: the stabilisation warp, the chroma denoise,
 # the crop, the 10->8 bit reduction, the sharpener and the grain blend.
 #
-# This lived in THREE copies — 03-final-reels.sh, 03-final-feed.sh and grade.sh's render() — and
-# had already drifted three ways, which is why it is here now: the 40-line grain rationale existed
-# in the reels copy only, grade.sh hardcoded the grain plate's frame rate at 24 where the others
-# probed it, and only the stage-3 copies checked disk space. Every constant below is measured, and
-# the notes say by what. Nothing here is a style preference.
+# Every constant below is measured, and the notes say by what. Nothing here is a style preference.
 
 # ffprobe's csv output carries a TRAILING COMMA on this camera's files, and `r=30000/1001,` inside
 # a lavfi source string is a parse error, not merely a wrong number. Query the field on its own
@@ -1091,14 +1026,9 @@ delivery_encode_args() {  # delivery_encode_args  -> sets DELIVERY_ARGS
 	esac
 }
 
-# Delivery only; the master keeps its audio. 60, not 80: the filter is -3 dB at its cutoff, and 80
+# 60, not 80: the filter is -3 dB at its cutoff, and 80
 # cut the peak less (1.3 dB against 1.8) and cost 1.8 dB at 80-120 Hz. docs/PIPELINE.md, "Encode".
 DELIVERY_AUDIO_HIGHPASS_HZ=60
-
-# The graded master's encode, shared by the two staged stages that write one. Audio mapping is the
-# caller's: stage 1 maps nothing and takes ffmpeg's default selection.
-# shellcheck disable=SC2034  # used by the stage scripts
-PRORES_MASTER=(-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le -c:a copy)
 
 # The colour trims, which a render path hands grade_chain as arguments: a caller measuring the
 # chain at other values must not have look.json's read in underneath it.
@@ -1122,7 +1052,7 @@ load_delivery_look() {
 	GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain.strength)}")" || return 1
 	GRAIN_SHADOWS="$(require_unit grain.shadows "$(look .grain.shadows)")" || return 1
 	GRAIN_HIGHLIGHTS="$(require_unit grain.highlights "$(look .grain.highlights)")" || return 1
-	# shellcheck disable=SC2034  # read by grade.sh and 01-baseline.sh
+	# shellcheck disable=SC2034  # read by grade.sh
 	DENOISE_STRENGTH="$(require_number finish.denoise "$(look .finish.denoise)")" || return 1
 	SHARPEN="$(require_number finish.sharpen "$(look .finish.sharpen)")" || return 1
 	GAUGE="$(look .finish.gauge)" || return 1
@@ -1195,12 +1125,8 @@ delivery_pix_fmt() {  # delivery_pix_fmt  -> yuv420p|yuv420p10le|yuv422p10le
 	esac
 }
 
-# THE GRADE ITSELF, as a spliceable filter chain: hue curves, tone curve, saturation, warmth. Both
-# render paths use it — the one-pass grade.sh and the staged 02-grade.sh — and they used to build
-# it separately. That had already drifted once (grade.sh carried its own copy of the tone block, so
-# a grade sent from the since-removed Bench moved one path and not the other), and at the time
-# nothing in the suite rendered the staged graph, so the divergence shipped in silence. One builder,
-# two callers, the same reasoning as the delivery chain below.
+# THE GRADE ITSELF, as a spliceable filter chain: hue curves, tone curve, saturation, warmth. Built
+# only here: two copies of it had already drifted once, in silence.
 #
 # TONE ON THE LUMA PLANE ONLY. A per-channel contrast curve crushes a saturated colour's two low
 # channels harder than its high one, so saturated things get more saturated — the traffic signage
@@ -1217,8 +1143,7 @@ delivery_pix_fmt() {  # delivery_pix_fmt  -> yuv420p|yuv420p10le|yuv422p10le
 # own — grade.sh already uses [b] for the image branch that continues from here.
 #
 # <head> and <tag> are prefixes carrying their own trailing comma, like delivery_image_chain's, so
-# that an absent one leaves no trace: head is the camera CST for the one-pass path (the staged path
-# applied it back in stage 01), and tag is DELIVERY_SETPARAMS wherever the result feeds filters
+# that an absent one leaves no trace: head is the camera CST, and tag is DELIVERY_SETPARAMS wherever the result feeds filters
 # that negotiate a colourspace.
 #
 # A NEUTRAL STAGE IS ABSENT: an empty <tone-lut> leaves out the whole luma
@@ -1322,15 +1247,13 @@ halation_sigma() {  # halation_sigma <width> <height> <radius>  -> sigma in pixe
 }
 
 # The same glow in the pixels of a frame shrunk by <scale> (delivery_scale), which is what the
-# one-pass render grades: the radius stays a fraction of the SOURCE frame, so a crop cut from the
+# render grades: the radius stays a fraction of the SOURCE frame, so a crop cut from the
 # graded frame afterwards does not make the glow grow.
 delivery_halation_sigma() {  # delivery_halation_sigma <src-w> <src-h> <radius> <scale>
 	awk -v s="$(halation_sigma "$1" "$2" "$3")" -v f="$4" 'BEGIN { printf "%.2f", s * f }'
 }
 
-# Camera-motion analysis into a transform, staged. Both entry points write the same cache path, so
-# they must measure the same way: a settings change made in one would leave the transform depending
-# on which script happened to write it.
+# Camera-motion analysis into a transform.
 #
 # shakiness=5 suits "static handheld" — the iPhone's own stabilisation has already removed the large
 # motion, so what is left is low-amplitude sway. stepsize=6 trades a little accuracy for speed and
@@ -1343,15 +1266,14 @@ delivery_halation_sigma() {  # delivery_halation_sigma <src-w> <src-h> <radius> 
 # localmotion: unexpected end of file", which does not point back here at all. Learned by doing
 # exactly that — a two-second smoke test destroyed a three-minute analysis.
 #
-# <head> is a prefix with its own trailing comma: the camera CST when detecting on the source, which
-# the one-pass path does, and nothing on a master that is already converted. The staging path is a
-# global because an EXIT trap runs after this function's locals are gone.
+# <head> is a prefix with its own trailing comma: the camera CST, since detection runs on the Apple
+# Log source. The staging path is a global because an EXIT trap runs after this function's locals
+# are gone.
 #
 # AT HALF SIZE, WRITTEN IN FULL-SIZE PIXELS. Detecting on the 4K frame took 101s for a 5s clip and
 # half size 12.7s, with the same residual shake measured on the stabilised output (IMG_0607). The
-# transform is ASCII so scale_transform can double it back: the cache stays in source pixels, which
-# is what the staged path warps its full-size master with, and the one-pass path scales it again to
-# the frame it warps. `scale`, not `zscale`: this shrink only feeds the analysis, and zscale refuses
+# transform is ASCII so scale_transform can double it back: the cache stays in source pixels, and
+# the render scales it again to the frame it warps. `scale`, not `zscale`: this shrink only feeds the analysis, and zscale refuses
 # an untagged source.
 detect_transform() {  # detect_transform <input> <trf> [head-prefix]
 	DETECT_PARTIAL="$2.partial"
@@ -1400,8 +1322,7 @@ scale_transform() {  # scale_transform <trf> <factor>  -> the scaled transform o
 		}' "$1"
 }
 
-# The staged path warps its master at full resolution; the one-pass path warps the shrunk frame
-# (delivery_geometry). The trailing comma belongs to the prefix: callers splice the result directly
+# The warp runs on the shrunk frame (delivery_geometry). The trailing comma belongs to the prefix: callers splice the result directly
 # into a filter chain, and an absent transform must leave no trace.
 #
 # The light `unsharp` after the warp (luma 5x5 at 0.2, chroma untouched) and the transform's options
@@ -1412,7 +1333,7 @@ stab_prefix() {  # stab_prefix <trf> <smoothing>
 		"$1" "$2"
 }
 
-# SHRINK FIRST, for the one-pass render: the reduction of the WHOLE frame to the size the
+# SHRINK FIRST: the reduction of the WHOLE frame to the size the
 # deliverables need, then the stabiliser's warp, and only then the denoise, correction, halation,
 # conversion and grade. Every one of those is per pixel or sized as a fraction
 # of the frame, so grading 1080p instead of 4K costs a quarter of the work: IMG_0609's grade and
@@ -1428,8 +1349,7 @@ stab_prefix() {  # stab_prefix <trf> <smoothing>
 # areas measured 0.04 display codes against 0.02 (p99 0.14), which is no visible banding.
 #
 # 10-bit 4:4:4 out, NOT DITHERED: the dither to the delivery depth stays in delivery_image_chain,
-# after the grade, where it has always been. The staged path grades its master at full resolution
-# and does not use this.
+# after the grade, where it has always been.
 delivery_geometry() {  # delivery_geometry <w> <h> <stab-prefix>  -> a prefix with its trailing comma
 	printf 'zscale=w=%s:h=%s:f=lanczos,%sformat=yuv444p10le,' "$1" "$2" "$3"
 }
@@ -1470,7 +1390,7 @@ scaled_crop() {  # scaled_crop <crop-prefix|empty> <scale> <frame-w> <frame-h>  
 	printf 'crop=%s:%s:%s:%s,\n' "$cw" "$ch" "$x" "$y"
 }
 
-# Grain and sharpen come AFTER the downscale, not before: grain sized for the 4K master is crushed
+# Grain and sharpen come AFTER the downscale, not before: grain sized for the 4K frame is crushed
 # to invisibility once scaled to 1080p, and sharpening pre-resize is blurred back out by the
 # resize.
 #
@@ -1653,9 +1573,8 @@ delivery_grain_merge() {  # delivery_grain_merge <image-label> <grain-label> <ou
 }
 
 # Deliverables, source to installed files, in ONE ffmpeg: a shared chain, split once per
-# deliverable into its own tail, grain plate and encode. The one-pass render passes the grade as the
-# shared chain, so a clip's deliverables decode and grade once between them; stage 3 passes a single
-# deliverable and no shared chain. Reads the grain globals load_delivery_look sets; under `set -u` an
+# deliverable into its own tail, grain plate and encode. grade.sh passes the grade as the shared
+# chain, so a clip's deliverables decode and grade once between them. Reads the grain globals load_delivery_look sets; under `set -u` an
 # unloaded one stops the run rather than rendering without grain.
 #
 # ONE DELIVERABLE BUILDS THE GRAPH IT ALWAYS DID: no split, and the labels b, g and o. Two or more
@@ -1711,12 +1630,6 @@ render_deliverables() {  # render_deliverables <label> <input> <fps> <shared-cha
 	render_deliveries "$label" "$n" "${outs[@]}" "${inputs[@]}" -filter_complex "$graph" "${outargs[@]}"
 }
 
-render_deliverable() {  # render_deliverable <final-out> <label> <input> <w> <h> <fps> <image-chain> [ffmpeg-arg]...
-	local out="$1" label="$2" in="$3" w="$4" h="$5" fps="$6" chain="$7"
-	shift 7
-	render_deliverables "$label" "$in" "$fps" "" 1 "$out" "$w" "$h" "$chain" "$@"
-}
-
 # Renders to staging files and installs each only once the render has succeeded, been checked for
 # content, and had its colour tags verified. Takes the FINAL path, a label for messages, then every
 # ffmpeg argument except the output path.
@@ -1724,11 +1637,10 @@ render_deliverable() {  # render_deliverable <final-out> <label> <input> <w> <h>
 # WHY THIS EXISTS. `ffmpeg -y` pointed straight at the delivery path TRUNCATES the existing file
 # before it knows whether the filter graph even initialises. Measured: an approved mp4 re-rendered
 # with a graph that fails at init was left at 0 bytes, ffmpeg exiting 234. require_nonempty then
-# reports the failure loudly — but the approved deliverable is already gone, and getting it back
-# means regenerating the baseline and the master first.
+# reports the failure loudly — but the approved deliverable is already gone.
 #
 # This is the same incident this file's header describes for the retag remux, and the same staging
-# 00-stabilise-detect.sh uses for its .trf. The render path was the only one without it.
+# detect_transform uses for its .trf.
 render_delivery() {  # render_delivery <final-out> <label> <ffmpeg-arg>...
 	local out="$1" label="$2"
 	shift 2

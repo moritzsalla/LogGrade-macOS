@@ -179,7 +179,8 @@ if command -v bats >/dev/null; then
 	[ "$FAST" = "1" ] && slow_tag='!slow,'
 	if command -v parallel >/dev/null; then
 		serial_log=$(mktemp -t check-bats-serial)
-		bats --filter-tags "${slow_tag}serial" tests/ > "$serial_log" 2>&1 &
+		# --allow-empty-suite: every serial test is also slow, so under --fast this pass has none.
+		bats --allow-empty-suite --filter-tags "${slow_tag}serial" tests/ > "$serial_log" 2>&1 &
 		serial_pid=$!
 		bats_rc=0
 		bats -j "$(sysctl -n hw.ncpu)" --filter-tags "${slow_tag}!serial" tests/ || bats_rc=1

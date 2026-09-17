@@ -8,10 +8,6 @@ itself ([ADR 0008](docs/adr/0008_THE_APP_DRIVES_THE_CHAIN_AND_NEVER_REBUILDS_IT.
 ```sh
 ./app/make-app.sh [--debug]                # dist/LogGrade.app, release by default
 ./scripts/grade.sh src/ | clip.mov ...     # source -> 'LogGrade export <date time>/', report in .loggrade/reports/ (or LOGGRADE_CACHE)
-./scripts/01-baseline.sh IMG_0609          # staged: source -> baseline
-./scripts/02-grade.sh    IMG_0609          # staged: baseline -> master (refuses correction or halation)
-./scripts/00-stabilise-detect.sh IMG_0609  # staged, optional: camera motion
-./scripts/03-final.sh    IMG_0609 feed 820 # staged: master -> one deliverable
 ./scripts/check.sh [--fast|--allow-skips]
 ./tests/render-golden.sh [--regenerate "<why>"]
 ```
@@ -52,7 +48,6 @@ Nothing has to be downloaded: `luts/rendering/neutral.cube` is the shipped conve
 | `JSON=1` | one event per line on stdout |
 | `GRADE_WORK_DIR=<path>` | work outside the repo; also read from `.workdir` |
 | `LOGGRADE_CACHE=<path>` | working files (reports, cubes, stabilisation, proofs) under this root instead of `<work>/.loggrade`, one folder per work dir. The app uses `~/Library/Caches/LogGrade` |
-| `ACCEPT_STALE=1` | `03-final.sh`: deliver despite a stale transform |
 
 Presets: `reels` is 9:16, `<clip>_reels-stories_9x16.mp4`; `feed` is 4:5, `<clip>_feed_4x5.mp4`.
 Everything else about the look lives in `look.json`. The film presets are complete look files in
@@ -75,7 +70,6 @@ Printed on stderr as `GRADE_CODE=<NAME>`. The code is the contract; the sentence
 | `REFUSE_UNMEASURED` | a clip's decoded frame could not be measured; the clip is skipped |
 | `REFUSE_PROOF_AND_FRAME` | both set |
 | `REFUSE_FRAME_STAGE` | `FRAME_STAGE` is neither `graded` nor `source` |
-| `REFUSE_STAGED_PRE_CONVERSION` | `02-grade.sh` was given a correction or halation |
 | `RENDER_FAILED` | a clip failed; previous output untouched |
 | `FRAME_FAILED` | a preview frame failed |
 | `STALE_TRANSFORM` | the transform is older than its source (a state; the run continues) |

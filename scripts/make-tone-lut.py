@@ -1,18 +1,8 @@
 #!/usr/bin/env python3
 """
-Generate a 1D .cube LUT: a filmic S-curve applied in DISPLAY space (Rec.709 in, Rec.709 out).
-
-WHY THIS AND NOT THE OTHER ONE
-------------------------------
-make-filmic-lut.py replaces Apple's CST entirely, doing log -> linear -> tonemap -> Rec.709. That
-is the textbook-correct architecture and it produces a better *tone* response, but it lost on
-*colour*: a naive BT.2020->709 matrix plus a global saturation multiplier could not match Apple's
-CST, which lands the standardised traffic-blue at B/G 1.99 against a 1.98 spec with nothing applied,
-while keeping more brick separation. Apple's gamut handling is better than anything hand-rolled here.
-
-So: keep Apple's CST for colour, and do the tone shaping afterwards with this. Display-space
-shaping cannot recover highlight detail the CST already compressed, but the CST does not clip
-(measured YMAX 884/1023 on this footage), so there is room to work.
+Generate a 1D .cube LUT: a filmic S-curve applied in DISPLAY space (Rec.709 in, Rec.709 out),
+after the conversion, which keeps colour to the conversion and shapes only tone (a log -> linear
+-> tonemap route lost on colour: docs/PIPELINE.md, "Tried and rejected").
 
 Why a generated 1D LUT rather than ffmpeg's `curves` filter: `curves` interpolates control points
 with a cubic spline that overshoots past identity when the slope between segments is uneven —

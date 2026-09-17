@@ -5,7 +5,7 @@
 # then two of them shipped BROKEN and stayed broken because nothing ever exercised them:
 #
 #   - `safe_retag` died on every call with "unbound variable" (bash 3.2 + `set -u` + an empty
-#     array), silently skipping the retag it exists to perform and leaving masters mistagged.
+#     array), silently skipping the retag it exists to perform and leaving files mistagged.
 #   - `verify_bt709` could never pass on ANY file, because ffprobe prints these files' video
 #     stream twice and it compared that against a single expected line.
 #
@@ -30,10 +30,8 @@ bats_require_minimum_version 1.5.0
 #           `bats --timing -f '<name>' tests/` rather than guessing.
 #   serial  kept out of the parallel pass, because it writes a path another test writes too. The two
 #           make-app.sh tests both rebuild dist/LogGrade.app, and one asserts on its contents while
-#           the other can be halfway through replacing it. The two 02-grade.sh tests regenerate the
-#           REPO's luts/tone/shipped.cube when look.json has moved, and make-tone-lut.py stages that
-#           write through one fixed .partial name, so two at once can interleave. Tag any new test
-#           that writes outside $BATS_TEST_TMPDIR.
+#           the other can be halfway through replacing it. Tag any new test that writes outside
+#           $BATS_TEST_TMPDIR.
 #
 # A serial test runs alongside the parallel pass, one at a time, not after it: those tests
 # conflict with each other, not with the rest, and waiting for the builds would give back most of
@@ -120,13 +118,6 @@ setup() {
 	source "$SCRIPTS/lib.sh"
 }
 
-# Mean luma of the first frame, 10-bit scale. `metadata=print` logs at INFO, so -v error would
-# suppress the only output that matters — the same trap grade.sh's exposure probe hit.
-_yavg() {  # _yavg <file>
-	ffmpeg -v info -i "$1" -frames:v 1 -vf signalstats,metadata=print:file=- -f null - 2>/dev/null \
-		| sed -n 's/.*lavfi\.signalstats\.YAVG=//p' | head -1
-}
-
 # The first real clip wherever the pipeline itself would look for footage, or nothing.
 # resolve_work_dir, not the repo's src/: three tests looked only in the repo, so with media kept
 # outside it (ADR 0006's .workdir) they skipped — one of them the only render of the production
@@ -171,9 +162,9 @@ fail() {
 	[ "$status" -ne 0 ]
 }
 
-# --- require_frame_size ------------------------------------------------------
+# --- source_frame_size -------------------------------------------------------
 
-@test "require_frame_size refuses a clip it cannot measure" {
+@test "source_frame_size refuses a clip it cannot measure" {
 	# Every crop is computed from the measurement, so "I could not tell" must land on refuse. It did not: an empty dimension makes the numeric test
 	# ERROR, and an `if` reads an erroring condition as false, so the clip was accepted. Same
 	# fail-open shape as the trailing comma on this camera's csv output, which is what this guard
@@ -187,9 +178,9 @@ fail() {
 	mkdir -p "$bin"
 	printf '#!/bin/sh\nexit 0\n' > "$bin/ffmpeg"
 	chmod +x "$bin/ffmpeg"
-	PATH="$bin:$PATH" run require_frame_size "$FIXTURES/portrait_tagged.mov"
-	[ "$status" -ne 0 ]
-	[[ "$output" == *"REFUSING"* ]] || fail "[[ \"$output\" == *\"REFUSING\"* ]]"
+	PATH="$bin:$PATH" run source_frame_size "$FIXTURES/portrait_tagged.mov"
+	[ "$status" -ne 0 ] || fail "measured a frame nothing decoded: $output"
+	[[ "$output" == *"could not measure a decoded frame"* ]] || fail "not refused by the guard: $output"
 }
 
 # --- verify_bt709 ------------------------------------------------------------
@@ -286,13 +277,13 @@ fail() {
 	[[ "$output" == *"LOW DISK SPACE"* ]] || fail "[[ \"$output\" == *\"LOW DISK SPACE\"* ]]"
 }
 @test "check_disk_space works on a directory that does not exist yet" {
-	# The stages call this BEFORE `mkdir -p`, so on a first run into a fresh work dir the path is
-	# absent. df then fails, the arithmetic expansion gets an empty operand, and the stage dies
+	# grade.sh calls this BEFORE `mkdir -p`, so on a first run into a fresh work dir the path is
+	# absent. df then fails, the arithmetic expansion gets an empty operand, and the run dies
 	# with a bash syntax error instead of a disk verdict — a guard that aborts the run it was
 	# meant to protect.
-	run check_disk_space "$BATS_TEST_TMPDIR/dist/03-final" 1
+	run check_disk_space "$BATS_TEST_TMPDIR/not-yet/export" 1
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"available in $BATS_TEST_TMPDIR/dist/03-final"* ]] || fail "[[ \"$output\" == *\"available in $BATS_TEST_TMPDIR/dist/03-final\"* ]]"
+	[[ "$output" == *"available in $BATS_TEST_TMPDIR/not-yet/export"* ]] || fail "[[ \"$output\" == *\"available in $BATS_TEST_TMPDIR/not-yet/export\"* ]]"
 	[[ "$output" != *"syntax error"* ]] || fail "[[ \"$output\" != *\"syntax error\"* ]]"
 }
 
@@ -334,27 +325,17 @@ _exports() {  # _exports <work>
 	# One folder per work dir under one root: two shoots' IMG_0609 must not share a transform.
 	a="$(LOGGRADE_CACHE="$root" transform_path "$work" CLIP)"
 	b="$(LOGGRADE_CACHE="$root" transform_path "$other" CLIP)"
-	[[ "$a" == "$root/"*"/stabilisation/CLIP.trf" ]] || fail "a stage path ignored the cache: $a"
+	[[ "$a" == "$root/"*"/stabilisation/CLIP.trf" ]] || fail "the transform path ignored the cache: $a"
 	[ "$a" != "$b" ] || fail "two work dirs share one cache: $a"
 }
 
-@test "every stage checks free space on the volume it writes to" {
-	# The work dir became opt-in, and three of the four call sites kept asking about the REPO's
-	# volume while writing to the work dir's. With no .workdir present those are the same path, so
-	# the defect is invisible locally — which is exactly why it shipped. Point the work dir
+@test "grade.sh checks free space on the volume it writes to" {
+	# The work dir is opt-in, and a disk check asking about the REPO's volume while writing to the
+	# work dir's is invisible locally, where the two are the same path. Point the work dir
 	# somewhere else and the two separate.
-	local work="$BATS_TEST_TMPDIR/elsewhere" s
-	mkdir -p "$work/src" "$work/.loggrade/baseline" "$work/.loggrade/masters"
+	local work="$BATS_TEST_TMPDIR/elsewhere"
+	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/baseline/CLIP_baseline.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
-	for s in 01-baseline 02-grade 03-final; do
-		GRADE_WORK_DIR="$work" run "$SCRIPTS/$s.sh" CLIP
-		[[ "$output" == *"available in $work"* ]] \
-			|| fail "$s.sh measured the wrong volume: $output"
-	done
-	# grade.sh is the path README tells you to run, and it had no disk guard at all while the four
-	# staged scripts did. A test named "every stage" that skipped it is how that went unnoticed.
 	GRADE_WORK_DIR="$work" DRY=1 MATCH=0 STAB=0 run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[[ "$output" == *"available in $work"* ]] \
 		|| fail "grade.sh measured no volume at all: $output"
@@ -401,9 +382,9 @@ _exports() {  # _exports <work>
 }
 
 # --- resolve_work_dir ----------------------------------------------------------
-# This function decides WHERE every stage reads and writes. Two shipped defects traced back to it
-# being untested: three stages checked free space on the repo's volume while writing to the work
-# dir's, and grade.sh resolved its stabilisation cache two levels off. Neither was visible locally,
+# This function decides WHERE a run reads and writes. Two shipped defects traced back to it
+# being untested: disk checks measured the repo's volume while writing to the work dir's, and
+# grade.sh resolved its stabilisation cache two levels off. Neither was visible locally,
 # because with no .workdir present the work dir IS the repo root and the wrong path is the right
 # one by accident. Every test below therefore sets a work dir that is genuinely elsewhere.
 
@@ -461,21 +442,20 @@ _exports() {  # _exports <work>
 
 # --- smoke: the scripts must actually RUN -------------------------------------
 # These exist because the rest of this suite once passed in full while FOUR functions were missing
-# from lib.sh and every stage script died on the first line with "command not found". shellcheck
+# from lib.sh and every script died on the first line with "command not found". shellcheck
 # does not run the code, the parity check does not touch lib.sh, and the unit tests only call the
 # handful of functions they cover — so nothing noticed the pipeline was completely broken.
 #
 # A suite that cannot detect "the program does not start" is not a suite.
 
-@test "lib.sh defines every function the stage scripts call" {
+@test "lib.sh defines every function grade.sh calls" {
 	# DERIVED, NOT LISTED. This used to hardcode ten names and was not updated when the delivery
 	# chain moved into lib.sh, so it silently stopped covering source_fps, stab_prefix,
 	# grain_plate, delivery_image_chain, delivery_grain_branch and render_delivery — six of the
 	# sixteen, including the one that protects approved deliverables. A test named for "every
 	# function" that checks a fixed subset is the coverage-shaped hole CLAUDE.md rules out.
 	#
-	# So the names come from the scripts: every word in COMMAND POSITION in the stage scripts and
-	# grade.sh — line start, after `$(`, a pipe, `&&`, `||`, `;`, or a keyword — minus the functions
+	# So the names come from the script: every word in COMMAND POSITION in grade.sh — line start, after `$(`, a pipe, `&&`, `||`, `;`, or a keyword — minus the functions
 	# a script defines for itself. Each must resolve to something after lib.sh is sourced (setup()
 	# does that); a helper renamed on one side only resolves to nothing. Line-start words followed by
 	# `|` or `)` are case patterns, and a continuation line is an argument list, so both are read for
@@ -489,21 +469,21 @@ _exports() {  # _exports <work>
 		print "$1\n" if !$cont && /^\s*([a-z_][a-z0-9_]*)(?![a-z0-9_]|\+?=|\(|\||\))/;
 		print "$1\n" if /^\s*(?:&&|\|\|)\s+([a-z_][a-z0-9_]*)/;
 		print "$1\n" if /;;\s*$/ && /\)\s+([a-z_][a-z0-9_]*)(?![a-z0-9_]|\+?=|\()/;
-	' "$SCRIPTS"/0*.sh "$SCRIPTS"/grade.sh | sort -u)
-	own=$(grep -hoE '^[[:space:]]*[a-z_]+\(\)' "$SCRIPTS"/0*.sh "$SCRIPTS"/grade.sh | tr -d '() \t' || true)
+	' "$SCRIPTS"/grade.sh | sort -u)
+	own=$(grep -hoE '^[[:space:]]*[a-z_]+\(\)' "$SCRIPTS"/grade.sh | tr -d '() \t' || true)
 
 	# The extraction has to be seen to work, or a pattern that matches nothing passes green: every
-	# lib.sh function a stage script names outside a comment must be among the calls it found.
+	# lib.sh function grade.sh names outside a comment must be among the calls it found.
 	# Here-strings rather than pipes into `grep -q`: under pipefail the writer can die of SIGPIPE
 	# when grep exits on its first match, and the lookup then reads as "not found".
 	local code
-	code=$(grep -vhE '^[[:space:]]*#' "$SCRIPTS"/0*.sh "$SCRIPTS"/grade.sh)
+	code=$(grep -vhE '^[[:space:]]*#' "$SCRIPTS"/grade.sh)
 	for fn in $(grep -oE '^[a-z_]+\(\)' "$SCRIPTS/lib.sh" | tr -d '()'); do
 		grep -qw "$fn" <<< "$code" || continue
 		grep -qx "$fn" <<< "$called" || missing="$missing $fn"
 	done
 	[ -z "$missing" ] || fail "the call extraction missed lib.sh functions the scripts use:$missing"
-	for fn in render_deliverable grade_chain require_frame_size deliverable_crops crop_description; do
+	for fn in render_deliverables grade_chain source_frame_size deliverable_crops crop_description; do
 		grep -qx "$fn" <<< "$called" || fail "the call extraction did not find $fn: $called"
 	done
 
@@ -511,29 +491,24 @@ _exports() {  # _exports <work>
 		grep -qx "$fn" <<< "$own" && continue
 		[ -n "$(type -t "$fn")" ] || missing="$missing $fn"
 	done
-	[ -z "$missing" ] || fail "stage scripts call names nothing defines:$missing"
+	[ -z "$missing" ] || fail "grade.sh calls names nothing defines:$missing"
 }
 
-@test "every stage script starts and reports usage rather than dying" {
-	for s in 01-baseline 02-grade 03-final 00-stabilise-detect; do
-		run "$BATS_TEST_DIRNAME/../scripts/$s.sh" __NO_SUCH_CLIP__
-		# It must fail on the MISSING CLIP, not on a broken script.
-		[[ "$output" != *"command not found"* ]] || fail "$s.sh: $output"
-		[[ "$output" != *"unbound variable"* ]]  || fail "$s.sh: $output"
-		[[ "$output" == *"not found"* ]]         || fail "$s.sh gave: $output"
-	done
+@test "grade.sh starts and reports a missing clip rather than dying" {
+	run "$SCRIPTS/grade.sh" __NO_SUCH_CLIP__
+	# It must fail on the MISSING CLIP, not on a broken script.
+	[[ "$output" != *"command not found"* ]] || fail "$output"
+	[[ "$output" != *"unbound variable"* ]]  || fail "$output"
+	[[ "$output" == *"not found"* ]]         || fail "gave: $output"
 }
 
-@test "every stage script reports usage when given NO arguments" {
+@test "grade.sh reports usage when given NO arguments" {
 	# The test above asserts "unbound variable" never appears, which is exactly what a bare `$1`
-	# under `set -u` produces — but it always passed an argument, so it could not see it. All four
-	# stage scripts died with "line NN: $1: unbound variable"; only grade.sh printed a usage line.
-	for s in 01-baseline 02-grade 03-final 00-stabilise-detect grade; do
-		run "$BATS_TEST_DIRNAME/../scripts/$s.sh"
-		[ "$status" -ne 0 ] || fail "$s.sh exited 0 with no arguments"
-		[[ "$output" != *"unbound variable"* ]] || fail "$s.sh died on \$1 instead of saying usage: $output"
-		[[ "$output" == *"usage:"* ]] || fail "$s.sh gave no usage line: $output"
-	done
+	# under `set -u` produces — but it always passes an argument, so it cannot see it.
+	run "$SCRIPTS/grade.sh"
+	[ "$status" -ne 0 ] || fail "exited 0 with no arguments"
+	[[ "$output" != *"unbound variable"* ]] || fail "died on \$1 instead of saying usage: $output"
+	[[ "$output" == *"usage:"* ]] || fail "gave no usage line: $output"
 }
 
 # bats test_tags=slow
@@ -550,14 +525,14 @@ _exports() {  # _exports <work>
 	[[ "$output" != *"command not found"* ]] || fail "[[ \"$output\" != *\"command not found\"* ]]"
 }
 
-@test "grade.sh reads the transform cache that stage 00 writes" {
+@test "grade.sh reuses the transform already in the cache" {
 	# grade.sh reassigned WORK from the work-dir root to its own scratch dir, then built the
 	# transform path from the reassigned value — landing two levels off, at
-	# <work>/.loggrade/work/.loggrade/stabilisation/. So it never saw a transform stage 00 had already
+	# <work>/.loggrade/work/.loggrade/stabilisation/. So it never saw a transform it had already
 	# computed and silently paid ~65s per clip to redo it. One name doing two jobs.
 	#
 	# Transforms are motion-only and survive a re-grade, so one cache is correct. Content here is
-	# irrelevant: this asserts the PATH both entry points agree on, not the warp.
+	# irrelevant: this asserts the PATH transform_path spells, not the warp.
 	local work="$BATS_TEST_TMPDIR/gwork"
 	mkdir -p "$work/src" "$work/.loggrade/stabilisation"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
@@ -571,9 +546,8 @@ _exports() {  # _exports <work>
 @test "a transform older than its source is not reused" {
 	# Transforms are measured against the DECODED frame, so re-orienting a source invalidates its
 	# transform: the file then describes motion in a frame that no longer exists. Once the cache is
-	# shared (above), a stale entry is silently reused by both entry points — the warp fights
-	# footage it was never measured on. Same freshness rule ensure_tone_lut already applies to
-	# shipped.cube against look.json.
+	# reused (above), a stale entry is silently reused too — the warp fights footage it was never
+	# measured on.
 	local work="$BATS_TEST_TMPDIR/stale"
 	_stale_transform "$work"
 	GRADE_WORK_DIR="$work" DRY=1 MATCH=0 run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
@@ -586,9 +560,8 @@ _exports() {  # _exports <work>
 @test "grade.sh takes its tone values from look.json, not from itself" {
 	# "Look values live in look.json, never hardcoded in a script" is a settled rule, and the
 	# production path was breaking it: it read colour, grain and stabilisation from look.json but
-	# carried its own copy of the whole tone block. So a grade sent from the Bench (since removed) updated
-	# shipped.cube and the staged path while grade.sh kept rendering the previous tone — the
-	# two-copies-one-edited failure that look() exists to end, one layer up.
+	# carried its own copy of the whole tone block — the two-copies-one-edited failure that look()
+	# exists to end, one layer up.
 	local work="$BATS_TEST_TMPDIR/lookwork" look="$BATS_TEST_TMPDIR/other-look.json"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
@@ -613,9 +586,8 @@ PY
 
 @test "safe_retag leaves a correctly tagged file untouched" {
 	# Encoders don't reliably STAMP the tags, which is why safe_retag exists — but they don't
-	# reliably get them wrong either, and the function remuxed unconditionally. On the staged path
-	# that is a full read+write of two ~2.3GB ProRes masters per clip, roughly 9GB of I/O, to
-	# change nothing. lib.sh's own header has always described verify-then-fix.
+	# reliably get them wrong either, and the function remuxed unconditionally: a full read and
+	# write of the file to change nothing.
 	#
 	# Inode, not mtime: a remux writes a temp file and moves it over the original, so the inode
 	# changes even when the bytes would not.
@@ -628,31 +600,6 @@ PY
 	[ "$before" = "$after" ] || fail "rewrote a file that was already correct"
 	# ...and it must still report the verdict, not fall silent.
 	[[ "$output" == *"tags OK"* ]] || fail "[[ \"$output\" == *\"tags OK\"* ]]"
-}
-
-@test "re-rendering a master does not invalidate its transform" {
-	# The cache is shared, but the two entry points judged freshness against two different
-	# references: grade.sh against the source, the final stages against the graded master. So a
-	# transform written by grade.sh went stale the moment a master re-rendered, and the delivery
-	# silently went out unstabilised.
-	#
-	# The source footage is the only correct reference. Transforms are motion-only and survive a
-	# re-grade — change the look, tone or saturation and the same warp still applies — so the
-	# graded master's mtime says nothing about whether the camera moved.
-	local work="$BATS_TEST_TMPDIR/prov"
-	mkdir -p "$work/src" "$work/.loggrade/masters" "$work/.loggrade/stabilisation"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	printf 'VID.STAB 1\n# transform measured on this source\n' > "$work/.loggrade/stabilisation/CLIP.trf"
-	# The master is re-rendered AFTER the transform. That is a re-grade, not a re-shoot.
-	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
-	# Stamp the order explicitly. bash 3.2's -nt compares whole seconds, and all three files are
-	# created inside one second here, so without this the transform is not "newer" than anything.
-	touch -t 202609010000 "$work/src/CLIP.mov"
-	touch -t 202609020000 "$work/.loggrade/stabilisation/CLIP.trf"
-	touch -t 202609030000 "$work/.loggrade/masters/CLIP_graded.mov"
-	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
-	[[ "$output" == *"stabilising with"* ]] \
-		|| fail "called a valid transform stale after a re-grade: $output"
 }
 
 @test "scale_transform scales a transform's pixels and nothing else" {
@@ -728,39 +675,13 @@ PY
 	[ "$status" -eq 0 ] || fail "an ASCII transform newer than its source was called stale"
 }
 
-@test "every stage creates its own output directory" {
-	# The staged scripts once relied on a .gitkeep existing in the REPO, so with a work dir
-	# set they wrote into a directory that does not exist — and ffmpeg reported it only at the end
-	# of a full-length encode. The markers have since been deleted, which makes this test the only
-	# thing standing between a fresh clone and that bug returning. The test above pre-creates every
-	# output folder and so cannot see it; this one deliberately does not.
-	local work="$BATS_TEST_TMPDIR/bare" s
-	mkdir -p "$work/src"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	mkdir -p "$work/.loggrade/baseline" "$work/.loggrade/masters"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/baseline/CLIP_baseline.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
-	# The export folder is the one nothing has created.
-	[ ! -d "$work/export" ]
-	for s in reels feed; do
-		EXPORT_DIR="$work/export" GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP "$s"
-		# Assert the directory itself, not the absence of an error message: this fixture is too
-		# small to survive the full delivery chain, and an unrelated encode failure must not let
-		# this pass vacuously.
-		[ -d "$work/export" ] \
-			|| fail "03-final.sh $s did not create its output dir: $output"
-		rm -rf "$work/export"
-	done
-}
-
 # --- render_delivery -----------------------------------------------------------
 
 @test "a failed re-render leaves the approved deliverable byte-identical" {
 	# `ffmpeg -y` pointed at the delivery path truncates the existing file before it knows whether
 	# the graph even initialises. Measured on this repo: an approved mp4 re-rendered with a broken
 	# graph was left at 0 bytes, ffmpeg exiting 234. require_nonempty reported the failure loudly
-	# and the deliverable was already gone, and getting it back means regenerating the baseline and
-	# the master first.
+	# and the deliverable was already gone, and getting it back means rendering it again.
 	local out="$BATS_TEST_TMPDIR/approved.mp4" before
 	ffmpeg -y -f lavfi -i "color=c=gray:s=72x128:d=0.1:r=24" -frames:v 1 \
 		-c:v libx264 -pix_fmt yuv420p "$out" -v error
@@ -787,57 +708,6 @@ PY
 	[ -s "$out" ]
 	run probe_tags "$out"
 	[ "$output" = "bt709,bt709,bt709" ]
-}
-
-# --- ensure_tone_lut -----------------------------------------------------------
-# This had no test at all, and its freshness check was mtime-only. git does not preserve mtimes, so
-# on every fresh clone the committed cube lands NEWER than look.json and was trusted forever: with
-# look.json backdated and a parameter changed, the stale curve stayed in place in silence. The
-# guarantee held only on the machine where the edit happened.
-
-_tone_root() {  # build a throwaway repo root with its own look.json and generator
-	local root="$1" gamma="$2"
-	mkdir -p "$root/luts/tone" "$root/scripts"
-	cp "$BATS_TEST_DIRNAME/../scripts/make-tone-lut.py" "$BATS_TEST_DIRNAME/../scripts/cubefile.py" "$root/scripts/"
-	cat > "$root/look.json" <<JSON
-{ "tone": { "gamma": $gamma, "pivot": 0.39, "contrast": 1.09,
-            "toe": 0.0, "shoulder": 0.1, "black": 0.025 } }
-JSON
-}
-
-@test "ensure_tone_lut regenerates a cube that disagrees with look.json" {
-	local root="$BATS_TEST_TMPDIR/tone-stale"
-	_tone_root "$root" 2.02
-	# A cube built at a DIFFERENT gamma, then stamped newer than look.json — exactly the state a
-	# fresh clone produces, and the state the old mtime check called fresh.
-	"$root/scripts/make-tone-lut.py" "$root/luts/tone/shipped.cube" \
-		--gamma 1.5 --pivot 0.39 --contrast 1.09 --toe 0.0 --shoulder 0.1 --black 0.025 >/dev/null
-	touch -t 202609010000 "$root/look.json"
-	touch -t 202609020000 "$root/luts/tone/shipped.cube"
-
-	LOOK_FILE="$root/look.json" run ensure_tone_lut "$root"
-	[ "$status" -eq 0 ]
-	run head -1 "$root/luts/tone/shipped.cube"
-	[[ "$output" == *"gamma=2.02"* ]] \
-		|| fail "kept a cube built at the wrong gamma: $output"
-}
-
-@test "ensure_tone_lut does not rewrite a cube that already matches" {
-	local root="$BATS_TEST_TMPDIR/tone-current" before after
-	_tone_root "$root" 2.02
-	LOOK_FILE="$root/look.json" ensure_tone_lut "$root"
-	before=$(stat -f%i "$root/luts/tone/shipped.cube")
-	LOOK_FILE="$root/look.json" run ensure_tone_lut "$root"
-	[ "$status" -eq 0 ]
-	after=$(stat -f%i "$root/luts/tone/shipped.cube")
-	[ "$before" = "$after" ] || fail "regenerated an already-current cube"
-}
-
-@test "the tone cube records the gamma it was built at" {
-	# The old TITLE recorded every parameter except gamma — the one that was actually re-tuned
-	# (2.09 -> 2.02), so a committed cube could not be traced back to the curve it encodes.
-	run head -1 "$BATS_TEST_DIRNAME/../luts/tone/shipped.cube"
-	[[ "$output" == *"gamma="* ]] || fail "[[ \"$output\" == *\"gamma=\"* ]]"
 }
 
 # bats test_tags=slow
@@ -1037,8 +907,8 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 	# The behavioural test above proves render_delivery protects the file it replaces. This pins
 	# the invariant that every render actually goes through it: `ffmpeg -y` aimed at an output
 	# variable truncates the existing file before the graph is known to initialise, and that is
-	# how a failed re-render destroys an approved deliverable. I reintroduced exactly this while
-	# rewriting stage 3, one commit after fixing it elsewhere.
+	# how a failed re-render destroys an approved deliverable. It has come back once already, one
+	# commit after being fixed elsewhere.
 	local offenders
 	# Comment lines are excluded, or the note explaining the rule trips the rule.
 	offenders=$(grep -n 'ffmpeg .*-y.*"\$\(OUT\|out\)"' "$BATS_TEST_DIRNAME"/../scripts/*.sh \
@@ -1051,32 +921,6 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 # failed re-render destroys an approved file. render_delivery stages, checks and tags before
 # installing. These pin BOTH halves of that: the staging behaviour, and the tag check that decides
 # whether a staged file is allowed to land.
-
-@test "a failed re-render through 03-final.sh leaves the approved deliverable byte-identical" {
-	# grade.sh was converted to render_delivery and 03-final.sh was not, so the staged path still
-	# truncated the file the one-pass path protected — same directory, same filename. Measured: an
-	# approved 2176-byte mp4 left at 0 bytes.
-	#
-	# No special trigger needed. The synthetic fixture cannot survive the delivery chain (zscale
-	# reports "code 3074: no path between colorspaces" on it, while a real graded master passes the
-	# identical graph), so a plain run is a reliable failing render.
-	local work="$BATS_TEST_TMPDIR/keepdeliv" out before
-	mkdir -p "$work/src" "$work/.loggrade/masters" "$work/export"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
-
-	out="$work/export/CLIP_reels-stories_9x16.mp4"
-	ffmpeg -y -f lavfi -i "color=c=red:s=72x128:d=0.1:r=24" -frames:v 1 \
-		-c:v libx264 -pix_fmt yuv420p "$out" -v error
-	before=$(md5 -q "$out")
-
-	EXPORT_DIR="$work/export" GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
-	[ "$status" -ne 0 ] || skip "the fixture rendered successfully; this test needs a failing render"
-	[ -s "$out" ] || fail "the approved deliverable was truncated"
-	[ "$(md5 -q "$out")" = "$before" ] || fail "the approved deliverable was modified"
-	[ ! -f "$work/export/CLIP_reels-stories_9x16.partial.mp4" ] \
-		|| fail "left a staging file in the folder someone uploads from"
-}
 
 @test "render_delivery refuses to install a file it could not tag" {
 	# The ffmpeg result and the emptiness check were both guarded with `if !`; the retag was a bare
@@ -1133,77 +977,19 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 	[ -z "$(ls -A "$work")" ] || fail "a usage error created $(find "$work" -mindepth 1 | tr '\n' ' ')"
 }
 
-# --- the grade chain: one builder, two render paths ---------------------------
-# The look LUT, the luma-only tone curve and the colour ops were assembled separately by grade.sh
-# and 02-grade.sh. They had already drifted once before that (grade.sh carried its own copy of the
-# tone block, so a grade from the Bench moved the one-pass path and left the staged one behind),
-# and the suite renders only the one-pass graph — so the staged one could break and stay green.
+# --- the grade chain: one builder -------------------------------------------
+# The hue curves, the luma-only tone curve and the colour ops are assembled by grade_chain alone.
+# Two copies of it had already drifted once, and a second copy would render outside the goldens.
 
 @test "the grade chain is built in exactly one place" {
-	# Structural, because the behavioural test below cannot see a THIRD caller appearing. The
-	# tell is mergeplanes: it is the one filter that only the grade head uses, so any stage script
+	# Structural, because a render test cannot see a second copy appearing. The
+	# tell is mergeplanes: it is the one filter that only the grade head uses, so any script
 	# naming it has started building its own copy again.
 	local offenders
 	# Comments are excluded, or the pointers explaining the rule trip the rule.
 	offenders=$(grep -n 'mergeplanes' "$SCRIPTS"/*.sh \
 		| grep -v '/lib\.sh:' | grep -v ':[0-9]*:[[:space:]]*#' || true)
 	[ -z "$offenders" ] || fail "builds its own grade chain instead of calling grade_chain:$offenders"
-}
-
-# bats test_tags=serial
-@test "the staged grade graph initialises and renders" {
-	# 02-grade.sh's graph was executed by NOTHING. shellcheck cannot see inside a filter string,
-	# the parity check touches only the tone curve, and the one real render in this suite goes
-	# through grade.sh. So the staged path's half of the shared builder had no cover at all, and
-	# it IS a different graph: no CST prefix, no setparams.
-	#
-	# WHAT THIS DOES AND DOES NOT CATCH. Mutation-tested: breaking the mergeplanes mask fails it.
-	# Dropping either `format=yuv444p10le` does NOT — not here and not in the real-footage render
-	# either. The "Invalid argument" that pair was added for is not reproducible on ffmpeg 9.0.1,
-	# which negotiates both branches to a matching format on its own. Do not read that as licence
-	# to delete them: the failure is documented from a real incident, negotiation is exactly the
-	# kind of thing that changes between builds, and nothing would tell you it had come back.
-	#
-	# A SYNTHETIC baseline is legitimate here, unlike the ffprobe tests: what is under test is
-	# whether a filter graph initialises and produces pixels, which does not depend on this
-	# camera's stream structure. A baseline is by definition already Rec.709 ProRes.
-	local work="$BATS_TEST_TMPDIR/staged" base out
-	base="$work/.loggrade/baseline/CCC_baseline.mov"
-	mkdir -p "$(dirname "$base")"
-	ffmpeg -y -f lavfi -i "testsrc2=s=240x426:d=0.2:r=24" \
-		-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le "$base.raw.mov" -v error
-	# Tagged in a separate remux, for the reason setup_file gives: prores_ks ignores the flags.
-	ffmpeg -y -i "$base.raw.mov" -map 0:v:0 -c copy \
-		-color_primaries bt709 -color_trc bt709 -colorspace bt709 "$base" -v error
-
-	GRADE_WORK_DIR="$work" run "$SCRIPTS/02-grade.sh" CCC
-	[ "$status" -eq 0 ] || fail "$output"
-	out="$work/.loggrade/masters/CCC_graded.mov"
-	[ -s "$out" ] || fail "the staged graph produced nothing: $output"
-	# THE TONE CURVE MUST BE LOAD-BEARING, and proving that took three attempts — each earlier
-	# one passed against a mutation it was written to catch:
-	#   1. `pix_fmt is 10-bit` is vacuous. `-pix_fmt yuv422p10le` on the command line decides the
-	#      answer whatever the graph did, so it passed against a chain mutated to emit 8-bit.
-	#   2. `luma moved from the baseline` is nearly vacuous. colorbalance shifts luma too, so a
-	#      mergeplanes mask taking the UNTONED branch still moved it — baseline 493.92, bypassed
-	#      647.998, real chain 552.71 — and passed.
-	#      (Bypassing it means 0x101112, not 0x011112: each byte of the mask is INPUT then PLANE,
-	#      so 01 asks for input 0's chroma as luma, which is a different corruption that moves
-	#      luma too. A mutation that is not the one you meant proves nothing.)
-	# Rendering the same baseline through the same builder with an IDENTITY tone LUT and requiring
-	# the two to differ pins the curve itself, and stays true whatever look.json currently says.
-	local ident="$BATS_TEST_TMPDIR/identity.cube" flat="$work/flat.mov"
-	"$SCRIPTS/make-tone-lut.py" "$ident" --gamma 1 --pivot 0.5 --contrast 1 \
-		--toe 0 --shoulder 0 --black 0 >/dev/null
-	ffmpeg -y -i "$base" \
-		-filter_complex "[0:v]$(grade_chain "$ident" "$(look .colour.saturation)" "$(look .colour.warmth)")[o]" \
-		-map "[o]" -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le "$flat" -v error
-	local y_graded y_flat
-	y_graded=$(_yavg "$out")
-	y_flat=$(_yavg "$flat")
-	[ -n "$y_graded" ] && [ -n "$y_flat" ] || fail "could not measure luma: '$y_graded' '$y_flat'"
-	[ "$y_graded" != "$y_flat" ] \
-		|| fail "the tone LUT changed nothing ($y_graded either way): the curve is not reaching the output"
 }
 
 @test "every file path named in prose or in a script actually exists" {
@@ -1224,13 +1010,13 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 	# it was compiled from, so importing a test helper once was enough to make this guard report
 	# generated bytecode as a broken pointer. It greps PROSE and SCRIPTS; binaries and build caches
 	# are not its business, and __pycache__ is gitignored, which is the repo already saying so.
-	for ref in $(grep -rhoIE --exclude-dir=__pycache__ \
+	# fixtures/ is excluded because a golden records the files its render READ, as they were when it
+	# was measured, and is refreshed only on a deliberate regenerate: a deleted input is history
+	# there, not a broken pointer.
+	for ref in $(grep -rhoIE --exclude-dir=__pycache__ --exclude-dir=fixtures \
 			'(docs|scripts|tests|luts|bench)/[A-Za-z0-9_/.-]+\.(md|sh|py|jsonl|json|cube|html|txt)' \
 			"$root"/*.md "$root"/docs "$root"/scripts "$root"/tests 2>/dev/null | sort -u); do
 		f="${ref%%[.,)]}"
-		# luts/filmic/ holds no cube: the filmic
-		# cubes are generated and gitignored. Both document their own absence in a SOURCE.txt.
-		case "$f" in luts/filmic/*) continue ;; esac
 		[ -e "$root/$f" ] || missing="$missing $f"
 	done
 	[ -z "$missing" ] || fail "referenced but not present:$missing"
@@ -1313,48 +1099,31 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 	[ ! -f "$injected" ] || fail "ffmpeg wrote the injected output $injected"
 }
 
-@test "03-final.sh refuses a non-numeric crop offset" {
+@test "grade.sh refuses a non-numeric crop offset" {
 	local work="$BATS_TEST_TMPDIR/inj-crop" marker="$BATS_TEST_TMPDIR/crop-written"
-	mkdir -p "$work/src" "$work/.loggrade/masters"
+	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
-	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP feed "750,metadata=print:file=$marker"
+	CROP_OFFSET="750,metadata=print:file=$marker" DELIVERABLES=feed MATCH=0 STAB=0 PROOF=0.1 \
+		GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -ne 0 ]
-	# The words, not just the status: this fixture cannot complete the delivery chain, so a non-zero
-	# exit and an absent marker are both true whether or not the offset was refused.
+	# The words, not just the status: a render that fails for any other reason also exits non-zero
+	# and writes no marker.
 	[[ "$output" == *"CROP_OFFSET must be numeric"* ]] || fail "not refused at the offset: $output"
 	[ ! -f "$marker" ] || fail "the spliced filter ran and wrote $marker"
 }
 
-@test "03-final.sh refuses an unknown deliverable with its code, before anything is created" {
-	# The spec went through a here-string, which swallows the refusal: the script carried on with
-	# empty aspect terms and died on an arithmetic syntax error, with no code for a wrapper to read.
+@test "grade.sh refuses an unknown deliverable with its code, before anything is created" {
+	# A spec read through a here-string swallows the refusal: the script carries on with empty
+	# aspect terms and dies on an arithmetic syntax error, with no code for a wrapper to read.
 	local work="$BATS_TEST_TMPDIR/bad-deliv"
-	mkdir -p "$work/src" "$work/.loggrade/masters"
+	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
-	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP nope
+	DELIVERABLES=nope MATCH=0 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -ne 0 ] || fail "accepted an unknown deliverable"
 	[[ "$output" == *"REFUSING: unknown deliverable 'nope'"* ]] || fail "not refused by the spec: $output"
 	[[ "$output" == *"GRADE_CODE=REFUSE_DELIVERABLE"* ]] || fail "unnamed refusal: $output"
 	[[ "$output" != *"syntax error"* ]] || fail "died in arithmetic instead of refusing: $output"
-	[[ "$output" != *"deliverable:"* ]] || fail "went on to plan a deliverable: $output"
-	[ -z "$(_exports "$work")" ] || fail "created the output folder for a refused deliverable"
-}
-
-@test "every stage refuses a clip argument that escapes the work dir" {
-	# The clip name is used raw as a path component. `mkdir -p "$(dirname "$OUT")"` — added when the
-	# stages stopped relying on checked-in dist/*/.gitkeep markers, which are now deleted — is what
-	# turns a traversal argument into a successful write: before it, the absent directory stopped
-	# the render by accident.
-	local work="$BATS_TEST_TMPDIR/escape" s
-	mkdir -p "$work/src" "$work/.loggrade/baseline" "$work/.loggrade/masters"
-	for s in 00-stabilise-detect 01-baseline 02-grade 03-final; do
-		GRADE_WORK_DIR="$work" run "$SCRIPTS/$s.sh" "../../escaped"
-		[ "$status" -ne 0 ] || fail "$s.sh accepted a traversing clip name"
-		[[ "$output" == *"clip name"* ]] || fail "$s.sh gave no reason: $output"
-	done
-	[ ! -d "$BATS_TEST_TMPDIR/escaped" ] || fail "a stage created a directory outside the work dir"
+	[ -z "$(ls -A "$work" | grep -vxF src)" ] || fail "created something for a refused deliverable: $(ls -A "$work")"
 }
 
 @test "grade.sh refuses a clip whose FILENAME would break the filter graph" {
@@ -1575,7 +1344,7 @@ PY
 }
 
 @test "a render reports progress, through the one chokepoint every path uses" {
-	# render_delivery is where grade.sh, 03-final.sh and the proof path all end up, so a bar in the
+	# render_delivery is where every deliverable and proof grade.sh renders ends up, so a bar in the
 	# app needs instrumenting exactly here and nowhere else. Every ffmpeg call in this pipeline runs
 	# at -v error and none used -progress, so there was no signal at all to read.
 	local out="$BATS_TEST_TMPDIR/prog.mp4"
@@ -1803,39 +1572,6 @@ PY
 # --- stale transforms ---------------------------------------------------------
 # A transform is measured from the DECODED source. If the source changes, the transform describes
 # motion in frames that no longer exist, and applying it makes the warp fight the footage.
-
-@test "03-final refuses a stale transform rather than delivering unstabilised" {
-	# This stage has no detect pass, so the alternative is shipping a file that looks finished and
-	# quietly lacks the stabilisation someone asked for. The warning it used to print sat among a
-	# dozen other lines and the render went ahead regardless.
-	local work="$BATS_TEST_TMPDIR/stale-final"
-	_stale_transform "$work"
-	mkdir -p "$work/.loggrade/masters"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
-	GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
-	[ "$status" -ne 0 ] || fail "delivered against a stale transform"
-	# Assert the REFUSAL's own words and that the render was never attempted. A synthetic fixture
-	# cannot complete the delivery chain, so `status != 0` and an empty output folder are true
-	# whether or not the guard fired — written that way, this test passed with the guard removed.
-	[[ "$output" == *"REFUSING: stale transform"* ]] || fail "not refused by the guard: $output"
-	[[ "$output" != *"encode"* ]] || fail "reached the render despite the stale transform: $output"
-	[[ "$output" == *"GRADE_CODE=STALE_TRANSFORM"* ]] || fail "unnamed refusal: $output"
-}
-
-@test "ACCEPT_STALE proceeds past the refusal as a decision someone made" {
-	# Scoped to the GUARD, not to the render. A 72x128 synthetic fixture cannot complete the
-	# delivery chain — it fails reinitialising filters on the way to 1080x1920 — so asserting a
-	# successful delivery here would be asserting something about the fixture. What this pins is
-	# that the refusal is skipped, said out loud, and the render is attempted.
-	local work="$BATS_TEST_TMPDIR/stale-ok"
-	_stale_transform "$work"
-	mkdir -p "$work/.loggrade/masters"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/masters/CLIP_graded.mov"
-	ACCEPT_STALE=1 GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP reels
-	[[ "$output" == *"accepted via ACCEPT_STALE=1"* ]] || fail "said nothing about it: $output"
-	[[ "$output" != *"REFUSING"* ]] || fail "refused despite ACCEPT_STALE=1: $output"
-	[[ "$output" == *"encode"* ]] || fail "never reached the render: $output"
-}
 
 @test "a dry run says a stale transform will be recomputed, not ignored" {
 	# grade.sh's stale branch is only reachable in a dry run, because a real run recomputes it a
@@ -2200,8 +1936,8 @@ PY
 
 @test "the grade golden still describes the chain in lib.sh" {
 	# By CONTENT, never mtime: git does not preserve mtime, so on a fresh clone the committed
-	# golden always lands newer than lib.sh and would be trusted forever. Same reasoning as
-	# ensure_tone_lut's TITLE fingerprint.
+	# golden always lands newer than lib.sh and would be trusted forever. Same reasoning as the
+	# generated cubes' TITLE fingerprint.
 	#
 	# The fingerprint is COMPUTED BY THE HARNESS that writes it, not re-derived here. This test used
 	# to carry its own copy of the normalisation and the hash, which agreed with the harness only
@@ -2438,6 +2174,25 @@ PY
 		|| fail "a pre-conversion stage was placed after the conversion"
 }
 
+@test "the tone cube is regenerated by content, never by timestamp" {
+	# grade.sh regenerates each clip's tone cube on every run and relies on make-tone-lut.py to skip
+	# the write only when the TITLE already matches. A cube stamped newer than the change is the
+	# state a timestamp check calls fresh, so the stale curve must still be replaced.
+	local cube="$BATS_TEST_TMPDIR/t.cube"
+	local shape="--pivot 0.39 --contrast 1.09 --toe 0.0 --shoulder 0.1 --black 0.025"
+	# shellcheck disable=SC2086  # a flag list, split on purpose
+	run "$SCRIPTS/make-tone-lut.py" "$cube" --gamma 1.5 $shape
+	[ "$status" -eq 0 ] || fail "$output"
+	# shellcheck disable=SC2086
+	run "$SCRIPTS/make-tone-lut.py" "$cube" --gamma 1.5 $shape
+	[[ "$output" == *"already current"* ]] || fail "rewrote a cube that already matched: $output"
+	touch -t 203001010000 "$cube"
+	# shellcheck disable=SC2086
+	run "$SCRIPTS/make-tone-lut.py" "$cube" --gamma 2.02 $shape
+	[[ "$output" != *"already current"* ]] || fail "kept a cube built at a different gamma"
+	grep -q 'gamma=2.02' "$cube" || fail "the cube does not record the gamma it was built at"
+}
+
 @test "the correction cube is regenerated by content, never by timestamp" {
 	# Same reasoning as the tone cube's TITLE: git does not preserve mtime, so a committed cube
 	# always lands newer than the file it came from and would be trusted forever.
@@ -2499,35 +2254,27 @@ _look_with() {  # _look_with <name> <jq-assignment>
 @test "a correction wheel that cannot be read stops the run rather than dropping the stage" {
 	# The generator decides neutrality, and a generator handed a split argument dies of argparse
 	# and answers with nothing. Compared as a string, nothing is "not active": the correction was
-	# left out of both render paths in silence. Both must refuse instead.
+	# left out of the render in silence. It must refuse instead.
 	local work="$BATS_TEST_TMPDIR/badwheel" look
-	mkdir -p "$work/src" "$work/.loggrade/baseline"
+	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/.loggrade/baseline/CLIP_baseline.mov"
 	look="$(_look_with badwheel '.correct.slope = "1.2, 1, 1"')"
 
 	LOOK_FILE="$look" DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -ne 0 ] || fail "grade.sh planned a run without the correction: $output"
 	[[ "$output" == *"correct.slope must be numbers separated by commas"* ]] \
 		|| fail "grade.sh did not say which value: $output"
-
-	LOOK_FILE="$look" GRADE_WORK_DIR="$work" run "$SCRIPTS/02-grade.sh" CLIP
-	[ "$status" -ne 0 ] || fail "02-grade.sh rendered a master without the correction"
-	[[ "$output" == *"correct.slope must be numbers separated by commas"* ]] \
-		|| fail "02-grade.sh did not say which value: $output"
-	[ ! -e "$work/.loggrade/masters" ] || fail "02-grade.sh created output before refusing"
 }
 
-@test "encode settings, analysis settings and stage paths are spelled in lib.sh and nowhere else" {
-	# Each of these was written into two stage scripts and the byte comparisons render only one of them,
-	# so an edit to the other reached files nobody compared: the delivery encode, the ProRes master
-	# encode, the stabilisation analysis both entry points cache under one path, the Apple cube's
-	# path, and the paths one stage reads that another wrote.
+@test "encode settings, analysis settings and cache paths are spelled in lib.sh and nowhere else" {
+	# Each of these was once written into more than one script, and the byte comparisons render only
+	# one path, so an edit to a copy reached files nobody compared: the delivery encode, the
+	# stabilisation analysis and its cache path, the Apple cube's path.
 	local offenders
-	# The render entry points only. check.sh names Apple's cube and src/ too, to warn that a green run
+	# The render entry point only. check.sh names Apple's cube and src/ too, to warn that a green run
 	# skipped the render tests; it renders nothing and does not source lib.sh.
-	offenders=$(grep -nE 'libx264|prores_ks|vidstabdetect|AppleLogToRec709|\.loggrade/(stabilisation|baseline|masters)/|/src/' \
-		"$SCRIPTS"/0*.sh "$SCRIPTS"/grade.sh | grep -v ':[0-9]*:[[:space:]]*#' || true)
+	offenders=$(grep -nE 'libx264|prores_ks|vidstabdetect|AppleLogToRec709|\.loggrade/stabilisation/|/src/' \
+		"$SCRIPTS"/grade.sh | grep -v ':[0-9]*:[[:space:]]*#' || true)
 	[ -z "$offenders" ] || fail "spelled outside lib.sh:$offenders"
 }
 
@@ -2991,26 +2738,6 @@ CODECS
 	[ -s "$out" ] || fail "no proof was written: $output"
 }
 
-# bats test_tags=serial
-@test "the staged path refuses a look it cannot apply, rather than rendering without part of it" {
-	# A baseline has already been converted, so a stage that runs before the conversion has nowhere
-	# to go. For as long as the correction existed this path rendered masters without it, and they
-	# looked finished.
-	local work="$BATS_TEST_TMPDIR/staged-pre" base look="$BATS_TEST_TMPDIR/staged-pre.json" key
-	base="$work/.loggrade/baseline/CCC_baseline.mov"
-	mkdir -p "$(dirname "$base")"
-	ffmpeg -y -f lavfi -i "testsrc2=s=72x128:d=0.1:r=24" \
-		-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le "$base" -v error
-	for key in '.correct.exposure = 0.5' '.halation.strength = 0.4'; do
-		jq "$key" "$BATS_TEST_DIRNAME/../look.json" > "$look"
-		LOOK_FILE="$look" GRADE_WORK_DIR="$work" run "$SCRIPTS/02-grade.sh" CCC
-		[ "$status" -ne 0 ] || fail "rendered a master with '$key' left out"
-		[[ "$output" == *"runs before Apple's conversion"* ]] || fail "'$key' refused without saying why: $output"
-		[[ "$output" == *"GRADE_CODE=REFUSE_STAGED_PRE_CONVERSION"* ]] || fail "'$key' refused without its code"
-		[ ! -e "$work/.loggrade/masters/CCC_graded.mov" ] || fail "'$key' got as far as encoding"
-	done
-}
-
 @test "the halation cubes are regenerated by content, and only the one a change affects" {
 	local dir="$BATS_TEST_TMPDIR/hal-fresh"
 	run "$SCRIPTS/make-halation-luts.py" "$dir" --threshold 1.0
@@ -3147,18 +2874,11 @@ _low_band_db() {  # _low_band_db <file> <hz>
 		[[ "$output" == *"AUDIO_HIGHPASS_HZ must be a whole number of hertz"* ]] \
 			|| fail "grade.sh did not refuse '$v' by name: $output"
 		[ ! -e "$work/.loggrade/proofs" ] || fail "grade.sh got as far as rendering with '$v'"
-		AUDIO_HIGHPASS_HZ="$v" GRADE_WORK_DIR="$work" run "$SCRIPTS/03-final.sh" CLIP
-		[ "$status" -ne 0 ] || fail "03-final.sh accepted '$v'"
-		[[ "$output" == *"AUDIO_HIGHPASS_HZ must be a whole number of hertz"* ]] \
-			|| fail "03-final.sh did not refuse '$v' by name: $output"
 	done
 }
 
-@test "the master carries no high-pass: only the delivery encode filters audio" {
-	# The master is what every deliverable is cut from, so a filter there cannot be undone. Its
-	# audio is stream-copied, and ffmpeg refuses a filter on a copied stream.
+@test "the audio high-pass is built in exactly one place" {
 	local offenders
-	[[ " ${PRORES_MASTER[*]} " == *" -c:a copy "* ]] || fail "PRORES_MASTER no longer copies audio"
 	# The boundary is there because grade.sh's report line spells `audio_highpass=`.
 	offenders=$(grep -nE '(^|[^[:alnum:]_])highpass=|-af[[:space:]]' "$SCRIPTS"/*.sh \
 		| grep -v '/lib\.sh:' | grep -v ':[0-9]*:[[:space:]]*#' || true)

@@ -67,10 +67,6 @@ look and a clip's Adjust produce. _Avoid_: edit
 
 **Colour correction**: moving colour toward its measured spec. Not the correction stage.
 
-**Filmic route**: the abandoned log → linear → filmic tone map → Rec.709 approach
-(`make-filmic-lut.py`). It lost on colour to Apple's cube, having no gamut handling; the renderings
-that replaced that cube carry one. "Tone map" belongs to it.
-
 ## Measurement
 
 **Reference**: an object in frame with a standardised colour (plate yellow, traffic red and blue).
