@@ -132,7 +132,7 @@ public final class EngineRun {
 
         queue.async(group: group) {
             var buffer = ""
-            while let chunk = try? out.fileHandleForReading.read(upToCount: 4096), !chunk.isEmpty {
+            while let chunk = Self.readAvailable(out.fileHandleForReading) {
                 buffer += String(decoding: chunk, as: UTF8.self)
                 while let nl = buffer.firstIndex(of: "\n") {
                     let line = String(buffer[buffer.startIndex..<nl])
@@ -160,7 +160,7 @@ public final class EngineRun {
 
         queue.async(group: group) {
             var buffer = ""
-            while let chunk = try? err.fileHandleForReading.read(upToCount: 4096), !chunk.isEmpty {
+            while let chunk = Self.readAvailable(err.fileHandleForReading) {
                 let text = String(decoding: chunk, as: UTF8.self)
                 lock.lock()
                 stderrText += text
@@ -204,5 +204,22 @@ public final class EngineRun {
             malformed: malformed, stderrText: stderrText)
         lock.unlock()
         return outcome
+    }
+
+    /// Whatever the pipe holds now, up to 4 KB; nil at end of file or once the handle is closed.
+    ///
+    /// NOT `read(upToCount:)`, which waits for the whole count: a progress event is ~150 bytes, so
+    /// the queue's bar moved once every ~25 events, and a render looked stuck at nothing. NOT
+    /// `availableData` either: it raises an Objective-C exception, uncatchable here, when the bounded
+    /// wait below closes the handle under a blocked reader.
+    static func readAvailable(_ handle: FileHandle) -> Data? {
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        var n: Int
+        repeat {
+            n = buffer.withUnsafeMutableBytes {
+                Darwin.read(handle.fileDescriptor, $0.baseAddress, 4096)
+            }
+        } while n < 0 && errno == EINTR  // a signal is not the end of the stream
+        return n > 0 ? Data(buffer[0..<n]) : nil
     }
 }

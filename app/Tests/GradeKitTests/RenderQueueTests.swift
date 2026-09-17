@@ -88,6 +88,40 @@ final class RenderQueueTests: XCTestCase {
         XCTAssertEqual(queue.jobs[0].outputs.map(\.lastPathComponent), ["A_reels.mp4"])
     }
 
+    /// The stabiliser's pass reports frames too; they must not read as the render's.
+    func testTheStabilisationPassIsNotTheRender() throws {
+        // The stub holds the analysis state until the test has seen it, so nothing races.
+        let seen = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("seen-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: seen) }
+        let engine = try stubEngine(
+            script: """
+                #!/bin/bash
+                echo '{"event":"progress","label":"stabilise","state":"continue","frame":30}'
+                # Bounded, so a failing run does not leave this stub polling forever.
+                for _ in $(seq 500); do [ -f '\(seen.path)' ] && break; sleep 0.02; done
+                echo '{"event":"progress","label":"reels","state":"continue","frame":5}'
+                echo '{"event":"run_done","rendered":1,"skipped":0,"failed":0}'
+                """)
+        defer { try? FileManager.default.removeItem(at: engine.root) }
+        let queue = RenderQueue(engine: engine)
+        queue.enqueue([(URL(fileURLWithPath: "/tmp/A.mov"), "A", 48)])
+        var sawAnalysis = false
+        // Fires while waitForQueue spins the run loop, which is where the job's updates land.
+        let poll = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { timer in
+            if queue.jobs[0].analysing, queue.jobs[0].frame == 30 {
+                sawAnalysis = true
+                FileManager.default.createFile(atPath: seen.path, contents: nil)
+                timer.invalidate()
+            }
+        }
+        waitForQueue(queue, timeout: 10)
+        poll.invalidate()
+        XCTAssertTrue(sawAnalysis, "the analysis frames were never shown as analysis")
+        XCTAssertFalse(queue.jobs[0].analysing)
+        XCTAssertEqual(queue.jobs[0].frame, 5)
+    }
+
     /// The count the "clips delivered" toast shows. It was read before the delivered state landed,
     /// so a run that delivered a clip announced zero.
     func testTheFinishedCountIncludesTheClipJustDelivered() throws {

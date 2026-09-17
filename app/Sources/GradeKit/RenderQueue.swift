@@ -15,6 +15,8 @@ public final class RenderQueue: ObservableObject {
         public var state: State = .waiting
         /// Frames rendered so far, from the engine's progress events. Nil until it says.
         public var frame: Int?
+        /// The frames are the stabiliser's analysis pass, which comes before the render.
+        public var analysing = false
         public var outputs: [URL] = []
         /// How many frames this clip has, when it could be measured. Without it a frame count is a
         /// number with no scale, which is what "rendering, frame 412" was.
@@ -191,7 +193,11 @@ public final class RenderQueue: ObservableObject {
                     switch event.name {
                     case "progress":
                         if let frame = event.int("frame") {
-                            self?.update(job.id) { $0.frame = frame }
+                            let analysing = event.string("label") == "stabilise"
+                            self?.update(job.id) {
+                                $0.frame = frame
+                                $0.analysing = analysing
+                            }
                         }
                     case "output":
                         if let path = event.path {

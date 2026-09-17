@@ -693,6 +693,19 @@ PY
 		|| fail "the warp is not on the shrunk frame: $(grep -F '[0:v]' "$report")"
 }
 
+@test "the stabilisation pass reports progress under JSON=1, and prints nothing without it" {
+	local clip="$BATS_TEST_TMPDIR/sway.mov"
+	ffmpeg -y -v error -f lavfi -i "testsrc2=s=200x200:r=24:d=1" \
+		-vf "crop=160:160:x='20+8*sin(n*0.7)':y='20+8*cos(n*0.9)'" -c:v prores_ks "$clip"
+	JSON=1 run detect_transform "$clip" "$BATS_TEST_TMPDIR/a.trf"
+	[ "$status" -eq 0 ] || fail "detect failed: $output"
+	[ "$(head -1 "$BATS_TEST_TMPDIR/a.trf")" = "VID.STAB 1" ] || fail "no transform written"
+	[[ "$output" == *'"event":"progress","label":"stabilise"'* ]] || fail "no stabilise progress: $output"
+	printf '%s\n' "$output" | _json_lines || fail "progress broke the one-object-per-line contract:$output"
+	JSON=0 run detect_transform "$clip" "$BATS_TEST_TMPDIR/b.trf"
+	[ "$status" -eq 0 ] && [ -z "$output" ] || fail "the plain path printed: $output"
+}
+
 @test "transform_is_fresh refuses when the source it was measured from is gone" {
 	# Cannot prove freshness, so do not warp. A stale transform fights footage it was never
 	# measured on, which is visibly wrong output; dropping stabilisation is merely less good.
