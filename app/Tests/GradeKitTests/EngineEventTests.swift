@@ -92,7 +92,7 @@ final class EngineEventTests: XCTestCase {
     /// here the engine no longer emits is a refusal the interface still explains and nothing can
     /// produce, which is how a rename leaves the old name handled and the new one not.
     ///
-    /// EVERY SCRIPT, found rather than listed. This used to name three, and 02-grade.sh emitted a
+    /// EVERY SCRIPT, found rather than listed. This used to name three, and a staged script emitted a
     /// code none of them contained. The pattern is anchored to the start of a line so the function's
     /// definition and the `# emit_code <NAME>` in its comment cannot count as emitted.
     func testTheCodesTheEngineEmitsAreExactlyTheOnesTheAppKnows() throws {

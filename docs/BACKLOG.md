@@ -71,4 +71,3 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
 - HDR delivery.
 - Cameras other than iPhone Apple Log. Apple Log 2 maybe, much later.
 - The filmic route: it lost on colour (`docs/PIPELINE.md`).
-- A native render in AVFoundation (ADR 0008).

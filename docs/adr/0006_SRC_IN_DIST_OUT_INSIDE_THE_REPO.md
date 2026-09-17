@@ -1,11 +1,11 @@
 # src/ in, exports out, inside the work dir
 
 Footage lives in `src/`. Each run's deliverables go to a dated `LogGrade export <date time>/`, and
-everything else a render writes (reports, cubes, stabilisation, proofs, previews, staged masters) to
-a hidden `.loggrade/`, both in the work dir, which is the repo unless moved. Media is never
-committed. The export folder was `dist/03-final/`, nested among working folders a person does not
-deliver from. `GRADE_WORK_DIR`, or a path in `.workdir`, moves both elsewhere, such as an
-external disk. That is opt-in, because the default should work with no configuration.
+everything else a render writes (reports, cubes, stabilisation, proofs) to a hidden `.loggrade/`,
+both in the work dir, which is the repo unless moved. Media is never committed. `GRADE_WORK_DIR`,
+or a path in `.workdir`, moves both elsewhere, such as an external disk. That is opt-in, because the
+default should work with no configuration. The app sets `LOGGRADE_CACHE`, so its working files go
+to `~/Library/Caches/LogGrade` rather than beside a person's footage.
 
 ## Consequences
 

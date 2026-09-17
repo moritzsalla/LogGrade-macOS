@@ -1,7 +1,9 @@
 # The app drives the shell chain and never rebuilds it
 
-The app sets environment variables, spawns `scripts/grade.sh` and reads its event stream. It never
-constructs a filter graph or reimplements a stage. The engine is the source of truth for the image.
+The title records the original decision, since reversed in stages. The preview grades in-process
+(ADR 0009). Export still spawns `scripts/grade.sh` and reads its event stream, and never builds a
+filter graph. A native export on the same in-process chain is being built and held to grade.sh by
+`ExportParityTests`; grade.sh stays the source of truth until it is at parity.
 
 ## Why not rebuild it in Core Image and AVFoundation
 
@@ -17,8 +19,8 @@ constructs a filter graph or reimplements a stage. The engine is the source of t
 
 ## Consequences
 
-- **A second implementation of the render is forbidden.** A preview that approximates it must be
-  measured against it (`LiveChainTests`, ADR 0009).
+- **A second implementation of the render is measured against grade.sh** (`LiveChainTests`,
+  `ExportParityTests`), never trusted on sight.
 - **Enforced by a test.** `EndToEndTests` renders one clip from the shell and from the app and
   asserts identical bytes. Same binary, same arguments, so any difference means the app built its
   own graph.

@@ -125,7 +125,6 @@ public enum EngineCode: Equatable {
     case noTransform
     case renderFailed
     case frameFailed
-    case stagedPathCannotApplyPreConversion
     case unknown(String)
 
     /// Every name the app knows, as data rather than as a `switch`, so a test can compare the set
@@ -147,7 +146,6 @@ public enum EngineCode: Equatable {
         "REFUSE_PROOF_AND_FRAME": .proofAndFrameTogether,
         "REFUSE_FRAME_STAGE": .unknownFrameStage,
         "REFUSE_FPS_RETIME": .fpsWouldNeedRetiming,
-        "REFUSE_STAGED_PRE_CONVERSION": .stagedPathCannotApplyPreConversion,
         "STALE_TRANSFORM": .staleTransform,
         "NO_TRANSFORM": .noTransform,
         "RENDER_FAILED": .renderFailed,
@@ -197,8 +195,6 @@ public enum EngineCode: Equatable {
         case .noTransform: return "no stabilisation transform, rendering unstabilised"
         case .renderFailed: return "the render failed; the previous output was left alone"
         case .frameFailed: return "the preview frame failed"
-        case .stagedPathCannotApplyPreConversion:
-            return "the staged path cannot apply a correction or halation — see scripts/02-grade.sh"
         case .unknown(let raw): return raw
         }
     }

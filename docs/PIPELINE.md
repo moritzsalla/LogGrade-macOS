@@ -87,7 +87,7 @@ not the chain's).
 - **Colour correction toward spec.** Apple's cube landed the colour on its own: traffic blue
   measured B/G 1.99 against a 1.98 spec with nothing applied, and every correction tried moved a
   reference off spec. The flatness was tone, not colour. Measured on one shoot's signage.
-- **The filmic route** (`make-filmic-lut.py`, log → linear → filmic → Rec.709). It gave a better
+- **The filmic route** (log → linear → filmic → Rec.709). It gave a better
   tone range, but lost on colour. A per-channel curve cannot do a BT.2020 gamut matrix, so it
   desaturated, and the compensating saturation overshot blue to 2.45.
 - **Apple's `AppleLogToRec709` cube, and grading after it.** It lands log 0.75–1.0 on output

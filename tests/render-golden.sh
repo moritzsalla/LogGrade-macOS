@@ -57,8 +57,8 @@ esac
 
 ffmpeg_build() { ffmpeg -version | head -1; }
 
-# Every file the default render reads, relative to ROOT. shipped.cube is left out because it is
-# generated from look.json by a script already on the list; check.sh because it renders nothing.
+# Every file the default render reads, relative to ROOT. check.sh is left out because it renders
+# nothing.
 inputs() {
 	local f
 	for f in look.json scripts/* luts/rendering/*.cube; do

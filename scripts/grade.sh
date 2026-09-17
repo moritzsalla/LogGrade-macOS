@@ -51,15 +51,11 @@
 #                     lib.sh picks between them. The whole bats suite runs through this.
 #   CONVERT=<name>    the conversion out of Apple Log for this run, overriding look.json's
 #                     convert.cube: a cube from luts/rendering/ or luts/film/.
-#   LOOK_FILE=<path>  which look.json every stage reads (lib.sh). Changing it changes the grade,
+#   LOOK_FILE=<path>  which look.json the run reads (lib.sh). Changing it changes the grade,
 #                     so it is a knob like any other rather than an implementation detail.
 #
-# WHY ONE PASS. The staged pipeline (01-baseline -> 02-grade -> 03-final) writes two ~2.5GB ProRes
-# intermediates per clip and decodes the footage three times. Those intermediates existed so the
-# look could be re-tuned without redoing the CST. The look is now FROZEN, so they earn nothing:
-# nothing ever re-renders from the master. Collapsing to a single filter graph removes two full
-# encodes, two full decodes and ~5GB of disk per clip. The staged scripts are kept for re-tuning;
-# this is the path for production runs.
+# ONE PASS: no intermediate files. ProRes intermediates would cost two ~2.5GB encodes and two extra
+# decodes per clip, and nothing ever re-renders from one.
 #
 # WHAT IS AUTOMATIC vs WHAT THIS REFUSES TO GUESS:
 #   automatic  exposure match, stabilisation, the whole grade, tag verification
@@ -179,15 +175,13 @@ fi
 REPORT_DIR="$(work_cache "$WORK")/reports"
 # A persistent cache for the per-clip tone LUTs the exposure match generates. It used to be
 # assigned over WORK itself, which left one name meaning two things — and the stabilisation
-# path below was then built from the wrong one, landing inside the cache instead of
-# where 00-stabilise-detect.sh writes. WORK stays the work-dir root.
+# path below was then built from the wrong one, landing inside the cache instead of at
+# transform_path. WORK stays the work-dir root.
 CACHE="$(work_cache "$WORK")/work"
 
 # --- the look. Every value comes from look.json; nothing here holds a copy. ---
-# This path used to carry its own tone block while reading colour, grain and stabilisation from
-# look.json, so a grade sent from the since-removed Bench updated shipped.cube and the staged path
-# while THIS script kept rendering the previous tone. That is the two-copies-one-edited failure
-# look() was written to end, one layer up. No fallbacks on purpose: a missing value must stop the
+# This script used to carry its own tone block while reading colour, grain and stabilisation from
+# look.json: the two-copies-one-edited failure look() was written to end. No fallbacks on purpose: a missing value must stop the
 # run, not quietly substitute a different look.
 # Every one of these is spliced into an ffmpeg filter graph, and the look file is usually the
 # app's LOOK_FILE rather than typed — see require_number in lib.sh for why that matters.
@@ -321,7 +315,7 @@ fi
 # of IMG_0609.
 #
 # WHICH deliverables crop is a fact about the SOURCE's shape, not about their names: a 4:5 frame is
-# a crop of a 9:16 master and the whole frame of a 4:5 one, and 9:16 is a crop of a landscape one.
+# a crop of a 9:16 source and the whole frame of a 4:5 one, and 9:16 is a crop of a landscape one.
 # So it needs measurements, taken here because this refusal has to land before anything is created —
 # a run that refuses halfway through has already written files someone has to reason about. It
 # costs one decode a clip (~0.6s), against three minutes a clip.
@@ -412,8 +406,7 @@ done
 # usage and exited 1 — a usage error leaving litter in the folder someone delivers from, and one
 # stray report per suite run.
 #
-# 10GB is the staged stages' margin, kept although this path writes no ProRes masters; nothing
-# records a measurement for a one-pass run, so it has not been lowered on a guess.
+# 10GB is inherited, not measured for this render; it has not been lowered on a guess.
 check_disk_space "$WORK" 10
 # The export folder is made only when a deliverable is about to land in it: a preview, a dry run or
 # a refused clip must not leave an empty dated folder behind.
