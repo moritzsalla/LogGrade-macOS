@@ -44,7 +44,7 @@ public enum NativeSource {
         }
     }
 
-    private static let context = CIContext(options: [
+    static let context = CIContext(options: [
         .workingColorSpace: NSNull(), .outputColorSpace: NSNull(),
     ])
 
@@ -85,17 +85,28 @@ public enum NativeSource {
         else { throw Failure.noFrame }
         defer { reader.cancelReading() }
 
-        var image = CIImage(cvPixelBuffer: buffer, options: [.colorSpace: NSNull()])
-        let flipBefore = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: image.extent.height)
-        image = image.transformed(by: flipBefore.concatenating(track.preferredTransform))
-        image = image.transformed(
-            by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
-        image = image.transformed(
-            by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: image.extent.height))
+        let image = oriented(buffer, by: track.preferredTransform)
         let size = FrameSize(width: Int(image.extent.width), height: Int(image.extent.height))
-
         let scale = Double(height) / image.extent.height
         let width = Int((image.extent.width * scale / 2).rounded()) * 2
+        return Frame(image: try scaled(image, width: width, height: height), sourceSize: size)
+    }
+
+    /// The decoded picture, colour values untouched, turned upright by the track's transform.
+    static func oriented(_ buffer: CVPixelBuffer, by transform: CGAffineTransform) -> CIImage {
+        var image = CIImage(cvPixelBuffer: buffer, options: [.colorSpace: NSNull()])
+        let flipBefore = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: image.extent.height)
+        image = image.transformed(by: flipBefore.concatenating(transform))
+        image = image.transformed(
+            by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+        return image.transformed(
+            by: CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: image.extent.height))
+    }
+
+    /// Lanczos to exactly `width` x `height`, the two factors set separately as ffmpeg's are, into
+    /// 16-bit RGB with no colour management.
+    static func scaled(_ image: CIImage, width: Int, height: Int) throws -> CGImage {
+        let scale = Double(height) / image.extent.height
         guard let lanczos = CIFilter(name: "CILanczosScaleTransform") else {
             throw Failure.renderFailed
         }
@@ -108,6 +119,6 @@ public enum NativeSource {
                 scaled, from: CGRect(x: 0, y: 0, width: width, height: height),
                 format: .RGBA16, colorSpace: CGColorSpaceCreateDeviceRGB())
         else { throw Failure.renderFailed }
-        return Frame(image: rendered, sourceSize: size)
+        return rendered
     }
 }
