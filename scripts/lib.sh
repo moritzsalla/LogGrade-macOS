@@ -81,12 +81,20 @@ baseline_path()      { printf '%s/baseline/%s_baseline.mov\n' "$(work_cache "$1"
 graded_master_path() { printf '%s/masters/%s_graded.mov\n' "$(work_cache "$1")" "$2"; }    # <work> <clip>
 transform_path()     { printf '%s/stabilisation/%s.trf\n' "$(work_cache "$1")" "$2"; }     # <work> <clip>
 
-# EVERYTHING THAT IS NOT A DELIVERABLE lives in one hidden folder in the work dir: the stabilisation
+# EVERYTHING THAT IS NOT A DELIVERABLE lives in one folder per work dir: the stabilisation
 # analysis, generated cubes, run reports, preview frames, proofs and the staged path's masters.
-# Hidden, because the work dir is the folder a person exports into and uploads from, and Finder
-# does not show it. Beside the export rather than in ~/Library/Caches, because a transform is
-# fresh by timestamp against a clip NAME: two shoots' IMG_0609 must not share one.
-work_cache() { printf '%s/.loggrade\n' "$1"; }  # <work>
+# By default a hidden `.loggrade` in the work dir. LOGGRADE_CACHE is a ROOT elsewhere (the app passes
+# ~/Library/Caches/LogGrade, because the user found the hidden folders in their footage), under which
+# each work dir gets its own folder, named by a checksum of its path. ONE PER WORK DIR either way: a
+# transform is fresh by timestamp against a clip NAME, so two shoots' IMG_0609 must not share one,
+# even when one exported LOGGRADE_CACHE serves both.
+work_cache() {  # <work>
+	if [ -n "${LOGGRADE_CACHE:-}" ]; then
+		printf '%s/%s\n' "$LOGGRADE_CACHE" "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"
+	else
+		printf '%s/.loggrade\n' "$1"
+	fi
+}
 
 # Where a run's deliverables go: one folder per export, named for when it started, so an export
 # never overwrites an earlier one and the folder says what it is. EXPORT_DIR names it outright,

@@ -650,6 +650,7 @@ final class GradeModel: ObservableObject {
                     ?? missingLook.appendingPathComponent("no-look-for-\(stem).json")
                 var env = project.environment(for: stem, lookFile: file)
                 env["GRADE_WORK_DIR"] = destination.path
+                env["LOGGRADE_CACHE"] = Project.cacheRoot.path
                 env["EXPORT_DIR"] = export.path
                 if adjustOff { env["MATCH"] = "0" }
                 return env

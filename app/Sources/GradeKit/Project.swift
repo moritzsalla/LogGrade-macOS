@@ -233,6 +233,13 @@ public struct Project: Equatable {
         return destination.appendingPathComponent("LogGrade export \(format.string(from: date))")
     }
 
+    /// The root the engine keeps its working files under (`LOGGRADE_CACHE`): the user's Caches,
+    /// not beside the footage, where the user found them. The engine gives each work dir its own
+    /// folder beneath it (`work_cache` in scripts/lib.sh).
+    public static let cacheRoot = FileManager.default.urls(
+        for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("LogGrade", isDirectory: true)
+
     /// Replaces the saved presets with the app's own, keeping the active choice where it still
     /// exists and falling back where it does not.
     ///
