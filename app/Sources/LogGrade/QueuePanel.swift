@@ -154,10 +154,11 @@ struct QueuePanel: View {
         switch job.state {
         case .waiting: return "waiting"
         case .running:
+            let doing = job.analysing ? "analysing shake" : "rendering"
             if let fraction = job.fractionDone {
-                return "rendering, \(Int(fraction * 100))%"
+                return "\(doing), \(Int(fraction * 100))%"
             }
-            return job.frame.map { "rendering, frame \($0)" } ?? "rendering"
+            return job.frame.map { "\(doing), frame \($0)" } ?? doing
         case .done:
             let names = job.outputs.map(\.lastPathComponent)
             return names.isEmpty ? "done" : "done: " + names.joined(separator: ", ")

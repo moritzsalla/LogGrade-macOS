@@ -1061,7 +1061,9 @@ delivery_encode_args() {  # delivery_encode_args  -> sets DELIVERY_ARGS
 	case "$DELIVERY_CODEC:$DELIVERY_QUALITY" in
 		h264:auto)    preset=medium crf=18;;
 		h264:high)    preset=slow   crf=16;;
-		h264:max)     preset=slower crf=14;;
+		# slow, not slower: on a 1080x1920 Portra 800 render slower took 2.3x as long (54 s vs 23 s for
+		# 5 s) for SSIM 0.98624 vs 0.98611, the same size, and 98.9% vs 98.6% of the fine texture.
+		h264:max)     preset=slow   crf=14;;
 		hevc:auto)    preset=medium crf=20;;
 		hevc:high)    preset=slow   crf=18;;
 		hevc:max)     preset=slower crf=16;;
@@ -1355,8 +1357,21 @@ detect_transform() {  # detect_transform <input> <trf> [head-prefix]
 	DETECT_PARTIAL="$2.partial"
 	mkdir -p "$(dirname "$2")"
 	trap 'rm -f "$DETECT_PARTIAL" "$DETECT_PARTIAL.half"' EXIT
-	if ! ffmpeg -v error -y -i "$1" \
-		-vf "scale=trunc(iw/2):trunc(ih/2):flags=bilinear,${3:-}vidstabdetect=shakiness=5:accuracy=15:stepsize=6:fileformat=ascii:result=${DETECT_PARTIAL}.half" -f null - \
+	local detect=(-y -i "$1"
+		-vf "scale=trunc(iw/2):trunc(ih/2):flags=bilinear,${3:-}vidstabdetect=shakiness=5:accuracy=15:stepsize=6:fileformat=ascii:result=${DETECT_PARTIAL}.half" -f null -)
+	local rc=0
+	# PROGRESS under JSON=1, labelled `stabilise`: the pass takes about as long as the render, and a
+	# queue showing nothing for that long reads as stuck. Same pipeline and PIPESTATUS dance as
+	# render_delivery.
+	if [ "$JSON" = "1" ]; then
+		set +e
+		ffmpeg -v error -progress pipe:1 -nostats "${detect[@]}" | progress_events stabilise
+		rc="${PIPESTATUS[0]}"
+		set -e
+	else
+		ffmpeg -v error "${detect[@]}" || rc=$?
+	fi
+	if [ "$rc" -ne 0 ] \
 		|| ! require_nonempty "$DETECT_PARTIAL.half" "stabilisation analysis" \
 		|| ! scale_transform "$DETECT_PARTIAL.half" 2 > "$DETECT_PARTIAL"; then
 		rm -f "$DETECT_PARTIAL" "$DETECT_PARTIAL.half"
