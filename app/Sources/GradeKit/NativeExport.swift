@@ -87,6 +87,10 @@ public enum NativeExport {
             look, metered: metered, frameLongEdge: max(plan.frameWidth, plan.frameHeight),
             sourceLongEdge: max(sourceSize.width, sourceSize.height))
         let finish = DeliveryFinish(look: look)
+        // Grain in the negative, on the shared frame, as grade.sh's grain_prefix adds it.
+        let grain = LiveGrain(
+            strength: look.grainStrength, frameWidth: plan.frameWidth,
+            frameHeight: plan.frameHeight)
         let range =
             proofSeconds.map {
                 CMTimeRange(start: .zero, duration: CMTime(seconds: $0, preferredTimescale: 600))
@@ -151,14 +155,12 @@ public enum NativeExport {
                 if let gpu {
                     try gpu.render(
                         source: buffer, turns: turns, frameWidth: plan.frameWidth,
-                        frameHeight: plan.frameHeight, grade: built.chain,
+                        frameHeight: plan.frameHeight, grade: built.chain, grain: grain,
+                        frame: index,
                         targets: try outputs.map { output in
                             MetalFrame.Target(
                                 crop: (output.target.crop.x, output.target.crop.y),
-                                finish: finish, output: try output.nextBuffer(),
-                                plate: finish.plate(
-                                    width: output.target.width, height: output.target.height,
-                                    frame: index))
+                                finish: finish, output: try output.nextBuffer())
                         })
                     for output in outputs { try output.appendPending(at: time) }
                     index += 1
@@ -169,7 +171,7 @@ public enum NativeExport {
                 guard
                     let converted = LiveChain.converted(
                         rgba16: pixels, width: plan.frameWidth, height: plan.frameHeight,
-                        through: built.chain.stages)
+                        through: built.chain.stages, grain: grain, frame: index)
                 else { throw Failure.frame }
                 let rgba = LiveChain.gradedPixels(converted, with: built.chain.grade)
                 for output in outputs {
@@ -621,7 +623,7 @@ public enum NativeExport {
             for row in 0..<h {
                 for col in 0..<w { luma[row * w + col] = yPlane[row * yRow + col] }
             }
-            finish.apply(to: &luma, width: w, height: h, frame: frame)
+            finish.apply(to: &luma, width: w, height: h)
             for row in 0..<h {
                 for col in 0..<w { yPlane[row * yRow + col] = luma[row * w + col] }
             }

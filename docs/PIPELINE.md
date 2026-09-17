@@ -11,8 +11,8 @@ ADR 0003.
   early sharpening bakes in halos. The log denoise is the one exception, and it runs before the
   conversion, where the noise is still the sensor's.
 - **Master:** the graded ProRes. Re-export from it, never from a delivered MP4.
-- **Final:** Lanczos downscale, then sharpen (mild, luma only), then grain (a half-resolution plate,
-  after the sharpener). Grain before the sharpener gets rung by it. The one-pass render downscales
+- **Final:** Lanczos downscale, then sharpen (mild, luma only). Grain is earlier, in the log picture
+  before the conversion (`grain_prefix`), so the stock shapes it. The one-pass render downscales
   BEFORE the grade (`delivery_geometry`): twice as fast on IMG_0609, and against grading at 4K the
   final measured 41.7 dB luma / 50 dB chroma PSNR with mean level and saturation within 0.1.
   A clip's deliverables share that pass (`render_deliverables`): reels and feed of 3s of IMG_0609
@@ -38,23 +38,20 @@ dBFS), not the loudest; 80–120 Hz is as loud as anything (−39.0). 60 Hz take
 and −1.8 dB off the peak while leaving 80–120 Hz within −0.7 dB. 70/80 Hz cut more of the loud band.
 Bands were measured with `firequalizer` band-passes into `astats`, which leak within 3 Hz of an edge.
 
-## Sharpen and grain at other heights
+## Sharpen at other heights
 
-IMG_0607 frame 12, luma, code values, not yet judged by eye. Grain = default − `GRAIN_STRENGTH=0` in
-flat sky; sharpen = that − delivery `unsharp` amount 0; corr/hw = lag where horizontal
-autocorrelation falls below 0.5.
+IMG_0607 frame 12, luma, code values, not yet judged by eye. Sharpen = default − delivery `unsharp`
+amount 0 in flat sky; hw = lag where horizontal autocorrelation falls below 0.5.
 
-| Height | r | Grain RMS | Grain corr px | Sharpen RMS | Sharpen hw %h |
-|---|---|---|---|---|---|
-| 960 | 3 | 3.14 | 1.03 | 3.17 | 0.070 |
-| 1280 | 3 | 3.06 | 1.10 | 2.92 | 0.053 |
-| 1920 | 5 | 3.00 | 1.21 | 3.04 | 0.043 |
-| 2560 | 7 | 2.94 | 1.26 | 2.95 | 0.038 |
+| Height | r | Sharpen RMS | Sharpen hw %h |
+|---|---|---|---|
+| 960 | 3 | 3.17 | 0.070 |
+| 1280 | 3 | 2.92 | 0.053 |
+| 1920 | 5 | 3.04 | 0.043 |
+| 2560 | 7 | 2.95 | 0.038 |
 
-Measured when grain was a fixed half-resolution plate and the radius followed height: grain stayed
-about one output pixel, 1.7× coarser relative to the picture at 960 than at 1920. Both now scale
-with the short edge against 1080 (`grain_plate`, `delivery_image_chain`). About 1.6
-of each sharpen RMS is sky noise and encode disagreement.
+The radius scales with the short edge against 1080 (`delivery_image_chain`), as the grain's softening
+does (`grain_prefix`). About 1.6 of each sharpen RMS is sky noise and encode disagreement.
 
 ## Tone shaping
 

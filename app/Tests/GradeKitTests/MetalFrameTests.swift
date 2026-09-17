@@ -3,7 +3,7 @@ import XCTest
 
 @testable import GradeKit
 
-/// The GPU finish against `DeliveryFinish` on the same picture and the same grain plate.
+/// The GPU finish against `DeliveryFinish` on the same picture.
 final class MetalFrameTests: XCTestCase {
     func testTheGPUFinishIsTheCPUFinish() throws {
         let frame: MetalFrame
@@ -28,9 +28,6 @@ final class MetalFrameTests: XCTestCase {
         }
         var look = try lookFixture()
         look.finish.sharpen = 0.6
-        look.grainStrength = 4
-        look.grainShadows = 0.8
-        look.grainHighlights = 0.6
         let finish = DeliveryFinish(look: look)
 
         var made: CVPixelBuffer?
@@ -41,10 +38,9 @@ final class MetalFrameTests: XCTestCase {
                 kCVPixelBufferIOSurfacePropertiesKey: [String: Any](),
             ] as CFDictionary, &made)
         let output = try XCTUnwrap(made)
-        let plate = finish.plate(width: w, height: h, frame: 3)
         try frame.finish(
             rgba: rgba, width: w, height: h,
-            targets: [.init(crop: (0, 0), finish: finish, output: output, plate: plate)])
+            targets: [.init(crop: (0, 0), finish: finish, output: output)])
 
         // The CPU side from the same luma the GPU starts from: 709 video range, rounded.
         var luma = [UInt8](repeating: 0, count: w * h)
@@ -55,7 +51,7 @@ final class MetalFrameTests: XCTestCase {
             let yl = 0.2126 * r + 0.7152 * g + 0.0722 * b
             luma[i] = UInt8((16 + yl * 219 / 255 + 0.5).rounded(.down))
         }
-        finish.apply(to: &luma, width: w, height: h, frame: 3)
+        finish.apply(to: &luma, width: w, height: h)
 
         CVPixelBufferLockBaseAddress(output, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(output, .readOnly) }

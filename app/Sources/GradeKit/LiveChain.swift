@@ -91,13 +91,17 @@ public struct LiveChain {
 
     /// The same, from 16-bit RGBA pixels in host order, for a caller that already has them: the
     /// export, which would otherwise draw every frame into a CGImage only to read it back.
+    ///
+    /// `grain`, for an export only, is added to the log picture after halation and before the
+    /// conversion (`LiveGrain`); `frame` numbers it.
     public static func converted(
-        rgba16 source: [UInt16], width: Int, height: Int, through stages: ColourStages
+        rgba16 source: [UInt16], width: Int, height: Int, through stages: ColourStages,
+        grain: LiveGrain? = nil, frame: Int = 0
     ) -> Converted? {
         guard width > 0, height > 0, source.count >= width * height * 4 else { return nil }
         var rgb = [UInt8](repeating: 255, count: width * height * 4)
         let scale = Float(1.0 / 65535.0)
-        if let halation = stages.halation {
+        if stages.halation != nil || grain != nil {
             var log = [Float](repeating: 0, count: width * height * 3)
             let correction = stages.correction
             source.withUnsafeBufferPointer { src in
@@ -115,7 +119,8 @@ public struct LiveChain {
                     }
                 }
             }
-            halation.apply(to: &log, width: width, height: height)
+            stages.halation?.apply(to: &log, width: width, height: height)
+            grain?.apply(to: &log, width: width, height: height, frame: frame)
             let after = stages.afterHalation
             log.withUnsafeBufferPointer { src in
                 rgb.withUnsafeMutableBufferPointer { out in

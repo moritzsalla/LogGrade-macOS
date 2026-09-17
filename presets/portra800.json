@@ -48,9 +48,7 @@
     "warmth": 0.0
   },
   "grain": {
-    "strength": 12,
-    "shadows": 1.0,
-    "highlights": 0.5
+    "strength": 12
   },
   "stabilisation": {
     "smoothing": 30

@@ -332,10 +332,6 @@ public struct Look: Equatable {
     public var tone: Tone
     public var colour: Colour
     public var grainStrength: Double
-    /// The grain's weight at black and at white, 1 at the midtones. Both at 1 is flat grain, and
-    /// leaves the weighting out of the render. `grain.shadows` and `grain.highlights` in the file.
-    public var grainShadows: Double
-    public var grainHighlights: Double
     public var stabilisationSmoothing: Double
     /// The centre-weighted log-average, in stops from 0.18, each clip is metered to.
     public var matchReferenceStops: Double
@@ -347,7 +343,6 @@ public struct Look: Equatable {
         a.convertCube == b.convertCube && a.correct == b.correct && a.halation == b.halation
             && a.hue == b.hue && a.tone == b.tone
             && a.colour == b.colour && a.grainStrength == b.grainStrength
-            && a.grainShadows == b.grainShadows && a.grainHighlights == b.grainHighlights
             && a.stabilisationSmoothing == b.stabilisationSmoothing
             && a.matchReferenceStops == b.matchReferenceStops && a.finish == b.finish
     }
@@ -417,8 +412,6 @@ public struct Look: Equatable {
             warmth: try number(colourBlock, "warmth", "colour.warmth"))
         let grainBlock = try block("grain")
         grainStrength = try number(grainBlock, "strength", "grain.strength")
-        grainShadows = try number(grainBlock, "shadows", "grain.shadows")
-        grainHighlights = try number(grainBlock, "highlights", "grain.highlights")
         stabilisationSmoothing = try number(
             try block("stabilisation"), "smoothing",
             "stabilisation.smoothing")
@@ -460,8 +453,7 @@ public struct Look: Equatable {
         ]
         root["colour"] = ["saturation": colour.saturation, "warmth": colour.warmth]
         root["grain"] = [
-            "strength": grainStrength, "shadows": grainShadows,
-            "highlights": grainHighlights,
+            "strength": grainStrength
         ]
         root["stabilisation"] = ["smoothing": stabilisationSmoothing]
         root["match"] = ["reference_stops": matchReferenceStops]

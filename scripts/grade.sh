@@ -455,7 +455,7 @@ say "convert: $CONVERT_NAME"
 [ -n "$FRAME" ] || report_environment "$ROOT"
 # The EFFECTIVE values, after defaults and look.json, which is what a report read weeks later needs:
 # the environment that launched the run is gone by then.
-report_line "knobs:   deliverables=$(IFS=,; printf '%s' "${D_NAME[*]}") width=$WIDTH height=$HEIGHT crop_offset=${CROP_OFFSET_OK:--} match=$MATCH stab=$STAB smoothing=$SMOOTHING grain=$GRAIN_STRENGTH fps_out=${FPS_OUT:--} proof=${PROOF:--} frame=${FRAME:--} frame_height=$FRAME_HEIGHT frame_stage=$FRAME_STAGE halation=${HAL_STRENGTH}/${HAL_THRESHOLD}/${HAL_RADIUS}/${HAL_TINT} grain_weights=${GRAIN_SHADOWS}/${GRAIN_HIGHLIGHTS} audio_highpass=${AUDIO_HIGHPASS_HZ} codec=$DELIVERY_CODEC quality=$DELIVERY_QUALITY container=$DELIVERY_CONTAINER audio=$DELIVERY_AUDIO correct_size=$CORRECT_SIZE convert=$CONVERT_NAME reference_stops=$REF_STOPS denoise=$DENOISE_STRENGTH sharpen=$SHARPEN gauge=$GAUGE dry=$DRY json=$JSON"
+report_line "knobs:   deliverables=$(IFS=,; printf '%s' "${D_NAME[*]}") width=$WIDTH height=$HEIGHT crop_offset=${CROP_OFFSET_OK:--} match=$MATCH stab=$STAB smoothing=$SMOOTHING grain=$GRAIN_STRENGTH fps_out=${FPS_OUT:--} proof=${PROOF:--} frame=${FRAME:--} frame_height=$FRAME_HEIGHT frame_stage=$FRAME_STAGE halation=${HAL_STRENGTH}/${HAL_THRESHOLD}/${HAL_RADIUS}/${HAL_TINT} audio_highpass=${AUDIO_HIGHPASS_HZ} codec=$DELIVERY_CODEC quality=$DELIVERY_QUALITY container=$DELIVERY_CONTAINER audio=$DELIVERY_AUDIO correct_size=$CORRECT_SIZE convert=$CONVERT_NAME reference_stops=$REF_STOPS denoise=$DENOISE_STRENGTH sharpen=$SHARPEN gauge=$GAUGE dry=$DRY json=$JSON"
 report_line "work:    $WORK"
 report_line "preflight took $(fmt_ms "$T_PREFLIGHT")"
 say ""
@@ -686,9 +686,14 @@ for SRC in "${CLIPS[@]}"; do
 		local HALATION_PREFIX=""
 		[ -z "$HAL_DIR" ] || HALATION_PREFIX="$(halation_prefix "$HAL_DIR" \
 			"$(delivery_halation_sigma "$SRC_W" "$SRC_H" "$HAL_RADIUS" "$scale")" "$HAL_STRENGTH" "$HAL_TINT")"
+		# Grain in the log picture, after the glow and before the stock (grain_prefix). Exports only: a
+		# preview still has none, as it has no sharpener.
+		local grain grain_size=1 grain_gain=1
+		[ "$GAUGE" != super8 ] || { grain_size="$SUPER8_GRAIN_SIZE"; grain_gain="$SUPER8_GRAIN_GAIN"; }
+		grain="$(grain_prefix "$fw" "$fh" "$FPS" "$GRAIN_STRENGTH" "$grain_size" "$grain_gain")"
 		local shared
 		shared="$(delivery_geometry "$fw" "$fh" "$stab")$(grade_chain "$TONE" "$SAT" "$WARM" \
-  "${DENOISE_PREFIX}${CLIP_CORRECT_PREFIX}${HALATION_PREFIX}lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},")"
+  "${DENOISE_PREFIX}${CLIP_CORRECT_PREFIX}${HALATION_PREFIX}${grain}lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},")"
 		local args=() label=""
 		for (( i = 0; i < n; i++ )); do
 			args+=("${R_OUT[$i]}" "$WIDTH" "${R_H[$i]}" \

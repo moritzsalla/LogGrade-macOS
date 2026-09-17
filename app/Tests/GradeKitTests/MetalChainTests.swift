@@ -170,4 +170,82 @@ final class MetalChainTests: XCTestCase {
             XCTAssertLessThanOrEqual(worst, 2, "\(look.convertCube): \(worst) codes off")
         }
     }
+
+    /// The GPU's grain is the CPU's: the same hashed noise, blur and mix, through a film stock.
+    func testTheGPUGrainIsTheCPUGrain() throws {
+        let engine = try engineCheckout()
+        let metal: MetalChain
+        do { metal = try MetalChain() } catch { throw XCTSkip("\(error)") }
+        let width = 320
+        let height = 240
+        // A log ramp, so the stock's toe, midtones and shoulder all see grain.
+        var source = [UInt16](repeating: UInt16.max, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let v = UInt16(Double(x) / Double(width - 1) * 60000 + 2000)
+                let i = (y * width + x) * 4
+                (source[i], source[i + 1], source[i + 2]) = (v, v, v)
+            }
+        }
+        let film = try XCTUnwrap(
+            engine.shippedPresets().first { $0.look.convertCube == "portra800" }
+        ).look
+        let chain = try ChainBuilder(engine: engine).build(
+            film, metered: nil, frameLongEdge: width, sourceLongEdge: width
+        ).chain
+        let grain = try XCTUnwrap(LiveGrain(strength: 12, frameWidth: 1080, frameHeight: 1920))
+        let cpu = LiveChain.gradedPixels(
+            try XCTUnwrap(
+                LiveChain.converted(
+                    rgba16: source, width: width, height: height, through: chain.stages,
+                    grain: grain, frame: 5)), with: chain.grade)
+        let gpu = try metal.graded(
+            rgba16: source, width: width, height: height, chain: chain, grain: grain, frame: 5)
+        let plain = LiveChain.gradedPixels(
+            try XCTUnwrap(
+                LiveChain.converted(
+                    rgba16: source, width: width, height: height, through: chain.stages)),
+            with: chain.grade)
+        var worst = 0
+        var grainEnergy = 0.0
+        for i in 0..<cpu.count where i % 4 != 3 {
+            worst = max(worst, abs(Int(cpu[i]) - Int(gpu[i])))
+            grainEnergy += Double((Int(cpu[i]) - Int(plain[i])) * (Int(cpu[i]) - Int(plain[i])))
+        }
+        // Float on both, not the same instructions: worst 1 code measured.
+        XCTAssertLessThanOrEqual(worst, 1, "the GPU's grain is \(worst) codes from the CPU's")
+        // And there is grain to compare: a test of two grain-free pictures would pass too.
+        XCTAssertGreaterThan(
+            (grainEnergy / Double(cpu.count / 4 * 3)).squareRoot(), 1, "no grain was added")
+    }
+
+    /// The grain is the size it is specified to be: per-channel sd strength * 0.00064 in log, 90%
+    /// of its variance shared by the three channels, and nothing added on average.
+    func testTheGrainIsItsSpecifiedSize() throws {
+        let width = 540
+        let height = 960
+        let grain = try XCTUnwrap(LiveGrain(strength: 12, frameWidth: width, frameHeight: height))
+        var log = [Float](repeating: 0.5, count: width * height * 3)
+        grain.apply(to: &log, width: width, height: height, frame: 1)
+        func channel(_ c: Int) -> [Double] {
+            stride(from: c, to: log.count, by: 3).map { Double(log[$0]) - 0.5 }
+        }
+        let (r, g, b) = (channel(0), channel(1), channel(2))
+        func mean(_ v: [Double]) -> Double { v.reduce(0, +) / Double(v.count) }
+        func sd(_ v: [Double]) -> Double {
+            let m = mean(v)
+            return (v.map { ($0 - m) * ($0 - m) }.reduce(0, +) / Double(v.count)).squareRoot()
+        }
+        func corr(_ a: [Double], _ b: [Double]) -> Double {
+            let (ma, mb) = (mean(a), mean(b))
+            return zip(a, b).map { ($0 - ma) * ($1 - mb) }.reduce(0, +) / Double(a.count)
+                / (sd(a) * sd(b))
+        }
+        for (name, v) in [("red", r), ("green", g), ("blue", b)] {
+            XCTAssertEqual(sd(v), 12 * 0.00064, accuracy: 12 * 0.00064 * 0.05, "\(name) sd")
+            XCTAssertEqual(mean(v), 0, accuracy: 0.0002, "\(name) mean")
+        }
+        XCTAssertEqual(corr(r, g), 0.9, accuracy: 0.03, "red and green share the grain")
+        XCTAssertEqual(corr(r, b), 0.9, accuracy: 0.03, "red and blue share the grain")
+    }
 }

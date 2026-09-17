@@ -956,14 +956,8 @@ source_fps() {  # source_fps <file>
 # backwards and a zscale on a different branch fails with "code 3074: no path between
 # colorspaces", pointing at a filter that is not the problem. Every filter was bisected
 # individually and all passed; only the pair fails.
+# shellcheck disable=SC2034  # read by grade.sh
 DELIVERY_SETPARAMS="setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=limited"
-
-# `shortest=1` on the blend is REQUIRED, and `-shortest` is not a substitute. The grey plate is an
-# infinite lavfi source; with filter_complex, `-shortest` does not reliably stop the encode, so the
-# render runs forever and the output grows without bound (observed: a 26s clip past 189MB and still
-# going, with no moov atom ever written). The blend option terminates on the shortest input, which
-# is the video.
-DELIVERY_BLEND="blend=all_mode=grainmerge:shortest=1"
 
 # Every output flag a deliverable is encoded with. Both delivery paths passed their own copy, and
 # the byte comparisons render only grade.sh's, so a change to one reached a file nobody compared.
@@ -1045,13 +1039,10 @@ load_grade_look() {
 }
 
 # The look values the delivery tail reads, into globals, for the same reasons. SMOOTHING and
-# GRAIN_STRENGTH take an environment override; the grain weights do not, because they are part of
-# how the grain was tuned rather than how much of it a run wants.
+# GRAIN_STRENGTH take an environment override.
 load_delivery_look() {
 	SMOOTHING="$(require_number SMOOTHING "${SMOOTHING:-$(look .stabilisation.smoothing)}")" || return 1
 	GRAIN_STRENGTH="$(require_number GRAIN_STRENGTH "${GRAIN_STRENGTH:-$(look .grain.strength)}")" || return 1
-	GRAIN_SHADOWS="$(require_unit grain.shadows "$(look .grain.shadows)")" || return 1
-	GRAIN_HIGHLIGHTS="$(require_unit grain.highlights "$(look .grain.highlights)")" || return 1
 	# shellcheck disable=SC2034  # read by grade.sh
 	DENOISE_STRENGTH="$(require_number finish.denoise "$(look .finish.denoise)")" || return 1
 	SHARPEN="$(require_number finish.sharpen "$(look .finish.sharpen)")" || return 1
@@ -1485,115 +1476,89 @@ gauge_super8_tail() {  # gauge_super8_tail [fps]
 	[ -z "${1:-}" ] || printf ",fps=%s" "$1"
 }
 
-# CLUSTERED grain, not per-pixel, generated on a half-resolution plate and blended. Measured:
+# GRAIN IN THE NEGATIVE: noise added to the LOG picture before the conversion cube, so the stock's
+# own toe and shoulder shape it, the way grain forms in film rather than lying on a finished picture.
+# Chosen by the user over three display-space alternatives (prototype sheet, 2026-09-17): grain
+# added after the grade read as "strong and dark", an overlay that did not blend. In the negative,
+# bright sky stays clean, midtones carry it, and a little dye variation reads as film.
 #
-#   1. Per-pixel grain does not survive delivery. Re-encoded at ~4 Mbps its lag-1 autocorrelation
-#      goes 0.00 -> 0.39: the compressor smears it into blobs and invents correlation that was
-#      never there. Half-resolution grain keeps its own structure through the same re-encode
-#      (0.75 -> 0.59).
-#   2. Clustered is also CHEAPER: bitrate against no grain is 3.7x per-pixel, 2.9x clustered. More
-#      filmic and ~22% cheaper to encode, which is not the usual trade. (`-tune grain` was tested
-#      too: 4.3x bitrate for no structural gain. Skipped.)
-#   3. It must come after the sharpener. Grain before `unsharp` gets RUNG by it — the isolated
-#      residual shows a negative lag-1 (-0.09), the signature of an overshoot either side of every
-#      spike, which reads as "crunchy digital" rather than film. It is also WEAKER than intended
-#      (sd 2.65 vs 3.67 at the same c0s) because the sharpener averages it away.
+# THE NOISE, per channel of log RGB: sd strength * 0.00064 (Portra 800's 12 gives 0.0077 in log,
+# which matched the old grain's size on a mid-grey wall), 90% of its variance shared by R, G and B and
+# 10% each channel's own. Softened by a Gaussian of 0.8 px at a 1080 short edge (never below 0.5 px),
+# scaled with the picture so every size gets the same grain against it. Independent frame to frame.
 #
-# The plate is flat grey so its chroma stays neutral and `grainmerge` is a no-op on the chroma
-# planes — measured U-plane residual sd 0.000, i.e. verifiably luma-only. That matters because the
-# delivered chroma is left as the grade made it, and grain must not add any.
-#
-# THE PLATE'S LUMA IS SET TO 128, not left at `gray`'s. grainmerge is A+B-128, and `color=c=gray`
-# converts to Y=126, so every final came out 2 code values darker with nothing on screen to blame.
-#
-# c0s is the one number that wants an eye rather than a measurement, so it is look.json's
-# grain.strength rather than a constant here. Clustered grain reads stronger per unit amplitude than
-# per-pixel, so a strength carried over from per-pixel grain renders heavier than it did.
-#
-# SIZED TO THE PICTURE, not to the pixel. The plate was always half the output, which was tuned at a
-# 1080 short edge; at 2160 that grain was half as big against the picture, at 720 half again as big.
-# It is now half resolution AT 1080 and scales with the short edge, so every size gets the grain the
-# look was judged with. 1080 x 1920 is byte-identical to before.
-#
-# NEVER LARGER THAN THE OUTPUT. Below a 540 short edge the scaled plate would be bigger than the
-# picture, and shrinking a flat 128 back down moved it by a code value (strength-0 grain stopped
-# being byte-identical at 64x64).
-grain_plate() {  # grain_plate <w> <h> <fps>
-	local short=$(( $1 < $2 ? $1 : $2 )) pw ph
-	pw=$(( $1 * 540 / short )); ph=$(( $2 * 540 / short ))
-	[ "$pw" -le "$1" ] || { pw="$1"; ph="$2"; }
-	printf 'color=c=gray:s=%sx%s:r=%s,format=yuv420p,lutyuv=y=128:u=128:v=128' "$pw" "$ph" "$3"
+# HOW, and the traps each step is shaped around, all measured on flat grey at 1080x1920:
+#   - Two 8-bit plates of `noise` at c0s=40 (sd 23.08 codes = 40/sqrt3), one for the shared part and
+#     one for the dye. `all_seed` sets the seed: `c0_seed` is ACCEPTED AND IGNORED, and with it the
+#     dye plate's green was the shared plate's noise, green 27% too strong.
+#   - The shared plate is one noisy plane copied into three with `mergeplanes`. `format=gray` to
+#     `gbrp` put the noise in green only.
+#   - The blur is two integer `convolution` passes, row then column, so its effect on sd is exactly
+#     the kernel's sum of squared weights. `bias` 0.5 rounds: truncation shifted the mean by -0.0015
+#     in log, a fifth of the grain's sd.
+#   - `mix` combines the picture, both plates and a flat grey plate in float with the grey's weight
+#     subtracting the plates' mid-grey, so no offset reaches the picture (mean -0.0003, sd 0.0074,
+#     channel correlation 0.90). The sources are infinite: `duration=first` ends on the picture.
+# Strength 0 is no prefix at all, absent rather than idle.
+SUPER8_GRAIN_SIZE="${SUPER8_GRAIN_SIZE:-3.33}"
+SUPER8_GRAIN_GAIN="${SUPER8_GRAIN_GAIN:-2}"
+
+grain_kernel() {  # grain_kernel <sigma-px>  -> "<weights>|<sum>|<sum of squared normalised weights>"
+	awk -v s="$1" 'BEGIN {
+		r = int(s * 3 + 0.999); if (r < 1) r = 1
+		for (i = -r; i <= r; i++) { w[i] = int(exp(-(i * i) / (2 * s * s)) * 1000 + 0.5); t += w[i] }
+		for (i = -r; i <= r; i++) { line = line (i > -r ? " " : "") w[i]; q += (w[i] / t) ^ 2 }
+		printf "%s|%d|%.10f\n", line, t, q
+	}'
 }
 
-delivery_grain_branch() {  # delivery_grain_branch <w> <h> <strength>
-	# The plate stays 8-bit through `noise` and is raised here: 128 converts to exactly 512, the
-	# 10-bit grainmerge's zero, and the noise keeps its size relative to the picture.
-	printf 'noise=c0s=%s:c0f=t,scale=%s:%s:flags=bilinear,format=%s,%s' \
-		"$3" "$1" "$2" "$(delivery_pix_fmt)" "$DELIVERY_SETPARAMS"
-}
-
-# The grain merge, WEIGHTED BY THE PICTURE'S OWN BRIGHTNESS. On a print, grain is most visible in
-# the midtones and recedes into deep shadow and bright highlight; a uniform plate puts as much into a
-# black coat as into a grey wall, which reads as noise laid over the picture rather than as part of
-# it. `grain.shadows` and `grain.highlights` are the weight at black and at white, 1 at the midtones
-# between 0.45 and 0.55 of the range, with a smoothstep either side.
 #
-# How: the delivered image's luma becomes a mask (`lutyuv`, so the table is built once per frame
-# format rather than evaluated per pixel), and `maskedmerge` fades the noisy plate toward a flat grey
-# one by it. The flat plate is the noisy one with its luma set to 128, so the two stay in step and
-# carry identical chroma — `grainmerge` then remains a no-op on the chroma planes, which is the
-# property the plate was built grey for. Measured on a ramp at 0.35 and 0.5: grain sd 1.2 in the
-# darkest ninth, 3.2 at the midtones, 1.8 in the brightest, against a flat 3.2 unweighted.
-#
-# Both weights at 1 leave the mask out of the graph and return the plain blend, so flat grain costs
-# no filter it does not use. `maskedmerge` has no `shortest` option, and does not need one: its
-# mask comes from the image, which ends, and the blend after it keeps its own `shortest=1` for the
-# plate.
-delivery_grain_merge() {  # delivery_grain_merge <image-label> <grain-label> <out-label> <shadows> <highlights> [label-prefix]
-	if [ "$(awk -v s="$4" -v h="$5" 'BEGIN { print (s == 1 && h == 1) ? "flat" : "weighted" }')" = "flat" ]; then
-		printf '[%s][%s]%s[%s]' "$1" "$2" "$DELIVERY_BLEND" "$3"
-		return
-	fi
-	local shadows="$4" highlights="$5" p="${6:-gw}" expr black=16 span=219 full=255 mid=128
-	[ "$(delivery_pix_fmt)" = yuv420p ] || { black=64; span=876; full=1023; mid=512; }
-	# ld(0) is luma out of limited range as 0..1; ld(1) runs 0..1 across the shadow ramp below 0.45
-	# and ld(2) across the highlight ramp above 0.55. Each ramp is eased by a smoothstep.
-	local level="st(0,clip((val-$black)/$span,0,1))"
-	local shadow_ramp='st(1,clip(ld(0)/0.45,0,1))'
-	local highlight_ramp='st(2,clip((ld(0)-0.55)/0.45,0,1))'
-	local shadow_ease='ld(1)*ld(1)*(3-2*ld(1))'
-	local highlight_ease='ld(2)*ld(2)*(3-2*ld(2))'
-	# Quoted, because the expression holds both of the graph's own separators, `,` and `;`.
-	expr="$level;$shadow_ramp;$highlight_ramp;$full*(($shadows+(1-$shadows)*$shadow_ease)+($highlights-1)*$highlight_ease)"
-	printf "[%s]split=2[%s_image][%s_luma];[%s_luma]lutyuv=y='%s':u=%s:v=%s[%s_mask];" \
-		"$1" "$p" "$p" "$p" "$expr" "$mid" "$mid" "$p"
-	printf '[%s]split=2[%s_noise][%s_level];[%s_level]lutyuv=y=%s[%s_flat];' "$2" "$p" "$p" "$p" "$mid" "$p"
-	printf '[%s_flat][%s_noise][%s_mask]maskedmerge=planes=1[%s_grain];' "$p" "$p" "$p" "$p"
-	printf '[%s_image][%s_grain]%s[%s]' "$p" "$p" "$DELIVERY_BLEND" "$3"
+# SUPER 8 GRAIN IS BIGGER against the picture, as a small frame's is: `<size>` scales it up and
+# `<gain>` makes up what the gauge's reduction to 0.3 and its blur average away. Without them the
+# gauge erased the grain the look was approved with.
+grain_prefix() {  # grain_prefix <w> <h> <fps> <strength> [size] [gain]  -> a prefix with its trailing comma, or nothing
+	local w="$1" h="$2" fps="$3" strength="$4" size="${5:-1}" gain="${6:-1}" short sigma weights sum sumsq shared own
+	[ "$(awk -v k="$strength" 'BEGIN { print (k == 0) }')" = 0 ] || return 0
+	short=$(( w < h ? w : h ))
+	sigma=$(awk -v s="$short" -v f="$size" 'BEGIN { v = 0.8 * s / 1080 * f; printf "%.3f", (v < 0.5) ? 0.5 : v }')
+	IFS='|' read -r weights sum sumsq <<< "$(grain_kernel "$sigma")"
+	# Each plate's blurred sd, as a fraction of full scale, is 40/sqrt3 codes times the kernel's sum of
+	# squares over 255. 1.03 is the measured shortfall of the 8-bit blur (0.0074 against 0.0077).
+	read -r shared own <<< "$(awk -v k="$strength" -v q="$sumsq" -v g="$gain" 'BEGIN {
+		sd = 40 / sqrt(3) * q / 255; t = k * 0.00064 * 1.03 * g
+		printf "%.8f %.8f\n", sqrt(0.9) * t / sd, sqrt(0.1) * t / sd }')"
+	local pass="0m='$weights':1m='$weights':2m='$weights':0rdiv=1/$sum:1rdiv=1/$sum:2rdiv=1/$sum:0bias=0.5:1bias=0.5:2bias=0.5"
+	local blur="convolution=$pass:0mode=row:1mode=row:2mode=row,convolution=$pass:0mode=column:1mode=column:2mode=column"
+	local plate="color=c=gray:s=${w}x${h}:r=${fps},format=gbrp"
+	printf 'format=gbrpf32le[gr_img];'
+	printf '%s,noise=all_seed=1709:c0s=40:c0f=t,mergeplanes=0x000000:gbrp,%s,format=gbrpf32le[gr_shared];' "$plate" "$blur"
+	printf '%s,noise=all_seed=2203:c0s=40:c1s=40:c2s=40:c0f=t:c1f=t:c2f=t,%s,format=gbrpf32le[gr_own];' "$plate" "$blur"
+	printf '%s,format=gbrpf32le[gr_mid];' "$plate"
+	printf "[gr_img][gr_shared][gr_own][gr_mid]mix=inputs=4:weights='1 %s %s %s':scale=1:duration=first," \
+		"$shared" "$own" "$(awk -v a="$shared" -v b="$own" 'BEGIN { printf "%.8f", -(a + b) }')"
 }
 
 # Deliverables, source to installed files, in ONE ffmpeg: a shared chain, split once per
-# deliverable into its own tail, grain plate and encode. grade.sh passes the grade as the shared
-# chain, so a clip's deliverables decode and grade once between them. Reads the grain globals load_delivery_look sets; under `set -u` an
-# unloaded one stops the run rather than rendering without grain.
+# deliverable into its own tail and encode. grade.sh passes the grade as the shared chain, grain
+# included, so a clip's deliverables decode, grade and grain once between them.
 #
 # ONE DELIVERABLE BUILDS THE GRAPH IT ALWAYS DID: no split, and the labels b, g and o. Two or more
-# number every label a tail or grain merge owns (sh_, gw_), because a filter graph's labels are
-# global and the sharpener's would otherwise be defined twice.
+# number every label a tail owns (sh_), because a filter graph's labels are global and the
+# sharpener's would otherwise be defined twice.
 render_deliverables() {  # render_deliverables <label> <input> <fps> <shared-chain|empty> <n> [<out> <w> <h> <tail>]... [ffmpeg-arg]...
-	local label="$1" in="$2" fps="$3" shared="$4" n="$5" i
+	# The fps and each deliverable's size are no longer read here: the grain that needed them is in
+	# the shared chain (grain_prefix). The arguments keep their places so the callers do not change.
+	local label="$1" in="$2" shared="$4" n="$5" i
 	shift 5
-	local outs=() ws=() hs=() tails=()
+	local outs=() tails=()
 	for (( i = 0; i < n; i++ )); do
-		outs+=("$1"); ws+=("$2"); hs+=("$3"); tails+=("$4")
+		outs+=("$1"); tails+=("$4")
 		shift 4
 	done
-	local af="" grain=1
+	local af=""
 	[ "$AUDIO_HIGHPASS_HZ" -eq 0 ] || [ "$DELIVERY_AUDIO" = 0 ] || af="highpass=f=$AUDIO_HIGHPASS_HZ"
 	delivery_encode_args
-	# Strength 0 is no plate and no merge: absent rather than idle, like a neutral grade stage.
-	[ "$(awk -v k="$GRAIN_STRENGTH" 'BEGIN { print (k == 0) }')" = 1 ] && grain=0
-	local inputs=(-y -i "$in") graph="" outargs=() b g o t
+	local inputs=(-y -i "$in") graph="" outargs=() o t
 	if [ "$n" -gt 1 ]; then
 		graph="[0:v]${shared:+$shared,}split=$n"
 		for (( i = 0; i < n; i++ )); do graph="${graph}[s$i]"; done
@@ -1602,24 +1567,13 @@ render_deliverables() {  # render_deliverables <label> <input> <fps> <shared-cha
 	for (( i = 0; i < n; i++ )); do
 		t="${tails[$i]}"
 		if [ "$n" -eq 1 ]; then
-			b=b; g=g; o=o
-			graph="${graph}[0:v]${shared:+$shared,}$t"
+			o=o
+			graph="${graph}[0:v]${shared:+$shared,}${t}[$o]"
 		else
-			b="b$i"; g="g$i"; o="o$i"
+			o="o$i"
 			t="${t//\[sh_/[sh${i}_}"
 			[ "$i" -eq 0 ] || graph="${graph};"
-			graph="${graph}[s$i]$t"
-		fi
-		if [ "$grain" = 0 ]; then
-			graph="${graph}[$o]"
-		else
-			inputs+=(-f lavfi -i "$(grain_plate "${ws[$i]}" "${hs[$i]}" "$fps")")
-			graph="${graph}[$b];[$(( i + 1 )):v]$(delivery_grain_branch "${ws[$i]}" "${hs[$i]}" "$GRAIN_STRENGTH")[$g];"
-			if [ "$n" -eq 1 ]; then
-				graph="${graph}$(delivery_grain_merge "$b" "$g" "$o" "$GRAIN_SHADOWS" "$GRAIN_HIGHLIGHTS")"
-			else
-				graph="${graph}$(delivery_grain_merge "$b" "$g" "$o" "$GRAIN_SHADOWS" "$GRAIN_HIGHLIGHTS" "gw$i")"
-			fi
+			graph="${graph}[s$i]${t}[$o]"
 		fi
 		# `${af:+-af "$af"}` is zero words when the filter is off and exactly two when it is on. An
 		# array would be the obvious spelling, but an empty one under `set -u` is "unbound" on bash 3.2.
