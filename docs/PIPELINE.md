@@ -26,6 +26,11 @@ every encode: `prores_ks` and `libx264` both ignored the encode-time flags, and 
 tagged BT.2020 gets transformed twice by players (*bleached*). Remux with `-c copy` to set the
 tags.
 
+### Native export
+
+The app renders an H.264 export on the GPU where it can (`NativeExport`). Its speed, bitrate and file
+size are measured in that type's header; its parity with this pipeline in `ExportParityTests`.
+
 ### Audio high-pass, 60 Hz
 
 2-pole `highpass` on delivery only. Over all of IMG_0607, below 40 Hz is the quietest band (−50.1

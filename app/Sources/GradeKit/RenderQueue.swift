@@ -130,7 +130,29 @@ public final class RenderQueue: ObservableObject {
     }
 
     /// Runs everything waiting. Returns when the queue is empty or cancelled.
-    public func start(environment: @escaping (String) -> [String: String]) {
+    /// What the native export needs for one clip: its effective look, the delivery, the clip's
+    /// settings and the export folder.
+    public struct NativeRequest {
+        public let look: Look
+        public let delivery: Project.Delivery
+        public let clip: Project.ClipSettings
+        public let outputDirectory: URL
+
+        public init(
+            look: Look, delivery: Project.Delivery, clip: Project.ClipSettings, outputDirectory: URL
+        ) {
+            self.look = look
+            self.delivery = delivery
+            self.clip = clip
+            self.outputDirectory = outputDirectory
+        }
+    }
+
+    /// `native` answers, per clip, what the native export would render, or nil to use the engine.
+    public func start(
+        environment: @escaping (String) -> [String: String],
+        native: ((String) -> NativeRequest?)? = nil
+    ) {
         lock.lock()
         cancelled = false
         lock.unlock()
@@ -154,7 +176,7 @@ public final class RenderQueue: ObservableObject {
                     slots.signal()
                     group.leave()
                 }
-                self?.run(job, environment: environment(job.stem))
+                self?.run(job, environment: environment(job.stem), native: native?(job.stem))
             }
         }
         group.wait()
@@ -178,8 +200,9 @@ public final class RenderQueue: ObservableObject {
         }
     }
 
-    private func run(_ job: Job, environment: [String: String]) {
+    private func run(_ job: Job, environment: [String: String], native: NativeRequest?) {
         update(job.id) { $0.state = .running }
+        if let native, runNatively(job, native) { return }
         do {
             let outcome = try EngineRun(engine: engine).run(
                 arguments: [job.clip.path],
@@ -230,6 +253,46 @@ public final class RenderQueue: ObservableObject {
             }
         } catch {
             update(job.id) { $0.state = .failed(String(describing: error)) }
+        }
+    }
+
+    /// The native export, where it can take the clip. True when the job reached a final state
+    /// here; false to hand the clip to the engine.
+    ///
+    /// ANY FAILURE FALLS BACK. The engine is the reference the native export is held to, so a clip
+    /// the native path cannot render — a shape it does not do, a decode it cannot start, a GPU
+    /// that refuses — is rendered the slower way rather than reported as failed.
+    private func runNatively(_ job: Job, _ request: NativeRequest) -> Bool {
+        guard
+            NativeExport.unsupported(
+                look: request.look, delivery: request.delivery, clip: request.clip) == nil
+        else { return false }
+        do {
+            let outputs = try NativeExport.export(
+                source: job.clip, look: request.look, delivery: request.delivery,
+                clip: request.clip, proofSeconds: nil, outputDirectory: request.outputDirectory,
+                engine: engine,
+                progress: { [weak self] frame in
+                    self?.update(job.id) {
+                        $0.frame = frame
+                        $0.analysing = false
+                    }
+                },
+                isCancelled: { [weak self] in self?.isCancelled() ?? true })
+            update(job.id) {
+                $0.outputs = outputs
+                $0.state = .done
+            }
+            return true
+        } catch NativeExport.Failure.cancelled {
+            update(job.id) { $0.state = .cancelled }
+            return true
+        } catch {
+            update(job.id) {
+                $0.frame = nil
+                $0.outputs = []
+            }
+            return false
         }
     }
 

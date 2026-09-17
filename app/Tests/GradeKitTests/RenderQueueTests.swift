@@ -5,10 +5,13 @@ import XCTest
 /// Driven by a stand-in engine: these tests are about the queue, and real renders would make them
 /// slow, footage-dependent and about something else.
 final class RenderQueueTests: XCTestCase {
-    private func waitForQueue(_ queue: RenderQueue, timeout: TimeInterval = 30) {
+    private func waitForQueue(
+        _ queue: RenderQueue, timeout: TimeInterval = 30,
+        native: ((String) -> RenderQueue.NativeRequest?)? = nil
+    ) {
         let done = expectation(description: "queue")
         DispatchQueue.global().async {
-            queue.start(environment: { _ in [:] })
+            queue.start(environment: { _ in [:] }, native: native)
             done.fulfill()
         }
         wait(for: [done], timeout: timeout)
@@ -318,5 +321,43 @@ extension RenderQueueTests {
         let id = try XCTUnwrap(queue.jobs.first?.id)
         queue.retry(id)
         XCTAssertEqual(queue.jobs.first?.state, .waiting)
+    }
+
+    /// The native export takes a clip only when it can render it, and a clip it cannot, or fails
+    /// on, goes to the engine rather than being reported as failed.
+    func testTheNativeExportFallsBackToTheEngine() throws {
+        let marks = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("engine-ran-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: marks, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: marks) }
+        let engine = try stubEngine(
+            script: """
+                #!/bin/bash
+                touch "\(marks.path)/$(basename "$1" .mov)"
+                echo '{"event":"run_done","rendered":1,"skipped":0,"failed":0}'
+                """)
+        defer { try? FileManager.default.removeItem(at: engine.root) }
+
+        let queue = RenderQueue(engine: engine)
+        queue.concurrency = 1
+        // A: the native export would take it, and fails, because the clip does not exist.
+        // B: stabilised, which the native export does not do.
+        queue.enqueue([
+            (URL(fileURLWithPath: "/tmp/no-such-clip-A.mov"), "A", nil),
+            (URL(fileURLWithPath: "/tmp/no-such-clip-B.mov"), "B", nil),
+        ])
+        let look = try lookFixture()
+        waitForQueue(queue) { stem in
+            RenderQueue.NativeRequest(
+                look: look, delivery: Project.Delivery(),
+                clip: Project.ClipSettings(stabilise: stem == "B"),
+                outputDirectory: marks)
+        }
+        XCTAssertEqual(queue.jobs.map(\.state), [.done, .done])
+        for stem in ["no-such-clip-A", "no-such-clip-B"] {
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: marks.appendingPathComponent(stem).path),
+                "\(stem) never reached the engine")
+        }
     }
 }
