@@ -86,7 +86,15 @@ public struct LiveChain {
                 bitmapInfo: wide.rawValue)
         else { return nil }
         readContext.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return converted(rgba16: source, width: width, height: height, through: stages)
+    }
 
+    /// The same, from 16-bit RGBA pixels in host order, for a caller that already has them: the
+    /// export, which would otherwise draw every frame into a CGImage only to read it back.
+    public static func converted(
+        rgba16 source: [UInt16], width: Int, height: Int, through stages: ColourStages
+    ) -> Converted? {
+        guard width > 0, height > 0, source.count >= width * height * 4 else { return nil }
         var rgb = [UInt8](repeating: 255, count: width * height * 4)
         let scale = Float(1.0 / 65535.0)
         if let halation = stages.halation {
@@ -166,6 +174,22 @@ public struct LiveChain {
 
     /// The tone curve and the trims over an already-converted frame.
     public static func graded(_ converted: Converted, with grade: LiveGrade) -> CGImage? {
+        var out = gradedPixels(converted, with: grade)
+        return out.withUnsafeMutableBytes { buffer -> CGImage? in
+            guard
+                let context = CGContext(
+                    data: buffer.baseAddress, width: converted.width,
+                    height: converted.height, bitsPerComponent: 8,
+                    bytesPerRow: converted.width * 4,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return nil }
+            return context.makeImage()
+        }
+    }
+
+    /// The graded frame as 8-bit RGBA bytes, the alpha opaque.
+    public static func gradedPixels(_ converted: Converted, with grade: LiveGrade) -> [UInt8] {
         var out = converted.pixels
         // One table, because the curve is the same for every pixel and the input is 8-bit, so its
         // 256 entries are every value the curve can be asked for.
@@ -194,17 +218,7 @@ public struct LiveChain {
                 }
             }
         }
-        return out.withUnsafeMutableBytes { buffer -> CGImage? in
-            guard
-                let context = CGContext(
-                    data: buffer.baseAddress, width: converted.width,
-                    height: converted.height, bitsPerComponent: 8,
-                    bytesPerRow: converted.width * 4,
-                    space: CGColorSpaceCreateDeviceRGB(),
-                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-            else { return nil }
-            return context.makeImage()
-        }
+        return out
     }
 
     /// The picture as it is SHOWN: the same pixels, tagged as Rec.709 so macOS displays them the

@@ -27,9 +27,21 @@ typealias Exporter = (
 /// for 0.6 moved a measure outside what an equivalent encode did. A check that cannot fail was
 /// removed rather than kept; banding needs a smooth synthetic source to test.
 final class ExportParityTests: XCTestCase {
-    /// Nil is grade.sh, whose renders are the reference's: rendering them twice would double the
-    /// test's time to compare a file with itself.
-    static var candidate: ((EngineLocation) -> Exporter)? = nil
+    /// The native export, in a release build. A debug build renders it at a small fraction of the
+    /// speed (233 s for this test against 37 s in release), which the full check cannot carry, so
+    /// there it is nil: grade.sh, whose renders are the reference's, compared with itself. Hold the
+    /// native export with `swift test -c release --filter ExportParityTests` after changing it.
+    #if DEBUG
+        static var candidate: ((EngineLocation) -> Exporter)? = nil
+    #else
+        static var candidate: ((EngineLocation) -> Exporter)? = { engine in
+            { source, look, delivery, clip, proof, out in
+                try NativeExport.export(
+                    source: source, look: look, delivery: delivery, clip: clip,
+                    proofSeconds: proof, outputDirectory: out, engine: engine)
+            }
+        }
+    #endif
 
     static let proofSeconds = 0.5
     static let delivery = Project.Delivery(targets: [.feed], shortSide: 720)
