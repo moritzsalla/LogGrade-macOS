@@ -45,8 +45,8 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
      Left: the grade chain on the GPU, shared with Export.
    - **Export:** AVAssetReader, the same chain, the delivery stage, VideoToolbox H.264/HEVC through
      AVAssetWriter. ProRes, stabilisation and Super 8's gauge stay on grade.sh until at parity.
-2. **Portra 160, now, against public lab scans**; the partner's scans when they arrive. The user
-   found it dull; measured darker than Neutral with foliage at 2/3 the reference chroma.
+2. **Portra 160 against the partner's scans** when they arrive. Until then it is matched to public
+   scans and RawTherapee's emulation (#76).
 3. **Cross-check Super 8** against professional emulations (licence permitting, comparison only)
    and more reference stills per stock.
 4. **Delete the engine controls no look uses**, once the looks are signed off: wheels, hue curves,

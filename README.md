@@ -20,9 +20,11 @@ DaVinci Resolve, a full professional suite. Final Cut Pro converts Apple Log, bu
 editor and the look is still yours to build. Editors that accept LUTs expect you to bring one. None
 of them is quick: footage in, a good look, a file out.
 
-**How?** Apple Log → graded Rec.709 in one ffmpeg pass. 10-bit preserved to delivery, tone curve
-applied to luma only, LUTs generated rather than guessed. The app is a window over that chain — it
-sets environment variables and reads the engine's events, and never builds a filter graph itself.
+**How?** Apple Log → graded Rec.709. Export is one ffmpeg pass: 10-bit preserved to delivery, tone
+curve applied to luma only, LUTs generated rather than guessed. The app sets that engine's
+environment variables and reads its events, and never builds a filter graph itself. The preview is
+the same chain rebuilt in Swift, graded in-process and tested against the engine's render. Each clip
+keeps its own look and settings, and is exported on its own or with the rest.
 
 **Does it work?** Very well. Log holds real highlight headroom above diffuse white and none of the
 HDR tone mapping or sharpening a normal phone capture bakes in. Getting that out of it is a tone
@@ -39,14 +41,16 @@ Build it optimised — the live preview runs the real chain per frame and a debu
 
 ## The preview is the render
 
-Most grading tools approximate while you drag and render when you stop. This one runs the real
-chain on every move, so the picture on screen is the picture you get. There is no preview button.
+Most grading tools approximate while you drag and render when you stop. This one grades every
+picture, dragged or settled, with the whole chain: the clip is decoded and metered in the app, then
+put through the correction, halation, the film look, the hue curves and the tone curve in-process.
+There is no preview button and no slower "exact" render replacing it.
 
-An approximate GPU tier was planned first. I measured how far it drifts before building it, found
-the error worst exactly on saturated colour — which is what this footage is full of — and could not
-explain where it came from. Seven candidate causes, none of them it. Shipping an interface whose
-numbers are wrong in a way I can see but not account for was the worse option, so the tier was
-refused rather than deferred.
+That in-process chain is held to the engine's render by tests on real footage: against IMG_0607 at
+the shipped look the mean difference is about 1.3 code values, with the worst pixels on hard edges,
+where the preview resamples before grading and the render after. An earlier approximate GPU tier
+was refused for the opposite reason: its error was worst on saturated colour and no one could say
+why.
 
 → [`adr/0009`](docs/adr/0009_THE_PREVIEW_STAYS_EXACT_UNTIL_THE_DIVERGENCE_IS_EXPLAINED.md)
 
@@ -76,7 +80,9 @@ by eye.
 
 **Tone on luma only.** Curve all three channels and a contrast move turns saturated colour neon.
 
-**Grain at half resolution.** Instagram re-encodes everything; full-res grain comes back as blobs.
+**Grain at half resolution.** Social platforms re-encode everything; full-res grain comes back as
+blobs. The plate is half resolution at a 1080 short edge and scales with the export's short edge,
+so every size gets the grain that was judged.
 
 **Verify the colour tags after every encode.** Encoders don't reliably write them, and Rec.709
 pixels tagged BT.2020 get transformed a second time by anything that trusts the tag. It looks like
@@ -99,8 +105,13 @@ log picture so the highlights keep their latitude. What reads as film beyond col
 - **Grain that follows the picture** — most in the midtones, receding into shadow and highlight,
   coarse for Portra 800 and heavy for Super 8.
 
-You pick the stock; its halation and grain are not sliders. The looks are judged by eye against real
-film: Portra 160 against analog scans, the others against reference frames.
+You pick the stock; its halation and grain are not sliders. Each look is measured against RawTherapee's
+free film emulations (tone, and the hue and saturation of skin, foliage, sky and red) and against
+straight scans of the real stock, and then judged by eye on real footage.
+
+Exposure, warmth, tint, contrast and saturation act on the log picture before the look, so an
+adjustment feeds the stock the way a different exposure or light would, instead of bending its
+finished colour.
 
 → [`adr/0012`](docs/adr/0012_HALATION_IN_LINEAR_BEFORE_THE_CONVERSION.md)
 
@@ -108,8 +119,9 @@ film: Portra 160 against analog scans, the others against reference frames.
 
 ## Deliver in any shape
 
-A deliverable is a name, an aspect and a crop offset — not a size written into the pipeline. Two
-ship as presets and the set is open:
+A deliverable is a name, an aspect and a crop offset — not a size written into the pipeline. The app
+offers a vertical story (9:16), a 4:5 post, and Custom: one aspect (16:9, 4:3, 1:1, 4:5, 9:16) at
+a short edge from 720p to 2160p. On the command line the set is open:
 
 ```sh
 DELIVERABLES=reels,feed ./scripts/grade.sh src/            # the two presets
@@ -121,8 +133,8 @@ width and two deliverables that differed in it would be re-encoded differently f
 shape that is a crop of the master gets one, computed from the frame that is actually on disk; a
 shape that is already the master's own gets no crop filter at all.
 
-Sharpening and grain were tuned at 1080×1920 and are merely scaled away from it, so other sizes
-render but are not yet judged.
+Sharpening and grain were tuned at a 1080 short edge and scale with it, so a 4K export gets the same
+grain and sharpness against the picture as the size they were judged at.
 
 → [`adr/0010`](docs/adr/0010_A_DELIVERABLE_IS_DATA_NOT_A_CASE_BRANCH.md)
 
@@ -144,7 +156,7 @@ MATCH=0 ./scripts/grade.sh src/     # render every clip as shot instead
 ## Layout
 
 ```
-app/        Swift. GradeKit = models + engine adapter. LogGrade = the window.
+app/        Swift. GradeKit = models, the engine adapter and the in-process chain. LogGrade = the window.
 scripts/    The engine. bash + ffmpeg. Start at lib.sh.
 docs/       PIPELINE.md is the real documentation. adr/ holds the decisions.
 look.json   The Neutral look. presets/ holds the film looks, in the same format.
@@ -161,7 +173,9 @@ Nothing to download: the app renders Apple Log with its own conversion.
 
 ## Scope and licence
 
-macOS on Intel, bash 3.2. Built for my footage and my deliverables.
+macOS 13 or later, bash 3.2. The app builds as one universal bundle for Intel and Apple silicon;
+it is developed on Intel and not yet verified on Apple silicon. Built for my footage and my
+deliverables.
 
 [PolyForm Noncommercial 1.0.0](LICENSE). Run it, change it, share it, keep the attribution.
 Commercial use needs permission. The film stocks in `luts/film/` are baked from spektrafilm and
