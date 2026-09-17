@@ -23,8 +23,9 @@ All silent. Measurements are in `docs/PIPELINE.md` or beside the builder in `scr
 - `colorlevels` gives a flat frame here; use `curves`, and measure its spline rather than trusting the control points.
 - Only `zscale` dithers 10→8 bit.
 - Tag synthesised branches and `mergeplanes` output with `setparams`, or a `zscale` upstream fails.
-- Grain goes after the sharpener, at half resolution.
-- `blend` needs `shortest=1` (see `DELIVERY_BLEND`).
+- Grain goes in the log picture, before the conversion cube (`grain_prefix`).
+- `noise` ignores `c0_seed`; only `all_seed` seeds it.
+- An infinite `color` source must end on the picture: `mix` needs `duration=first`, `blend` needs `shortest=1`.
 - In float, `blend` addition, `avgblur` and `boxblur` clamp at 1.0, and `lut1d` ignores a negative `DOMAIN_MIN` (ADR 0012).
 - Verify colour tags after every encode (`safe_retag`); encoders ignore the flags.
 

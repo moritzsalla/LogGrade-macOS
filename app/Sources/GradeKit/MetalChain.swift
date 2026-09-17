@@ -55,7 +55,10 @@ public final class MetalChain {
             throw Failure.shader("\(error)")
         }
         var made: [String: MTLComputePipelineState] = [:]
-        for name in ["correct", "highlight", "blurAcross", "blurDown", "glow", "convert", "grade"] {
+        for name in [
+            "correct", "highlight", "blurAcross", "blurDown", "glow", "convert", "grade",
+            "grainNoise", "grainAcross", "grainDown", "grainAdd",
+        ] {
             guard let function = library.makeFunction(name: name) else {
                 throw Failure.shader("no \(name)")
             }
@@ -68,9 +71,10 @@ public final class MetalChain {
 
     /// The graded frame from 16-bit RGBA source pixels, as `LiveChain.converted` then
     /// `LiveChain.gradedPixels` give it: 8-bit RGBA, opaque.
-    public func graded(rgba16: [UInt16], width: Int, height: Int, chain: LiveChain) throws
-        -> [UInt8]
-    {
+    public func graded(
+        rgba16: [UInt16], width: Int, height: Int, chain: LiveChain, grain: LiveGrain? = nil,
+        frame: Int = 0
+    ) throws -> [UInt8] {
         let source = try texture(.rgba16Unorm, width, height, usage: [.shaderRead])
         rgba16.withUnsafeBytes {
             source.replace(
@@ -79,7 +83,8 @@ public final class MetalChain {
         }
         let out = try texture(.rgba8Unorm, width, height, usage: [.shaderRead, .shaderWrite])
         guard let buffer = queue.makeCommandBuffer() else { throw Failure.command("no buffer") }
-        try encode(source: source, into: out, chain: chain, buffer: buffer)
+        try encode(
+            source: source, into: out, chain: chain, grain: grain, frame: frame, buffer: buffer)
         // A managed texture on a discrete GPU is only copied back when asked; read without this and
         // the bytes are whatever the CPU side last held.
         if out.storageMode == .managed, let blit = buffer.makeBlitCommandEncoder() {
@@ -104,9 +109,12 @@ public final class MetalChain {
     ///
     /// `turns` quarter turns clockwise are applied as the correction reads the source, so a
     /// sideways source is `out` with its sides swapped and no pass is spent on turning it.
+    ///
+    /// `grain`, for an export only, is added to the log picture after halation and before the
+    /// conversion, as `LiveChain.converted` adds it; `frame` numbers it.
     func encode(
         source: MTLTexture, into out: MTLTexture, chain: LiveChain, turns: Int = 0,
-        buffer: MTLCommandBuffer
+        grain: LiveGrain? = nil, frame: Int = 0, buffer: MTLCommandBuffer
     ) throws {
         let width = out.width
         let height = out.height
@@ -126,6 +134,9 @@ public final class MetalChain {
         var converting = log
         if let halation = stages.halation {
             converting = try halated(log, halation, buffer)
+        }
+        if let grain {
+            converting = try grained(converting, grain, frame: frame, buffer)
         }
 
         let codes = try scratch("codes", .rgba32Float, width, height)
@@ -201,6 +212,48 @@ public final class MetalChain {
             e.setBytes(&gain, length: MemoryLayout<SIMD3<Float>>.stride, index: 0)
         }
         return lit
+    }
+
+    // MARK: grain
+
+    private func grained(
+        _ log: MTLTexture, _ grain: LiveGrain, frame: Int, _ buffer: MTLCommandBuffer
+    ) throws -> MTLTexture {
+        let w = log.width
+        let h = log.height
+        let noise = try scratch("grainNoise", .rgba32Float, w, h)
+        var frameNumber = UInt32(truncatingIfNeeded: frame)
+        try run("grainNoise", buffer, w, h) { e in
+            e.setTexture(noise, index: 0)
+            e.setBytes(&frameNumber, length: 4, index: 0)
+        }
+        var (weights, sumOfSquares) = grain.kernel
+        var radius = Int32(weights.count / 2)
+        let across = try scratch("grainAcross", .rgba32Float, w, h)
+        try run("grainAcross", buffer, w, h) { e in
+            e.setTexture(noise, index: 0)
+            e.setTexture(across, index: 1)
+            e.setBytes(&weights, length: weights.count * 4, index: 0)
+            e.setBytes(&radius, length: 4, index: 1)
+        }
+        let blurred = try scratch("grainBlurred", .rgba32Float, w, h)
+        try run("grainDown", buffer, w, h) { e in
+            e.setTexture(across, index: 0)
+            e.setTexture(blurred, index: 1)
+            e.setBytes(&weights, length: weights.count * 4, index: 0)
+            e.setBytes(&radius, length: 4, index: 1)
+        }
+        let out = try scratch("grained", .rgba32Float, w, h)
+        var amounts = SIMD2<Float>(
+            LiveGrain.shared.squareRoot() * grain.sd / sumOfSquares,
+            (1 - LiveGrain.shared).squareRoot() * grain.sd / sumOfSquares)
+        try run("grainAdd", buffer, w, h) { e in
+            e.setTexture(log, index: 0)
+            e.setTexture(blurred, index: 1)
+            e.setTexture(out, index: 2)
+            e.setBytes(&amounts, length: 8, index: 0)
+        }
+        return out
     }
 
     // MARK: plumbing
@@ -444,6 +497,64 @@ public final class MetalChain {
             if (useHue != 0) c = tetra(hue, sizes.y, c);
             // LiveChain.store: truncated to 8 bits.
             dst.write(float4(floor(clamp(c * 255.0, 0.0, 255.0)), 1), id);
+        }
+
+        // LiveGrain.hash and LiveGrain.gaussian, the same arithmetic: channel 0 shared, 1-3 R G B.
+        static uint grainHash(uint v) {
+            uint s = v * 747796405u + 2891336453u;
+            uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+            return (w >> 22u) ^ w;
+        }
+        static float grainGaussian(uint x, uint y, uint frame, uint channel) {
+            uint base = grainHash((frame * 0x9E3779B9u) ^ (channel * 0x85EBCA6Bu));
+            uint a = grainHash(grainHash(base ^ x) ^ y);
+            uint b = grainHash(a ^ 0x68E31DA4u);
+            float u1 = (float(a >> 8u) + 0.5) / 16777216.0;
+            float u2 = float(b >> 8u) / 16777216.0;
+            return sqrt(-2.0 * log(u1)) * cos(2.0 * M_PI_F * u2);
+        }
+
+        kernel void grainNoise(texture2d<float, access::write> dst [[texture(0)]],
+                               constant uint &frame [[buffer(0)]],
+                               uint2 id [[thread_position_in_grid]]) {
+            if (id.x >= dst.get_width() || id.y >= dst.get_height()) return;
+            dst.write(float4(grainGaussian(id.x, id.y, frame, 0), grainGaussian(id.x, id.y, frame, 1),
+                             grainGaussian(id.x, id.y, frame, 2), grainGaussian(id.x, id.y, frame, 3)), id);
+        }
+
+        kernel void grainAcross(texture2d<float, access::read> src [[texture(0)]],
+                                texture2d<float, access::write> dst [[texture(1)]],
+                                constant float *k [[buffer(0)]], constant int &radius [[buffer(1)]],
+                                uint2 id [[thread_position_in_grid]]) {
+            int w = src.get_width();
+            if (int(id.x) >= w || id.y >= src.get_height()) return;
+            float4 sum = 0;
+            for (int i = -radius; i <= radius; i++)
+                sum += src.read(uint2(clamp(int(id.x) + i, 0, w - 1), id.y)) * k[i + radius];
+            dst.write(sum, id);
+        }
+
+        kernel void grainDown(texture2d<float, access::read> src [[texture(0)]],
+                              texture2d<float, access::write> dst [[texture(1)]],
+                              constant float *k [[buffer(0)]], constant int &radius [[buffer(1)]],
+                              uint2 id [[thread_position_in_grid]]) {
+            int h = src.get_height();
+            if (id.x >= src.get_width() || int(id.y) >= h) return;
+            float4 sum = 0;
+            for (int i = -radius; i <= radius; i++)
+                sum += src.read(uint2(id.x, clamp(int(id.y) + i, 0, h - 1))) * k[i + radius];
+            dst.write(sum, id);
+        }
+
+        kernel void grainAdd(texture2d<float, access::read> log [[texture(0)]],
+                             texture2d<float, access::read> noise [[texture(1)]],
+                             texture2d<float, access::write> dst [[texture(2)]],
+                             constant float2 &amounts [[buffer(0)]],
+                             uint2 id [[thread_position_in_grid]]) {
+            if (id.x >= dst.get_width() || id.y >= dst.get_height()) return;
+            float4 n = noise.read(id);
+            float3 c = log.read(id).rgb + amounts.x * n.x + amounts.y * float3(n.y, n.z, n.w);
+            dst.write(float4(c, 1), id);
         }
 
         static float midtoneWeight(float level) {

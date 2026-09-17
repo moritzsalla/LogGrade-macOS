@@ -195,9 +195,6 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(
             opened.clips["IMG_0609"]?.adjust, Look.Adjust(),
             "an old per-clip whole look must open as no Adjust, not pin the clip")
-        XCTAssertEqual(opened.presets.first?.look.grainShadows, 1, "old grain came back weighted")
-        XCTAssertEqual(
-            opened.presets.first?.look.grainHighlights, 1, "old grain came back weighted")
         XCTAssertThrowsError(
             try Project(data: try project(version: 2)),
             "a current project missing a block was quietly repaired")
@@ -249,6 +246,27 @@ final class ProjectTests: XCTestCase {
         XCTAssertNil(look.preserved["look"], "the film look block was carried forward")
         XCTAssertNil(look.preserved["print"], "the print block was carried forward")
         XCTAssertEqual(look, try aLook(), "the rest of the look changed on the way")
+    }
+
+    /// A look saved while grain carried brightness weights opens without them, and does not write
+    /// them back.
+    func testAProjectFromBeforeGrainInTheNegativeDropsTheWeights() throws {
+        var preset =
+            try JSONSerialization.jsonObject(with: try aLook().serialised())
+            as? [String: Any] ?? [:]
+        var grain = preset["grain"] as? [String: Any] ?? [:]
+        grain["shadows"] = 0.35
+        grain["highlights"] = 0.5
+        preset["grain"] = grain
+        let data = try JSONSerialization.data(withJSONObject: [
+            "version": 6, "active_preset": "old", "presets": [["name": "old", "look": preset]],
+        ])
+        let look = try XCTUnwrap(try Project(data: data).presets.first?.look)
+        XCTAssertEqual(look, try aLook())
+        let written =
+            try JSONSerialization.jsonObject(with: try look.serialised()) as? [String: Any]
+        let writtenGrain = try XCTUnwrap(written?["grain"] as? [String: Any])
+        XCTAssertEqual(Set(writtenGrain.keys), ["strength"], "the weights were written back")
     }
 
     /// A correction saved before it carried contrast and saturation opens with both neutral,

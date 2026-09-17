@@ -457,7 +457,10 @@ extension Project {
     /// The first version whose corrections carry contrast and saturation.
     static let sceneTrimsVersion = 6
     /// The format this build writes.
-    static let fileVersion = sceneTrimsVersion
+    /// The first version whose grain has no brightness weights: it is added in the negative, and the
+    /// stock's own curve shapes it (`grain_prefix` in scripts/lib.sh).
+    static let grainInTheNegativeVersion = 7
+    static let fileVersion = grainInTheNegativeVersion
 
     public func serialised() throws -> Data {
         var presetList: [[String: Any]] = []
@@ -540,11 +543,6 @@ extension Project {
                     "radius": neutral.radius, "tint": neutral.tint,
                 ]
             }
-            if var grain = look["grain"] as? [String: Any] {
-                if grain["shadows"] == nil { grain["shadows"] = 1.0 }
-                if grain["highlights"] == nil { grain["highlights"] = 1.0 }
-                look["grain"] = grain
-            }
             upgraded = look
         }
         // Before version 3 every look rendered through Apple's cube, with the delivery finish the
@@ -594,6 +592,16 @@ extension Project {
             if correct["contrast"] == nil { correct["contrast"] = 1.0 }
             if correct["saturation"] == nil { correct["saturation"] = 1.0 }
             look["correct"] = correct
+            upgraded = look
+        }
+        // Before version 7 grain carried brightness weights. Dropped, not kept: `Look` carries unknown
+        // keys forward verbatim, and the grain they weighted is gone.
+        if version < grainInTheNegativeVersion, var look = upgraded as? [String: Any],
+            var grain = look["grain"] as? [String: Any]
+        {
+            grain.removeValue(forKey: "shadows")
+            grain.removeValue(forKey: "highlights")
+            look["grain"] = grain
             upgraded = look
         }
         return try Look(data: try JSONSerialization.data(withJSONObject: upgraded))

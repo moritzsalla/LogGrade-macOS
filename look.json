@@ -70,9 +70,7 @@
     "warmth": 0.0
   },
   "grain": {
-    "strength": 3,
-    "shadows": 1.0,
-    "highlights": 0.6
+    "strength": 3
   },
   "stabilisation": {
     "smoothing": 30

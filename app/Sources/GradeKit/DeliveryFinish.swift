@@ -1,37 +1,27 @@
 import Foundation
 
-/// The delivery finish on an 8-bit luma plane, as `delivery_image_chain` and `render_deliverables`
-/// apply it in scripts/lib.sh: the edge-limited sharpener, then the clustered grain, weighted by
-/// the picture's own brightness. Chroma is untouched by both, as it is in the engine.
+/// The delivery finish on an 8-bit luma plane, as `delivery_image_chain` applies it in
+/// scripts/lib.sh: the edge-limited sharpener. Chroma is untouched, as it is in the engine. Grain is
+/// not here: it is added in the negative, before the conversion (`LiveGrain`).
 ///
-/// A SECOND IMPLEMENTATION, held to the engine by `ExportParityTests` on the delivered file, not
-/// by equal bytes: the grain is random in both, so only its size can agree.
+/// A SECOND IMPLEMENTATION, held to the engine by `ExportParityTests` on the delivered file.
 ///
-/// INTEGER AND ACROSS CORES. Written per pixel in Doubles it was 237 ms of a 1080x1920 frame, more
-/// than decode and grade together; every loop here runs rows in bands (`LiveChain.inBands`).
+/// INTEGER AND ACROSS CORES. Written per pixel in Doubles the finish was 237 ms of a 1080x1920
+/// frame, more than decode and grade together; every loop here runs rows in bands.
 public struct DeliveryFinish {
     public let sharpen: Double
-    public let grainStrength: Double
-    public let grainShadows: Double
-    public let grainHighlights: Double
 
     public init(look: Look) {
         sharpen = look.finish.sharpen
-        grainStrength = look.grainStrength
-        grainShadows = look.grainShadows
-        grainHighlights = look.grainHighlights
     }
 
-    /// Sharpens, then grains, `luma` in place. `frame` numbers the grain, which is temporal.
-    public func apply(to luma: inout [UInt8], width: Int, height: Int, frame: Int) {
+    /// Sharpens `luma` in place.
+    public func apply(to luma: inout [UInt8], width: Int, height: Int) {
         if sharpen > 0 { sharpened(&luma, width: width, height: height) }
-        if grainStrength > 0 { grained(&luma, width: width, height: height, frame: frame) }
     }
 
     // MARK: sharpener
 
-    /// `unsharp` on luma at the engine's radius, clamped to within `limit` code values of the
-    /// unsharpened picture's 3x3 minimum and maximum (`erosion`, `dilation`, `maskedclamp`).
     /// The sharpener's integers at a size, shared with the GPU finish: binomial passes, the shift
     /// that normalises them (weights sum to 4^steps per axis), the amount in 1/65536ths as ffmpeg's
     /// `unsharp` holds it, and the clamp's allowance past the local range.
@@ -47,6 +37,8 @@ public struct DeliveryFinish {
         )
     }
 
+    /// `unsharp` on luma at the engine's radius, clamped to within `limit` code values of the
+    /// unsharpened picture's 3x3 minimum and maximum (`erosion`, `dilation`, `maskedclamp`).
     func sharpened(_ y: inout [UInt8], width: Int, height: Int) {
         let (steps, shiftBy, amount, limit) = sharpenGeometry(width: width, height: height)
         let original = y
@@ -147,121 +139,9 @@ public struct DeliveryFinish {
         }
         return out
     }
-
-    // MARK: grain
-
-    /// Gaussian noise on a plate half the picture's size at a 1080 short edge (`grain_plate`), sd
-    /// strength/√3 rounded to whole code values as ffmpeg's `noise` makes it, scaled up bilinearly,
-    /// faded toward zero by the brightness weight, and added (`grainmerge` about 128).
-    /// A frame's grain before it meets the picture: the plate's whole code values and, for every
-    /// output column and row, the two plate samples it falls between and the weight of the second
-    /// in 1/256ths. Shared with the GPU finish, so both add the same grain.
-    public struct Plate {
-        public let width: Int
-        public let height: Int
-        public let values: [Int32]
-        public let columns: [(Int, Int, Int32)]
-        public let rows: [(Int, Int, Int32)]
-    }
-
-    public func plate(width: Int, height: Int, frame: Int) -> Plate? {
-        guard grainStrength > 0 else { return nil }
-        let short = min(width, height)
-        var pw = width * 540 / short
-        var ph = height * 540 / short
-        if pw > width {
-            pw = width
-            ph = height
-        }
-        // A generator per row, seeded by frame and row, so the rows fill across cores: one
-        // generator for the plate was 30 ms of a 1080x1920 frame.
-        let sd = grainStrength / 3.0.squareRoot()
-        var values = [Int32](repeating: 0, count: pw * ph)
-        values.withUnsafeMutableBufferPointer { out in
-            LiveChain.inBands(height: ph) { rows in
-                for row in rows {
-                    var rng = SplitMix64(
-                        seed: 0x9E37_79B9_7F4A_7C15 &+ UInt64(frame) &* 0x1_0000_0001
-                            &+ UInt64(row))
-                    for x in 0..<pw {
-                        out[row * pw + x] = Int32(
-                            min(127, max(-128, (rng.gaussian() * sd).rounded())))
-                    }
-                }
-            }
-        }
-        func positions(_ out: Int, _ plateSize: Int) -> [(Int, Int, Int32)] {
-            let s = Double(plateSize) / Double(out)
-            return (0..<out).map { i in
-                let f = max(0, min(Double(plateSize - 1), (Double(i) + 0.5) * s - 0.5))
-                let i0 = Int(f)
-                return (i0, min(plateSize - 1, i0 + 1), Int32(((f - Double(i0)) * 256).rounded()))
-            }
-        }
-        return Plate(
-            width: pw, height: ph, values: values, columns: positions(width, pw),
-            rows: positions(height, ph))
-    }
-
-    /// Whether the grain is faded by brightness at all; both weights at 1 leave the mask out.
-    public var isWeighted: Bool { !(grainShadows == 1 && grainHighlights == 1) }
-
-    /// The mask per code value, in 1/255ths, as `lutyuv` tabulates it.
-    public var mask: [Int32] { (0..<256).map { Int32((255 * weight(Double($0))).rounded()) } }
-
-    /// Gaussian noise on a plate half the picture's size at a 1080 short edge (`grain_plate`), sd
-    /// strength/√3 rounded to whole code values as ffmpeg's `noise` makes it, scaled up bilinearly,
-    /// faded toward zero by the brightness weight, and added (`grainmerge` about 128).
-    func grained(_ y: inout [UInt8], width: Int, height: Int, frame: Int) {
-        guard let plate = plate(width: width, height: height, frame: frame) else { return }
-        let pw = plate.width
-        let weighted = isWeighted
-        let mask = self.mask
-        let cols = plate.columns
-        let rowsAt = plate.rows
-        plate.values.withUnsafeBufferPointer { p in
-            mask.withUnsafeBufferPointer { m in
-                y.withUnsafeMutableBufferPointer { out in
-                    LiveChain.inBands(height: height) { band in
-                        for row in band {
-                            let (y0, y1, ty) = rowsAt[row]
-                            let a = y0 * pw
-                            let b = y1 * pw
-                            for col in 0..<width {
-                                let (x0, x1, tx) = cols[col]
-                                let top = p[a + x0] * (256 - tx) + p[a + x1] * tx
-                                let bottom = p[b + x0] * (256 - tx) + p[b + x1] * tx
-                                // Round the 16.16 bilinear value to a whole code value.
-                                var g = (top * (256 - ty) + bottom * ty + 32768) >> 16
-                                let i = row * width + col
-                                let v = Int32(out[i])
-                                if weighted { g = (g * m[Int(v)] + (g >= 0 ? 127 : -127)) / 255 }
-                                out[i] = UInt8(min(255, max(0, v + g)))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// `delivery_grain_merge`'s mask: 1 across the midtones, easing to `grainShadows` at black and
-    /// `grainHighlights` at white.
-    func weight(_ code: Double) -> Double {
-        func ease(_ t: Double) -> Double { t * t * (3 - 2 * t) }
-        let level = min(1, max(0, (code - 16) / 219))
-        let shadow = min(1, max(0, level / 0.45))
-        let highlight = min(1, max(0, (level - 0.55) / 0.45))
-        return min(
-            1,
-            max(
-                0,
-                (grainShadows + (1 - grainShadows) * ease(shadow))
-                    + (grainHighlights - 1) * ease(highlight)))
-    }
 }
 
-/// A small, seedable generator, so a frame's grain is the same every time it is rendered.
+/// A small, seedable generator, for pictures a test needs to be the same every run.
 struct SplitMix64 {
     private var state: UInt64
     init(seed: UInt64) { state = seed }
@@ -272,17 +152,5 @@ struct SplitMix64 {
         z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
         z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
         return z ^ (z >> 31)
-    }
-
-    mutating func uniform() -> Double { Double(next() >> 11) / Double(1 << 53) }
-
-    /// The polar method, as ffmpeg's `noise` draws it.
-    mutating func gaussian() -> Double {
-        while true {
-            let x1 = 2 * uniform() - 1
-            let x2 = 2 * uniform() - 1
-            let w = x1 * x1 + x2 * x2
-            if w < 1 && w > 0 { return x1 * (-2 * log(w) / w).squareRoot() }
-        }
     }
 }

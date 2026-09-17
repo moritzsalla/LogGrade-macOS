@@ -6,10 +6,11 @@ import MetalPerformanceShaders
 /// One export frame on the GPU, decoded picture to encoder buffer, with no copy through the CPU
 /// between: the camera's 10-bit 4:2:2 planes in, YCbCr to RGB and Lanczos to the shared frame, the
 /// chain (`MetalChain`, turning the frame upright as it reads it), then for each deliverable the
-/// crop, the 709 conversion, the sharpener and the grain, written into an 8-bit 4:2:0 buffer.
+/// crop, the 709 conversion and the sharpener, written into an 8-bit 4:2:0 buffer. Grain is the
+/// chain's, in the negative.
 ///
 /// THE FINISH IS `DeliveryFinish` TRANSCRIBED, integer for integer, and `MetalFrameTests` holds the
-/// two to each other on the same plate. The source stage is held by `ExportParityTests`, against
+/// two to each other. The source stage is held by `ExportParityTests`, against
 /// the engine's file.
 public final class MetalFrame {
     public let chain: MetalChain
@@ -28,7 +29,7 @@ public final class MetalFrame {
         var made: [String: MTLComputePipelineState] = [:]
         for name in [
             "ycbcr", "toY", "toCbCr", "binomialAcross", "binomialDown",
-            "extremes", "sharpen", "grain",
+            "extremes", "sharpen", "writeY",
         ] {
             guard let f = library.makeFunction(name: name) else {
                 throw MetalChain.Failure.shader("no \(name)")
@@ -48,15 +49,13 @@ public final class MetalFrame {
         public let crop: (x: Int, y: Int)
         public let finish: DeliveryFinish
         public let output: CVPixelBuffer
-        /// The grain plate for this frame, `DeliveryFinish.plate`'s, or nil for no grain.
-        public let plate: DeliveryFinish.Plate?
     }
 
     /// Renders `source` (a 10-bit 4:2:2 bi-planar buffer, as decoded) into every target's buffer.
     /// `frameWidth` x `frameHeight` is the upright shared frame; `turns` stands the source up.
     public func render(
         source: CVPixelBuffer, turns: Int, frameWidth: Int, frameHeight: Int, grade: LiveChain,
-        targets: [Target]
+        grain: LiveGrain?, frame: Int, targets: [Target]
     ) throws {
         let sideways = turns % 2 == 1
         let sw = sideways ? frameHeight : frameWidth
@@ -79,7 +78,9 @@ public final class MetalFrame {
         let scaled = try chain.scratch("sourceScaled", .rgba32Float, sw, sh)
         lanczos.encode(commandBuffer: buffer, sourceTexture: rgb, destinationTexture: scaled)
         let graded = try chain.scratch("graded", .rgba8Unorm, frameWidth, frameHeight)
-        try chain.encode(source: scaled, into: graded, chain: grade, turns: turns, buffer: buffer)
+        try chain.encode(
+            source: scaled, into: graded, chain: grade, turns: turns, grain: grain, frame: frame,
+            buffer: buffer)
         try encodeTargets(graded, targets, buffer, &held)
         buffer.commit()
         buffer.waitUntilCompleted()
@@ -128,7 +129,7 @@ public final class MetalFrame {
                 e.setBytes(&crop, length: 8, index: 0)
             }
             let sharpened = try sharpen(y, target.finish, buffer, i)
-            try grain(sharpened, into: outY, target, buffer)
+            try writeY(sharpened, into: outY, buffer)
         }
     }
 
@@ -179,45 +180,10 @@ public final class MetalFrame {
         return sharp
     }
 
-    private func grain(
-        _ y: MTLTexture, into out: MTLTexture, _ target: Target, _ buffer: MTLCommandBuffer
-    ) throws {
-        let w = y.width
-        let h = y.height
-        var plateTexture: MTLTexture
-        var cols: [Int32] = [0, 0, 0]
-        var rows: [Int32] = [0, 0, 0]
-        var params = SIMD3<Int32>(0, 1, 0)  // grained, plate width, weighted
-        var mask = [Int32](repeating: 255, count: 256)
-        if let plate = target.plate {
-            plateTexture = try chain.texture(
-                .r32Float, plate.width, plate.height, usage: [.shaderRead], storage: .managed)
-            let values = plate.values.map(Float.init)
-            values.withUnsafeBytes {
-                plateTexture.replace(
-                    region: MTLRegionMake2D(0, 0, plate.width, plate.height), mipmapLevel: 0,
-                    withBytes: $0.baseAddress!, bytesPerRow: plate.width * 4)
-            }
-            cols = plate.columns.flatMap { [Int32($0.0), Int32($0.1), $0.2] }
-            rows = plate.rows.flatMap { [Int32($0.0), Int32($0.1), $0.2] }
-            params = SIMD3(1, Int32(plate.width), target.finish.isWeighted ? 1 : 0)
-            mask = target.finish.mask
-        } else {
-            plateTexture = try chain.scratch("noPlate", .r32Float, 1, 1)
-        }
-        try run("grain", buffer, w, h) { e in
+    private func writeY(_ y: MTLTexture, into out: MTLTexture, _ buffer: MTLCommandBuffer) throws {
+        try run("writeY", buffer, y.width, y.height) { e in
             e.setTexture(y, index: 0)
-            e.setTexture(plateTexture, index: 1)
-            e.setTexture(out, index: 2)
-            // Buffers, not bytes: a column table is past setBytes's 4 KB at any delivery width.
-            e.setBuffer(
-                self.chain.device.makeBuffer(bytes: &cols, length: cols.count * 4), offset: 0,
-                index: 0)
-            e.setBuffer(
-                self.chain.device.makeBuffer(bytes: &rows, length: rows.count * 4), offset: 0,
-                index: 1)
-            e.setBytes(&params, length: MemoryLayout<SIMD3<Int32>>.stride, index: 2)
-            e.setBytes(&mask, length: 256 * 4, index: 3)
+            e.setTexture(out, index: 1)
         }
     }
 
@@ -365,27 +331,11 @@ public final class MetalFrame {
             dst.write(float(clamp(clamped, 0, 255)), id);
         }
 
-        // DeliveryFinish.grained, in integers, written as the output's 8-bit luma.
-        kernel void grain(texture2d<float, access::read> y [[texture(0)]],
-                          texture2d<float, access::read> plate [[texture(1)]],
-                          texture2d<float, access::write> dst [[texture(2)]],
-                          constant int *cols [[buffer(0)]], constant int *rows [[buffer(1)]],
-                          constant int3 &params [[buffer(2)]], constant int *mask [[buffer(3)]],
-                          uint2 id [[thread_position_in_grid]]) {
+        kernel void writeY(texture2d<float, access::read> y [[texture(0)]],
+                           texture2d<float, access::write> dst [[texture(1)]],
+                           uint2 id [[thread_position_in_grid]]) {
             if (id.x >= dst.get_width() || id.y >= dst.get_height()) return;
-            int v = int(y.read(id).r);
-            if (params.x != 0) {
-                int y0 = rows[id.y * 3], y1 = rows[id.y * 3 + 1], ty = rows[id.y * 3 + 2];
-                int x0 = cols[id.x * 3], x1 = cols[id.x * 3 + 1], tx = cols[id.x * 3 + 2];
-                int a = int(plate.read(uint2(x0, y0)).r), b = int(plate.read(uint2(x1, y0)).r);
-                int c = int(plate.read(uint2(x0, y1)).r), d = int(plate.read(uint2(x1, y1)).r);
-                int top = a * (256 - tx) + b * tx;
-                int bottom = c * (256 - tx) + d * tx;
-                int g = (top * (256 - ty) + bottom * ty + 32768) >> 16;
-                if (params.z != 0) g = (g * mask[v] + (g >= 0 ? 127 : -127)) / 255;
-                v = clamp(v + g, 0, 255);
-            }
-            dst.write(float(v) / 255.0, id);
+            dst.write(y.read(id).r / 255.0, id);
         }
         """
 }

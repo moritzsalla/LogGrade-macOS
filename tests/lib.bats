@@ -450,9 +450,9 @@ _exports() {  # _exports <work>
 
 @test "lib.sh defines every function grade.sh calls" {
 	# DERIVED, NOT LISTED. This used to hardcode ten names and was not updated when the delivery
-	# chain moved into lib.sh, so it silently stopped covering source_fps, stab_prefix,
-	# grain_plate, delivery_image_chain, delivery_grain_branch and render_delivery — six of the
-	# sixteen, including the one that protects approved deliverables. A test named for "every
+	# chain moved into lib.sh, so it silently stopped covering six of the sixteen, among them
+	# source_fps, stab_prefix, delivery_image_chain and render_delivery, the one that protects
+	# approved deliverables. A test named for "every
 	# function" that checks a fixed subset is the coverage-shaped hole CLAUDE.md rules out.
 	#
 	# So the names come from the script: every word in COMMAND POSITION in grade.sh — line start, after `$(`, a pipe, `&&`, `||`, `;`, or a keyword — minus the functions
@@ -727,7 +727,7 @@ PY
 	mkdir -p "$work"
 
 	# 0.1 seconds through the whole chain: the conversion, look LUT, luma-only tone via
-	# mergeplanes, saturation, warmth, the dithered 10->8 reduction, sharpener, grain blend.
+	# mergeplanes, saturation, warmth, grain in the negative, the dithered 10->8 reduction, sharpener.
 	# MATCH stays on so the exposure meter runs too.
 	PROOF=0.1 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$src"
 	[ "$status" -eq 0 ] || fail "$output"
@@ -1230,9 +1230,10 @@ PY
 		"$report" || fail "no encode speed: $(cat "$report")"
 	grep -qE -- '--- graph [0-9]+ \(reels-stories_9x16 encode, -filter_complex\) ---' "$report" \
 		|| fail "no delimited filter graph: $(cat "$report")"
-	# Matched end to end rather than by its first filter, which a denoise or halation would change.
-	grep -qE '^\[0:v\].*lut3d=.*blend=all_mode=grainmerge:shortest=1\[o\]$' "$report" \
-		|| fail "the graph was not recorded whole: $(cat "$report")"
+	# Matched end to end rather than by its first filter, which a denoise or halation would change,
+	# and with the grain's mix before the stock's cube: grain in the negative.
+	grep -qE "^\[0:v\].*mix=inputs=4:.*lut3d=file='[^']*neutral\.cube'.*\[o\]$" "$report" \
+		|| fail "the graph was not recorded whole, grain before the conversion: $(cat "$report")"
 	grep -qE '^finished .*, wall time [0-9]+\.[0-9]{3}s$' "$report" || fail "no wall time: $(cat "$report")"
 	grep -qE '^  encode +[0-9]+\.[0-9]{3}s$' "$report" || fail "no phase summary: $(cat "$report")"
 }
@@ -1611,7 +1612,7 @@ PY
 	[ "$status" -eq 0 ] || fail "refused the last valid offset: $output"
 }
 
-@test "the sharpener's radius and the grain plate follow the output's short edge" {
+@test "the sharpener's radius and the grain's size follow the output's short edge" {
 	# Both were tuned at a 1080 short edge and are in PIXELS, so at another size they would act on a
 	# different real-world detail size. Scaled by the short edge, a landscape export gets the same
 	# radius as the portrait one it matches.
@@ -1624,10 +1625,18 @@ PY
 	[[ "$output" == *"unsharp=3:3:0.6:3:3"* ]] || fail "radius went below the floor: $output"
 	run delivery_image_chain 1920 1080 "" "" 1
 	[[ "$output" == *"unsharp=5:5:0.6:3:3"* ]] || fail "a 1080p landscape export lost the radius: $output"
-	run grain_plate 1080 1920 24
-	[[ "$output" == *"s=540x960:"* ]] || fail "the tuned size's plate moved: $output"
-	run grain_plate 3840 2160 24
-	[[ "$output" == *"s=960x540:"* ]] || fail "a 2160p plate did not keep the grain's size: $output"
+	# Grain softened by 0.8 px at a 1080 short edge: the same kernel for the landscape 1080p, a wider
+	# one at 2160, never below 0.5 px, and no prefix at all at strength 0.
+	local portrait landscape big small
+	portrait=$(grain_prefix 1080 1920 24 12 | grep -o "0m='[0-9 ]*'" | head -1)
+	landscape=$(grain_prefix 1920 1080 24 12 | grep -o "0m='[0-9 ]*'" | head -1)
+	big=$(grain_prefix 2160 3840 24 12 | grep -o "0m='[0-9 ]*'" | head -1)
+	small=$(grain_prefix 72 128 24 12 | grep -o "0m='[0-9 ]*'" | head -1)
+	[ "$portrait" = "0m='1 44 458 1000 458 44 1'" ] || fail "the tuned size's grain moved: $portrait"
+	[ "$landscape" = "$portrait" ] || fail "a landscape 1080p export got other grain: $landscape"
+	[ "$(echo "$big" | wc -w)" -gt "$(echo "$portrait" | wc -w)" ] || fail "2160 grain did not grow: $big"
+	[ "$small" = "0m='0 135 1000 135 0'" ] || fail "tiny grain went below 0.5 px: $small"
+	[ -z "$(grain_prefix 1080 1920 24 0)" ] || fail "strength 0 still built grain"
 }
 
 @test "fps_filter accepts an integer relation and refuses retiming" {
@@ -2167,7 +2176,8 @@ PY
 	#
 	# Halation sits between the two: it acts on light, so it follows the exposure the correction set
 	# and precedes the conversion that would land every highlight on the same display ceiling.
-	n=$(grep -c "CORRECT_PREFIX}\${HALATION_PREFIX}lut3d=file='\${CST}'" "$SCRIPTS/grade.sh" || true)
+	# The export's grain goes between halation and the conversion too: it is grain in the negative.
+	n=$(grep -cE "CORRECT_PREFIX\}\\\$\{HALATION_PREFIX\}(\\\$\{grain\})?lut3d=file='\\\$\{CST\}'" "$SCRIPTS/grade.sh" || true)
 	[ "$n" -eq 2 ] || fail "expected correction, halation, CST in that order in both graphs, found $n"
 	# And nowhere after it.
 	! grep -qE "CST\}':interp=tetrahedral,\\\$\{(CORRECT|HALATION)_PREFIX\}" "$SCRIPTS/grade.sh" \
@@ -2486,13 +2496,13 @@ sys.exit(None if 0 <= hue < tone else "order is hue@%d tone@%d" % (hue, tone))
 
 # bats test_tags=slow
 @test "a clip's deliverables render in one pass, and every one of them lands" {
-	# One ffmpeg, one decode, one grade, split per deliverable. The sharpener and a weighted grain
-	# merge each define labels, and two of them in one graph must not collide: ffmpeg refuses the
-	# whole graph if they do, which is what a lost renumbering looks like.
+	# One ffmpeg, one decode, one grade, split per deliverable. The sharpener defines labels, and two
+	# of them in one graph must not collide: ffmpeg refuses the whole graph if they do, which is what a
+	# lost renumbering looks like. The grain is in the shared chain, once.
 	local work="$BATS_TEST_TMPDIR/one-pass" report look="$BATS_TEST_TMPDIR/one-pass.json"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	jq '.finish.sharpen = 0.6 | .grain.strength = 4 | .grain.highlights = 0.5' "$BATS_TEST_DIRNAME/../look.json" > "$look"
+	jq '.finish.sharpen = 0.6 | .grain.strength = 4' "$BATS_TEST_DIRNAME/../look.json" > "$look"
 	LOOK_FILE="$look" DELIVERABLES=reels,feed CROP_OFFSET=centre MATCH=0 STAB=0 HEIGHT=128 PROOF=0.2 \
 		GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "render failed: $output"
@@ -2501,7 +2511,7 @@ sys.exit(None if 0 <= hue < tone else "order is hue@%d tone@%d" % (hue, tone))
 	report=$(ls "$work"/.loggrade/reports/run-*.txt 2>/dev/null | head -1) || true
 	[ "$(grep -c -- '--- graph [0-9]* (reels-stories_9x16+feed_4x5 encode, -filter_complex) ---' "$report")" = 1 ] \
 		|| fail "not one pass for both: $(grep -F -- '--- graph' "$report")"
-	grep -qE '^\[0:v\].*split=2\[s0\]\[s1\];.*\[sh1_in\].*\[gw1_image\]' "$report" \
+	grep -qE '^\[0:v\].*\[gr_img\].*split=2\[s0\]\[s1\];.*\[sh1_in\]' "$report" \
 		|| fail "the second deliverable's labels are not its own: $(grep -F '[0:v]' "$report")"
 }
 
@@ -2512,87 +2522,44 @@ sys.exit(None if 0 <= hue < tone else "order is hue@%d tone@%d" % (hue, tone))
 	[ "$status" -ne 0 ] && [[ "$output" == *"outside -60..60"* ]] || fail "a knot past its bound: $output"
 }
 
-# --- grain weighted by brightness ---------------------------------------------
+# --- grain in the negative ---------------------------------------------------
 
-# Grain sd per ninth of a horizontal ramp, darkest first, after merging a plate through the given
-# weights. The ramp is `geq`, not `gradients`: the latter seeds itself randomly, and two renders of
-# it disagreed by a whole band.
-_grain_bands() {  # _grain_bands <shadows> <highlights>   -> nine numbers, then the chroma verdict
-	local dir="$BATS_TEST_TMPDIR/grain" w=1080 h=320 src
+# bats test_tags=slow
+@test "grain in the negative is its specified size, shared by the channels, and adds no offset" {
+	# Per-channel sd strength * 0.00064 in log, 90% of the variance common to R, G and B, mean zero.
+	# Measured as built: sd 0.0074-0.0077, correlation 0.90, mean -0.0003. The traps it guards are in
+	# grain_prefix's header: an ignored per-plane seed made green 27% too strong, a gray-to-RGB
+	# conversion left red and blue without shared grain, a truncating blur darkened by 0.0015.
+	local dir="$BATS_TEST_TMPDIR/grain" w=270 h=480
 	mkdir -p "$dir"
-	src="nullsrc=s=${w}x${h}:d=0.1:r=24,geq=lum='16+219*X/W':cb=128:cr=128,format=yuv420p,${DELIVERY_SETPARAMS}"
-	ffmpeg -v error -y -f lavfi -i "$src" -frames:v 1 -f rawvideo -pix_fmt yuv420p "$dir/clean.yuv"
-	ffmpeg -v error -y -f lavfi -i "$src" -f lavfi -i "$(grain_plate "$w" "$h" 24)" \
-		-filter_complex "[0:v]null[b];[1:v]$(delivery_grain_branch "$w" "$h" 8)[g];$(delivery_grain_merge b g o "$1" "$2")" \
-		-map "[o]" -frames:v 1 -f rawvideo -pix_fmt yuv420p "$dir/grained.yuv"
-	python3 - "$dir/clean.yuv" "$dir/grained.yuv" "$w" "$h" <<'PY'
-import math, sys
-a, b = open(sys.argv[1], "rb").read(), open(sys.argv[2], "rb").read()
-w, h = int(sys.argv[3]), int(sys.argv[4])
-bands = []
-for x0 in range(0, w, w // 9):
-    d = [b[y * w + x] - a[y * w + x] for y in range(0, h, 2) for x in range(x0, x0 + w // 9, 2)]
-    m = sum(d) / len(d)
-    bands.append("%.2f" % math.sqrt(sum((v - m) ** 2 for v in d) / len(d)))
-print(" ".join(bands[:9]))
-print("chroma-untouched" if a[w * h:] == b[w * h:] else "chroma-moved")
-PY
-}
-
-@test "weighted grain recedes into shadow and highlight, and stays luma-only" {
-	# Print grain is most visible in the midtones. Measured at 0.35 and 0.5: sd 1.2 in the darkest
-	# ninth, 3.2 at the midtones, 1.8 in the brightest, against a flat 3.2 unweighted.
-	# Judged against the same plate merged flat, so the bounds are ratios rather than one ramp's sd.
-	run _grain_bands 1 1
-	[ "$status" -eq 0 ] || fail "$output"
-	local flat bands verdict
-	flat="$(printf '%s\n' "$output" | head -1)"
-	run _grain_bands 0.35 0.5
-	[ "$status" -eq 0 ] || fail "$output"
-	bands="$(printf '%s\n' "$output" | head -1)"
-	verdict="$(printf '%s\n' "$output" | tail -1)"
-	python3 -c '
-import sys
-f = [float(v) for v in sys.argv[1].split()]
-b = [float(v) for v in sys.argv[2].split()]
+	ffmpeg -v error -y -f lavfi -i "color=c=gray:s=${w}x${h}:r=24:d=0.2" \
+		-filter_complex "[0:v]$(grain_prefix "$w" "$h" 24 12)format=gbrpf32le[o]" -map "[o]" \
+		-frames:v 2 -f rawvideo -pix_fmt gbrpf32le "$dir/grain.raw" || fail "the grain graph failed"
+	python3 - "$dir/grain.raw" "$w" "$h" <<'PY' || fail "grain off its specification"
+import math, struct, sys
+w, h = int(sys.argv[2]), int(sys.argv[3])
+data = open(sys.argv[1], "rb").read()
+frame = w * h * 3 * 4
+vals = struct.unpack("<%df" % (w * h * 3), data[frame:2 * frame])
+g, b, r = (vals[i * w * h:(i + 1) * w * h] for i in range(3))
+base = 128 / 255
+def stats(c):
+    m = sum(c) / len(c)
+    return m, math.sqrt(sum((v - m) ** 2 for v in c) / len(c))
+def corr(a, c):
+    (ma, sa), (mc, sc) = stats(a), stats(c)
+    return sum((x - ma) * (y - mc) for x, y in zip(a, c)) / len(a) / (sa * sc)
 problems = []
-if b[0] > 0.5 * f[0]: problems.append("deep shadow keeps %.2f of a flat %.2f" % (b[0], f[0]))
-if b[8] > 0.7 * f[8]: problems.append("the highlights keep %.2f of a flat %.2f" % (b[8], f[8]))
-if b[4] < 0.9 * f[4]: problems.append("the midtones lost grain: %.2f of a flat %.2f" % (b[4], f[4]))
-sys.exit("; ".join(problems) or None)
-' "$flat" "$bands" || fail "grain is not weighted by brightness: flat $flat, weighted $bands"
-	# The plate is grey so grainmerge leaves chroma alone.
-	[ "$verdict" = "chroma-untouched" ] || fail "weighted grain moved the chroma planes"
-}
-
-@test "grain at strength 0 leaves the picture byte-identical" {
-	# grainmerge is A+B-128. `color=c=gray` is Y=126, which darkened every final by 2 code values
-	# with no grain visible to blame. Byte-identical, because any offset is the plate's.
-	local dir="$BATS_TEST_TMPDIR/plate" w=64 h=64 src
-	mkdir -p "$dir"
-	src="nullsrc=s=${w}x${h}:d=0.1:r=24,geq=lum='16+219*X/W':cb=128:cr=128,format=yuv420p,${DELIVERY_SETPARAMS}"
-	ffmpeg -v error -y -f lavfi -i "$src" -frames:v 1 -f rawvideo -pix_fmt yuv420p "$dir/clean.yuv"
-	ffmpeg -v error -y -f lavfi -i "$src" -f lavfi -i "$(grain_plate "$w" "$h" 24)" \
-		-filter_complex "[0:v]null[b];[1:v]$(delivery_grain_branch "$w" "$h" 0)[g];$(delivery_grain_merge b g o 1 1)" \
-		-map "[o]" -frames:v 1 -f rawvideo -pix_fmt yuv420p "$dir/grained.yuv"
-	cmp -s "$dir/clean.yuv" "$dir/grained.yuv" \
-		|| fail "strength-0 grain moved the picture: $(cmp -l "$dir/clean.yuv" "$dir/grained.yuv" | head -3)"
-}
-
-@test "10-bit weighted grain at strength 0 leaves the picture byte-identical" {
-	# Every grey the grain path writes is in code values: 8-bit numbers on a 10-bit plane put the
-	# merge's zero at 128 of 1023, and the delivery goes dark with no grain to blame. Weighted, so the
-	# mask and the flat plate are both in the graph.
-	local dir="$BATS_TEST_TMPDIR/plate10" w=64 h=64 src
-	mkdir -p "$dir"
-	DELIVERY_CODEC=hevc10
-	src="nullsrc=s=${w}x${h}:d=0.1:r=24,geq=lum='64+876*X/W':cb=512:cr=512,format=yuv420p10le,${DELIVERY_SETPARAMS}"
-	ffmpeg -v error -y -f lavfi -i "$src" -frames:v 1 -f rawvideo -pix_fmt yuv420p10le "$dir/clean.yuv"
-	ffmpeg -v error -y -f lavfi -i "$src" -f lavfi -i "$(grain_plate "$w" "$h" 24)" \
-		-filter_complex "[0:v]null[b];[1:v]$(delivery_grain_branch "$w" "$h" 0)[g];$(delivery_grain_merge b g o 0.35 0.5)" \
-		-map "[o]" -frames:v 1 -f rawvideo -pix_fmt yuv420p10le "$dir/grained.yuv"
-	cmp -s "$dir/clean.yuv" "$dir/grained.yuv" \
-		|| fail "10-bit strength-0 grain moved the picture: $(cmp -l "$dir/clean.yuv" "$dir/grained.yuv" | head -3)"
+for name, c in (("red", r), ("green", g), ("blue", b)):
+    m, sd = stats(c)
+    if abs(sd - 12 * 0.00064) > 12 * 0.00064 * 0.08: problems.append("%s sd %.5f" % (name, sd))
+    if abs(m - base) > 0.0008: problems.append("%s mean offset %+.5f" % (name, m - base))
+for name, c in (("green", g), ("blue", b)):
+    k = corr(r, c)
+    if abs(k - 0.9) > 0.05: problems.append("red-%s correlation %.3f" % (name, k))
+print("; ".join(problems))
+sys.exit(1 if problems else 0)
+PY
 }
 
 @test "every delivery format setting is refused by name before anything renders" {
@@ -2688,15 +2655,6 @@ CODECS
 		|| fail "DELIVERY_AUDIO=0 still delivered audio"
 }
 
-@test "flat grain weights leave the mask out of the graph" {
-	# Absent, not idle: flat grain is the plain blend, with no mask built for nothing.
-	[ "$(delivery_grain_merge b g o 1 1)" = "[b][g]${DELIVERY_BLEND}[o]" ] \
-		|| fail "weights of 1 still built a mask: $(delivery_grain_merge b g o 1 1)"
-	[ "$(delivery_grain_merge b g o 1.0 1.00)" = "[b][g]${DELIVERY_BLEND}[o]" ] \
-		|| fail "1.0 was read as a different number from 1"
-	[[ "$(delivery_grain_merge b g o 0.9 1)" == *maskedmerge* ]] || fail "a weight of 0.9 built no mask"
-}
-
 @test "a FINISH that is not 0 or 1 is refused before anything renders" {
 	local work="$BATS_TEST_TMPDIR/bad-finish"
 	mkdir -p "$work/src"
@@ -2708,28 +2666,14 @@ CODECS
 	[ ! -d "$work/.loggrade/frames" ] || fail "FINISH=no got as far as rendering"
 }
 
-@test "a grain weight outside 0 to 1 is refused before anything renders" {
-	local work="$BATS_TEST_TMPDIR/bad-grain" look="$BATS_TEST_TMPDIR/bad-grain.json" v
-	mkdir -p "$work/src"
-	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	for v in 1.5 -0.1 "0.5:x"; do
-		jq --arg v "$v" '.grain.shadows = $v' "$BATS_TEST_DIRNAME/../look.json" > "$look"
-		LOOK_FILE="$look" FRAME=0 FRAME_HEIGHT=128 MATCH=0 GRADE_WORK_DIR="$work" \
-			run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
-		[ "$status" -ne 0 ] || fail "rendered with grain.shadows '$v'"
-		[[ "$output" == *"grain.shadows"* ]] || fail "'$v' refused without naming it: $output"
-		[ ! -d "$work/.loggrade/frames" ] || fail "'$v' got as far as rendering"
-	done
-}
-
-@test "a weighted grain render finishes rather than following the infinite plate" {
-	# The plates are endless lavfi sources and `maskedmerge` has no `shortest` option; the render
-	# has to end because its mask comes from the image. A proof that never finished would be the
-	# DELIVERY_BLEND incident again, one filter earlier.
+@test "a grained render finishes rather than following the infinite noise plates" {
+	# The noise plates are endless lavfi sources; `mix` ends on its first input, the picture. Without
+	# `duration=first` a render runs on and the output grows without bound, which is what an
+	# unterminated plate did once before (a 26 s clip past 189 MB, no moov atom ever written).
 	local work="$BATS_TEST_TMPDIR/grain-proof" look="$BATS_TEST_TMPDIR/grain-proof.json"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	jq '.grain.shadows = 0.35 | .grain.highlights = 0.5' "$BATS_TEST_DIRNAME/../look.json" > "$look"
+	jq '.grain.strength = 12' "$BATS_TEST_DIRNAME/../look.json" > "$look"
 	LOOK_FILE="$look" PROOF=0.1 STAB=0 MATCH=0 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ] || fail "$output"
