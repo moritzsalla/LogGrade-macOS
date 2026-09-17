@@ -21,12 +21,13 @@ Sign-off is both users calling a look good enough. It stays improvable. Moritz c
 Super 8 and the brighter Neutral good enough for now, not exceptional; the partner has not
 judged them.
 
-**Right panel.** Look picker, one per batch. Adjust, per clip: Exposure, Warmth, Tint, Contrast,
-Saturation, and the per-clip exposure match (on by default). Scopes (levels, parade, vectorscope)
-and the curve, read-only. Sections with a bypass: Stabilisation (strength, off by default), Denoise
-(strength, off by default), Grain (on/off; off for Neutral, on for film).
+**Right panel.** Everything is per clip: clips are graded and exported one at a time. Look picker
+(a clip given none follows the last look picked). Adjust: Exposure, Warmth, Tint, Contrast,
+Saturation, exposure match (on by default). Scopes (levels, parade, vectorscope) and the curve,
+read-only. Sections with a bypass: Stabilisation (strength, off by default), Denoise (strength, off
+by default), Grain (on/off; off for Neutral, on for film).
 
-**Export.** A picker: Instagram Story, Instagram Post (no fields), Custom (resolution, aspect and
+**Export.** The selected clip, or all clips. A picker: Instagram Story, Instagram Post (no fields), Custom (resolution, aspect and
 crop, frame rate, codec up to ProRes 422 HQ, quality, container, audio). SDR only. Framing defaults
 to centre, dragged per clip; export warns about clips whose framing was never looked at.
 

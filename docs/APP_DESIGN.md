@@ -11,11 +11,11 @@ Each rule came from grading real clips or from a screenshot, not from theory.
   decimal comma made the panel disagree with the file.
 - **Readouts are SF Mono with tabular figures.** Labels are SF Pro, in sentence case.
 - **Type and spacing are on a scale:** four type roles and five spacings, on macOS's own metrics.
-- **Derive state, never copy it.** Thumbnails, the Convert count and the drop target each broke
+- **Derive state, never copy it.** Thumbnails, the export count and the drop target each broke
   because state lived in two places. Derive it, or route it through one door.
 - **A busy indicator must not grey the picture.** Use a corner spinner, since the picture is being
   judged at exactly that moment.
-- **Disabled controls say why.** Convert can be blocked for four reasons; show which one.
+- **Disabled controls say why.** Export can be blocked for four reasons; show which one.
 - **Standard menus are required.** ⌘Q, ⌘C, ⌘V and ⌘A only reach a text field through the menu bar's
   responder chain.
 - **Reference text goes behind a help button,** not as prose on every visit.

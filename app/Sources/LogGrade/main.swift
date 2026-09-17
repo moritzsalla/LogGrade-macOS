@@ -426,7 +426,8 @@ commands.openProject = { actions.openProject() }
 commands.saveProject = { actions.saveProject() }
 commands.previousClip = { actions.step(-1) }
 commands.nextClip = { actions.step(1) }
-commands.convert = { actions.convert() }
+commands.exportClip = { actions.export(.selected) }
+commands.exportAll = { actions.export(.all) }
 
 window.makeKeyAndOrderFront(nil)
 app.activate(ignoringOtherApps: true)

@@ -36,6 +36,17 @@ public struct Project: Equatable {
         public var previewSeconds: Double
         public var stabilise: Bool
         public var adjust: Look.Adjust
+        /// The preset this clip is graded with. Nil follows `activePreset`, the look last picked,
+        /// so a shoot nobody graded clip by clip still takes one choice for all of it.
+        public var look: String?
+        /// Adjust switched off: the look as it ships, metering included.
+        public var adjustOff: Bool
+        /// Denoise strength; nil is off. Off by default: daylight footage is clean once scaled.
+        public var denoise: Double?
+        /// Nil follows the look: on for a film stock, off for Neutral.
+        public var grain: Bool?
+        /// Nil is the look's own smoothing.
+        public var stabilisationStrength: Double?
 
         /// A clip nobody has decided about is not stabilised: the stabiliser crops and softens,
         /// and a locked-off shot gains nothing for it. One constant, because the interface, the
@@ -44,12 +55,27 @@ public struct Project: Equatable {
 
         public init(
             cropOffset: Int? = nil, previewSeconds: Double = 1,
-            stabilise: Bool = stabilisesByDefault, adjust: Look.Adjust = Look.Adjust()
+            stabilise: Bool = stabilisesByDefault, adjust: Look.Adjust = Look.Adjust(),
+            look: String? = nil, adjustOff: Bool = false, denoise: Double? = nil,
+            grain: Bool? = nil, stabilisationStrength: Double? = nil
         ) {
             self.cropOffset = cropOffset
             self.previewSeconds = previewSeconds
             self.stabilise = stabilise
             self.adjust = adjust
+            self.look = look
+            self.adjustOff = adjustOff
+            self.denoise = denoise
+            self.grain = grain
+            self.stabilisationStrength = stabilisationStrength
+        }
+
+        /// This clip with its grade back where its look starts. The look, crop and stabiliser
+        /// switch stay: they are choices about the clip, not moves on top of its preset.
+        public var gradeReset: ClipSettings {
+            ClipSettings(
+                cropOffset: cropOffset, previewSeconds: previewSeconds, stabilise: stabilise,
+                look: look)
         }
     }
 
@@ -248,9 +274,15 @@ public struct Project: Equatable {
     /// the preview could not read the conversion and Convert failed in the engine. "shipped" is
     /// what Neutral was called before, so it keeps a project on the same picture.
     public mutating func adopt(presets current: [Preset], fallback: String) {
-        let wanted = activePreset == "shipped" ? fallback : activePreset
+        func kept(_ name: String) -> String {
+            let wanted = name == "shipped" ? fallback : name
+            return current.contains { $0.name == wanted } ? wanted : fallback
+        }
         presets = current
-        activePreset = current.contains { $0.name == wanted } ? wanted : fallback
+        activePreset = kept(activePreset)
+        for (name, settings) in clips {
+            if let look = settings.look { clips[name]?.look = kept(look) }
+        }
     }
 
     /// A clip's decisions, or the undecided defaults for a clip with none recorded.
@@ -258,17 +290,51 @@ public struct Project: Equatable {
         clips[clip] ?? ClipSettings()
     }
 
+    /// The preset a clip is graded with, before anything of the clip's own.
+    public func preset(for clip: String) -> Preset? {
+        let name = settings(for: clip).look ?? activePreset
+        return presets.first { $0.name == name }
+    }
+
+    /// The stages switched off for a clip.
+    public func bypassed(for clip: String) -> Set<Look.Stage> {
+        let s = settings(for: clip)
+        var out: Set<Look.Stage> = []
+        if s.adjustOff { out.insert(.adjust) }
+        if s.denoise == nil { out.insert(.denoise) }
+        let filmStock = preset(for: clip).map { $0.look.convertCube != Look.neutralConversion }
+        if !(s.grain ?? filmStock ?? false) { out.insert(.grain) }
+        return out
+    }
+
+    /// Everything a clip renders with: its preset, its strengths, its Adjust and its switches.
+    /// ONE RESOLUTION, for the preview and the export alike, so the file is the picture.
+    public func look(for clip: String) -> Look? {
+        guard var look = preset(for: clip)?.look else { return nil }
+        let s = settings(for: clip)
+        if let denoise = s.denoise { look.finish.denoise = denoise }
+        if let smoothing = s.stabilisationStrength { look.stabilisationSmoothing = smoothing }
+        return s.adjust.applied(to: look).bypassing(bypassed(for: clip))
+    }
+
     /// The project with every clip's Adjust at neutral: what the panels that never show Adjust
     /// watch, so a slider drag does not rebuild them sixty times a second.
     public var ignoringAdjustments: Project {
         var out = self
-        for name in out.clips.keys { out.clips[name]?.adjust = Look.Adjust() }
+        // Strength drags too. The look and the switches stay: the queue reads them.
+        for (name, settings) in out.clips {
+            var ignoring = settings
+            ignoring.adjust = Look.Adjust()
+            ignoring.denoise = settings.denoise.map { _ in 0 }
+            ignoring.stabilisationStrength = nil
+            out.clips[name] = ignoring
+        }
         return out
     }
 
     /// What stops a render before it starts. The interface shows these rather than discovering
     /// them from the engine's refusal, which is the same rule the engine follows itself.
-    public enum Blocker: Equatable, CustomStringConvertible {
+    public enum Blocker: Error, Equatable, CustomStringConvertible {
         case noActivePreset(String)
 
         public var description: String {
@@ -335,7 +401,9 @@ public struct Project: Equatable {
         // offset, which is right for the command line and why the app says it out loud.
         env["CROP_OFFSET"] = clips[clip]?.cropOffset.map(String.init) ?? "centre"
         env["STAB"] = settings(for: clip).stabilise ? "1" : "0"
-        if !settings(for: clip).adjust.match { env["MATCH"] = "0" }
+        // Adjust off takes metering with it, as the preview does (`GradeModel.matches`).
+        let s = settings(for: clip)
+        if !s.adjust.match || s.adjustOff { env["MATCH"] = "0" }
         return env
     }
 }
@@ -406,6 +474,13 @@ extension Project {
                 "stabilise": s.stabilise,
             ]
             if let offset = s.cropOffset { entry["crop_offset"] = offset }
+            if let look = s.look { entry["look"] = look }
+            if s.adjustOff { entry["adjust_off"] = true }
+            if let denoise = s.denoise { entry["denoise"] = denoise }
+            if let grain = s.grain { entry["grain"] = grain }
+            if let smoothing = s.stabilisationStrength {
+                entry["stabilisation_strength"] = smoothing
+            }
             if s.adjust != Look.Adjust() {
                 entry["adjust"] = [
                     "exposure": s.adjust.exposure, "warmth": s.adjust.warmth,
@@ -565,7 +640,12 @@ extension Project {
                     exposure: number("exposure", 0), warmth: number("warmth", 0),
                     tint: number("tint", 0), contrast: number("contrast", 1),
                     saturation: number("saturation", 1),
-                    match: (a["match"] as? NSNumber)?.boolValue ?? true))
+                    match: (a["match"] as? NSNumber)?.boolValue ?? true),
+                look: raw["look"] as? String,
+                adjustOff: (raw["adjust_off"] as? NSNumber)?.boolValue ?? false,
+                denoise: (raw["denoise"] as? NSNumber)?.doubleValue,
+                grain: (raw["grain"] as? NSNumber)?.boolValue,
+                stabilisationStrength: (raw["stabilisation_strength"] as? NSNumber)?.doubleValue)
         }
         self.init(
             presets: loaded,

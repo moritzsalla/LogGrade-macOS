@@ -10,7 +10,6 @@ import SwiftUI
 final class GradeModel: ObservableObject {
     // A new @Published property goes into the `changes` relay in init too, unless it follows from
     // the look; otherwise the panels that observe the relay never see it change.
-    @Published var look: Look
     /// The picture, in its OWN observable. A new frame must not rebuild the inspector, which is
     /// what made a drag feel slow even though grading the frame took four milliseconds.
     let preview = LivePreview()
@@ -19,6 +18,8 @@ final class GradeModel: ObservableObject {
     // it off the property means a new path cannot forget.
     @Published var selectedClip: ClipList.Entry? {
         didSet {
+            // Each clip carries its own look, so the curve can change with the selection.
+            refreshCurve()
             renderPreview()
             if isComparing {
                 preview.baseline = nil
@@ -31,26 +32,25 @@ final class GradeModel: ObservableObject {
     /// is what the Bench did too; a long press on a label was undiscoverable and awkward.
     @Published var isComparing = false
 
-    /// Stages switched off in the inspector. Everything that renders — the preview and the export —
-    /// reads `effectiveLook`, so what you see with a stage off is what the shoot renders.
-    ///
-    /// NOT SAVED, deliberately: not in the preset, the project or the defaults. A bypass left on
-    /// from yesterday's comparison silently renders a whole shoot without a stage.
-    ///
-    /// Denoise and grain start off: denoise because daylight footage is clean once scaled down,
-    /// grain because Neutral is what opens. `apply(preset:)` turns grain on for a film preset.
-    @Published var bypassed: Set<Look.Stage> = [.denoise, .grain]
+    /// The selected clip's stages switched off in the inspector. Per clip and saved with it, so
+    /// the export reads the same switches the panel shows (`Project.bypassed(for:)`).
+    var bypassed: Set<Look.Stage> {
+        selectedClip.map { project.bypassed(for: $0.stem) } ?? [.denoise, .grain]
+    }
+
+    /// Edits the selected clip's settings. With no clip selected there is nothing to edit.
+    private func editClip(_ change: (inout Project.ClipSettings) -> Void) {
+        guard let stem = selectedClip?.stem else { return }
+        var settings = project.settings(for: stem)
+        change(&settings)
+        project.clips[stem] = settings
+    }
 
     /// The selected clip's Adjust, stored in the project under the clip. With no clip selected
     /// there is nothing to adjust, and a write goes nowhere.
     var adjust: Look.Adjust {
         get { selectedClip.map { project.settings(for: $0.stem).adjust } ?? Look.Adjust() }
-        set {
-            guard let stem = selectedClip?.stem else { return }
-            var settings = project.settings(for: stem)
-            settings.adjust = newValue
-            project.clips[stem] = settings
-        }
+        set { editClip { $0.adjust = newValue } }
     }
 
     /// Adjust switched off takes metering out too: off is the preset as shipped.
@@ -61,12 +61,43 @@ final class GradeModel: ObservableObject {
         renderPreview()
     }
 
-    var effectiveLook: Look { adjust.applied(to: look).bypassing(bypassed) }
+    /// What the selected clip renders with, the same resolution the export uses.
+    var effectiveLook: Look {
+        selectedClip.flatMap { project.look(for: $0.stem) } ?? defaultLook
+    }
 
     func setEnabled(_ stage: Look.Stage, _ enabled: Bool) {
-        if enabled { bypassed.remove(stage) } else { bypassed.insert(stage) }
+        let preset = defaultLook
+        editClip { s in
+            switch stage {
+            case .adjust: s.adjustOff = !enabled
+            // A switch that turns on at strength 0 does nothing, which reads as broken.
+            case .denoise:
+                s.denoise = enabled ? (preset.finish.denoise > 0 ? preset.finish.denoise : 1) : nil
+            case .grain: s.grain = enabled
+            }
+        }
         refreshCurve()
         renderPreview()
+    }
+
+    /// The selected clip's denoise strength, 0 while it is off.
+    var denoiseStrength: Double {
+        get { selectedClip.flatMap { project.settings(for: $0.stem).denoise } ?? 0 }
+        set { editClip { $0.denoise = newValue } }
+    }
+
+    var stabilisationStrength: Double {
+        get {
+            selectedClip.flatMap { project.settings(for: $0.stem).stabilisationStrength }
+                ?? defaultLook.stabilisationSmoothing
+        }
+        set { editClip { $0.stabilisationStrength = newValue } }
+    }
+
+    /// The preset the selected clip is graded with.
+    var lookName: String {
+        selectedClip.flatMap { project.preset(for: $0.stem)?.name } ?? project.activePreset
     }
 
     /// The project: presets, delivery, and what is decided per clip. Held here because the crop
@@ -81,8 +112,12 @@ final class GradeModel: ObservableObject {
     /// active preset, not a neutral. "Default" in a grading tool means the look you started this
     /// clip from, so undoing one control returns it to the grade rather than switching it off.
     var defaultLook: Look {
-        project.presets.first(where: { $0.name == project.activePreset })?.look ?? look
+        selectedClip.flatMap { project.preset(for: $0.stem)?.look } ?? project.active?.look
+            ?? neutralLook
     }
+
+    /// The engine's own look.json: what Neutral is, and the picture if no preset resolves.
+    private let neutralLook: Look
 
     /// Which inspector stages are open. Remembered across launches, because which part of the
     /// chain you are working on outlives a window.
@@ -453,7 +488,7 @@ final class GradeModel: ObservableObject {
 
     init(engine: EngineLocation, look: Look) {
         self.engine = engine
-        self.look = look
+        self.neutralLook = look
         // Neutral and the engine's `presets/`. Every opened project is given this same list
         // (`Project.adopt`), so `project.presets` is always the app's own.
         self.project = Project(
@@ -476,7 +511,6 @@ final class GradeModel: ObservableObject {
             $project.map(\.ignoringAdjustments).removeDuplicates().map { _ in () }
                 .eraseToAnyPublisher(),
             $openStages.map { _ in () }.eraseToAnyPublisher(),
-            $bypassed.map { _ in () }.eraseToAnyPublisher(),
             $frameSizes.map { _ in () }.eraseToAnyPublisher(),
             $projectURL.map { _ in () }.eraseToAnyPublisher(),
         ] {
@@ -517,39 +551,33 @@ final class GradeModel: ObservableObject {
     /// Switches to a preset, which replaces the whole grade: a look cube together with its tone
     /// and trims. They are switched as a pair because the shipped curve was tuned with its cube in
     /// the chain, so swapping one alone is a different grade rather than another film stock.
+    ///
+    /// FOR THE SELECTED CLIP. It also becomes the look of every clip not given one yet, so a shoot
+    /// graded with one choice still takes one click; a clip already given a look keeps it.
     func apply(preset name: String) {
-        guard let preset = project.presets.first(where: { $0.name == name }) else { return }
+        guard project.presets.contains(where: { $0.name == name }) else { return }
         project.activePreset = name
-        look = preset.look
         // Grain follows the preset: a film stock has one, Neutral does not.
-        if preset.look.convertCube == Look.neutralConversion {
-            bypassed.insert(.grain)
-        } else {
-            bypassed.remove(.grain)
+        editClip {
+            $0.look = name
+            $0.grain = nil
         }
         refreshCurve()
         renderPreview()
     }
 
-    /// The selected clip's Adjust and the switches back to where a preset starts. Other clips keep
-    /// their Adjust: a reset while looking at one clip must not undo work on eighteen others.
+    /// The selected clip's grade back to where its look starts. Other clips keep theirs: a reset
+    /// while looking at one clip must not undo work on eighteen others.
     func resetAdjustments() {
-        bypassed = [.denoise]
-        adjust = Look.Adjust()
-        apply(preset: project.activePreset)
+        editClip { $0 = $0.gradeReset }
+        refreshCurve()
+        renderPreview()
     }
 
     var hasAdjustments: Bool {
-        hasUnsavedChanges || adjust != Look.Adjust() || bypassed.contains(.adjust)
-            || !bypassed.contains(.denoise)
-            || bypassed.contains(.grain) != (look.convertCube == Look.neutralConversion)
-    }
-
-    /// The grade differs from the preset it came from. Worth showing: an unsaved adjustment that
-    /// looks like a preset is how a shoot ends up rendered with something nobody chose.
-    var hasUnsavedChanges: Bool {
-        guard let active = project.active else { return true }
-        return active.look != look
+        guard let stem = selectedClip?.stem else { return false }
+        let settings = project.settings(for: stem)
+        return settings != settings.gradeReset
     }
 
     func saveProject(to url: URL) throws {
@@ -567,11 +595,8 @@ final class GradeModel: ObservableObject {
         project = opened
         projectURL = url
         UserDefaults.standard.set(url, forKey: DefaultsKey.lastProject)
-        if let active = project.active {
-            look = active.look
-            refreshCurve()
-            renderPreview()
-        }
+        refreshCurve()
+        renderPreview()
     }
 
     /// WHERE DELIVERABLES GO, which is not the same place previews go.
@@ -593,20 +618,35 @@ final class GradeModel: ObservableObject {
         project.outputDirectory = url
     }
 
-    /// Renders every clip in the list, through the engine, with the project's own settings. The
-    /// look is written to a file per run and handed over with LOOK_FILE, so a render never edits
-    /// the checkout's own look.json.
     /// The folder the last Convert wrote to, so a cancel sweeps its staging files.
     private(set) var lastExportFolder: URL?
 
-    func convert(queue: RenderQueue) {
-        guard let clips = clipEntries, let destination = outputDirectory else { return }
+    /// What an export renders: the selected clip, or the whole list.
+    enum ExportScope {
+        case selected, all
+    }
+
+    /// Renders clips through the engine, each with its own settings from the project. The look is
+    /// written to a file per clip and handed over with LOOK_FILE, so a render never edits the
+    /// checkout's own look.json.
+    ///
+    /// Nil renders nothing new and runs what is already waiting: a retry.
+    func convert(queue: RenderQueue, _ scope: ExportScope?) {
+        guard let listed = clipEntries, let destination = outputDirectory else { return }
+        let clips: [ClipList.Entry]
+        switch scope {
+        case .all: clips = listed
+        case .selected:
+            guard let selected = selectedClip, listed.contains(where: { $0.stem == selected.stem })
+            else { return }
+            clips = [selected]
+        case nil: clips = []
+        }
         let export = Project.exportFolder(in: destination)
         lastExportFolder = export
         let project = self.project
-        let adjustOff = bypassed.contains(.adjust)
         let missingLook = workDirectory
-        // One look file per clip, because each carries its own Adjust. Scratch, in the scratch
+        // One look file per clip, because each carries its own grade. Scratch, in the scratch
         // directory; the RENDER goes where the person said, or beside their footage.
         //
         // THE QUEUE'S WAITING JOBS TOO, not only the list. A retried job from an earlier export
@@ -625,8 +665,11 @@ final class GradeModel: ObservableObject {
                 at: workDirectory,
                 withIntermediateDirectories: true)
             for (stem, file) in lookFiles {
-                try project.settings(for: stem).adjust.applied(to: look)
-                    .bypassing(bypassed).write(to: file)
+                guard let look = project.look(for: stem) else {
+                    throw Project.Blocker.noActivePreset(
+                        project.settings(for: stem).look ?? project.activePreset)
+                }
+                try look.write(to: file)
             }
             try FileManager.default.createDirectory(
                 at: destination,
@@ -652,7 +695,6 @@ final class GradeModel: ObservableObject {
                 env["GRADE_WORK_DIR"] = destination.path
                 env["LOGGRADE_CACHE"] = Project.cacheRoot.path
                 env["EXPORT_DIR"] = export.path
-                if adjustOff { env["MATCH"] = "0" }
                 return env
             })
         }

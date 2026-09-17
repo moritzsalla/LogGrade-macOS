@@ -21,12 +21,24 @@ struct QueuePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Button(queue.isRunning ? "Converting…" : "Convert") { model.convert(queue: queue) }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .tint(Palette.plate)
+                // THE SELECTED CLIP FIRST. Clips are graded one at a time, and each is exported
+                // when it is done; the whole list is the second choice.
+                Button(queue.isRunning ? "Exporting…" : "Export clip") {
+                    model.convert(queue: queue, .selected)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(Palette.plate)
+                .disabled(whyNotClip != nil)
+                .help(whyNotClip ?? "Render the selected clip")
+                if !queue.isRunning && model.clipNames.count > 1 {
+                    Button("export all \(model.clipNames.count)") {
+                        model.convert(queue: queue, .all)
+                    }
+                    .buttonStyle(.borderless)
                     .disabled(whyNot != nil)
-                    .help(whyNot ?? "Render every clip in the list")
+                    .help(whyNot ?? "Render every clip in the list, each with its own grade")
+                }
                 if queue.isRunning {
                     Button("stop") { model.cancel(queue: queue) }
                         .buttonStyle(.borderless)
@@ -36,7 +48,7 @@ struct QueuePanel: View {
                 if !queue.isRunning && needsRetry > 0 {
                     Button(needsRetry == 1 ? "retry 1 clip" : "retry \(needsRetry) clips") {
                         queue.retryAllFailed()
-                        model.convert(queue: queue)
+                        model.convert(queue: queue, nil)
                     }
                     .buttonStyle(.borderless)
                 }
@@ -53,7 +65,7 @@ struct QueuePanel: View {
             // four different reasons and the interface used to show the same grey rectangle for
             // all of them, leaving the only remaining move to guess. Whatever is in the way is
             // named where the button is, not in a panel somewhere else.
-            if let reason = whyNot, !queue.isRunning {
+            if let reason = whyNotClip, !queue.isRunning {
                 Label(reason, systemImage: "exclamationmark.circle")
                     .font(Type.caption)
                     .foregroundColor(Palette.lamp)
@@ -61,7 +73,7 @@ struct QueuePanel: View {
             }
 
             if queue.jobs.isEmpty {
-                Text("Convert renders every clip in the list.")
+                Text("Export clip renders the selected clip with its own grade.")
                     .font(Type.caption).foregroundColor(Palette.inkTertiary)
             } else {
                 // A BAR PER CLIP, not a percentage. A number tells you how far along something
@@ -97,7 +109,7 @@ struct QueuePanel: View {
                         if !queue.isRunning, job.state.isFinished, job.state != .done {
                             Button("retry") {
                                 queue.retry(job.id)
-                                model.convert(queue: queue)
+                                model.convert(queue: queue, nil)
                             }
                             .buttonStyle(.borderless).font(Type.caption)
                         }
@@ -109,7 +121,16 @@ struct QueuePanel: View {
         .background(Palette.panel)
     }
 
-    /// Why Convert cannot run, in the words of whatever is actually stopping it. Nil when it can.
+    /// Why the selected clip cannot be exported.
+    private var whyNotClip: String? {
+        if let reason = whyNot { return reason }
+        guard let selected = model.selectedClip, model.clipNames.contains(selected.stem) else {
+            return "Select a clip to export."
+        }
+        return nil
+    }
+
+    /// Why an export cannot run, in the words of whatever is actually stopping it. Nil when it can.
     private var whyNot: String? {
         if queue.isRunning { return "A conversion is already running." }
         if model.clipNames.isEmpty { return "Add a clip first." }

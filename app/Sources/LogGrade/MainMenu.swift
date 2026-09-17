@@ -88,7 +88,8 @@ enum MainMenu {
         compare.isEnabled = false
         clip.addItem(compare)
         clip.addItem(.separator())
-        clip.addItem(action(commands, "Convert", "\r", [.command], \.convert))
+        clip.addItem(action(commands, "Export Clip", "\r", [.command], \.exportClip))
+        clip.addItem(action(commands, "Export All Clips", "\r", [.command, .shift], \.exportAll))
         clipItem.submenu = clip
         main.addItem(clipItem)
 
@@ -114,7 +115,8 @@ enum MainMenu {
         var saveProject: () -> Void = {}
         var previousClip: () -> Void = {}
         var nextClip: () -> Void = {}
-        var convert: () -> Void = {}
+        var exportClip: () -> Void = {}
+        var exportAll: () -> Void = {}
 
         @objc fileprivate func run(_ sender: NSMenuItem) {
             (sender.representedObject as? () -> Void)?()
