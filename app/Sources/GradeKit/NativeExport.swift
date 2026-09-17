@@ -2,12 +2,20 @@ import AVFoundation
 import Accelerate
 import CoreImage
 import Foundation
+import Metal
 
 /// A clip's deliverables rendered in this process: AVFoundation decode, the live chain
 /// (`ChainBuilder`), the delivery finish (`DeliveryFinish`) and VideoToolbox H.264.
 ///
-/// WHY. grade.sh spends most of an export in ffmpeg's software pipeline and x264 on the CPU; the
-/// hardware encoder alone was 3x faster at equal SSIM on the Intel Mac.
+/// WHY. grade.sh spends most of an export in ffmpeg's software pipeline and x264 on the CPU. On the
+/// GPU (`MetalFrame`), a 5 s 1080x1920 reels export of IMG_0607 took 12.6 s against grade.sh's
+/// 18.8 s on the Intel MacBook Pro; the CPU path here took 20.2 s, no faster than the engine, and
+/// is kept only as the fallback when the GPU cannot take a frame.
+///
+/// THE COST IS FILE SIZE. VideoToolbox H.264 needs about 24 Mbit/s at 1080x1920 to deliver the grain
+/// the engine's x264 CRF 18 delivers at about 11, measured through `ExportParityTests` (on the GPU
+/// path 27 read 1.28 of the engine's grain; on the CPU path 24 read 0.79 and 30 read 1.22: the
+/// scaler's detail moves it), so a file is about twice the engine's.
 ///
 /// WHAT HOLDS IT. `ExportParityTests` renders the same clip both ways and bounds every stage against
 /// the engine's file. Anything it does not do yet — `unsupported` says what — stays on grade.sh.
@@ -81,17 +89,33 @@ public enum NativeExport {
                 CMTimeRange(start: .zero, duration: CMTime(seconds: $0, preferredTimescale: 600))
             } ?? CMTimeRange(start: .zero, duration: asset.duration)
 
+        // THE GPU WHEN IT CAN: every deliverable a crop of the shared frame at its own size, which
+        // is what the plan gives unless a shape rounds away from it. Otherwise the CPU path.
+        let gpu: MetalFrame? =
+            plan.targets.allSatisfy { $0.crop.width == $0.width && $0.crop.height == $0.height }
+            ? try? Self.metalFrame() : nil
+        lastRenderedOnGPU = gpu != nil
+        defer { release(gpu) }
+
         let reader = try AVAssetReader(asset: asset)
         reader.timeRange = range
         let video = AVAssetReaderTrackOutput(
             track: track,
-            outputSettings: [
-                // RGB from the decoder: its YCbCr matrix and range expansion only, with no transfer
-                // function, as ffmpeg's `format=gbrp16le` gives. vImage scales it in 34 ms a 4K
-                // frame where Core Image took 94. BIG-ENDIAN ARGB, because the little-endian RGBA
-                // format was accepted and came back black: measured, every sample zero.
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_64ARGB
-            ])
+            outputSettings: gpu != nil
+                ? [
+                    // The decoder's own planes, handed to the GPU as they are.
+                    kCVPixelBufferPixelFormatTypeKey as String:
+                        kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange,
+                    kCVPixelBufferMetalCompatibilityKey as String: true,
+                ]
+                : [
+                    // RGB from the decoder: its YCbCr matrix and range expansion only, with no
+                    // transfer function, as ffmpeg's `format=gbrp16le` gives. vImage scales it in
+                    // 34 ms a 4K frame where Core Image took 94. BIG-ENDIAN ARGB, because the
+                    // little-endian RGBA format was accepted and came back black: measured, every
+                    // sample zero.
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_64ARGB
+                ])
         video.alwaysCopiesSampleData = true
         reader.add(video)
 
@@ -116,6 +140,22 @@ public enum NativeExport {
             guard let buffer = CMSampleBufferGetImageBuffer(sample) else { continue }
             let time = CMSampleBufferGetPresentationTimeStamp(sample)
             do {
+                if let gpu {
+                    try gpu.render(
+                        source: buffer, turns: turns, frameWidth: plan.frameWidth,
+                        frameHeight: plan.frameHeight, grade: built.chain,
+                        targets: try outputs.map { output in
+                            MetalFrame.Target(
+                                crop: (output.target.crop.x, output.target.crop.y),
+                                finish: finish, output: try output.nextBuffer(),
+                                plate: finish.plate(
+                                    width: output.target.width, height: output.target.height,
+                                    frame: index))
+                        })
+                    for output in outputs { try output.appendPending(at: time) }
+                    index += 1
+                    continue
+                }
                 let pixels = try uprightScaled(
                     buffer, turns: turns, width: plan.frameWidth, height: plan.frameHeight)
                 guard
@@ -149,6 +189,45 @@ public enum NativeExport {
         if let failure { throw failure }
         return written
     }
+
+    /// Whether the last export rendered on the GPU. A shader that fails to compile falls back to the
+    /// CPU silently, which is right for a person exporting and wrong for a test measuring the GPU.
+    public private(set) static var lastRenderedOnGPU = false
+
+    /// The GPU the export renders on: the system's default, which on this MacBook Pro is the
+    /// discrete Radeon (a 5 s 1080x1920 reels export in 12.6 s against 13.9 s on the integrated
+    /// Intel, grade.sh 18.8 s). `LOGGRADE_GPU=integrated` picks the other, for measuring.
+    ///
+    /// KEPT FOR THE PROCESS, because compiling the shaders costs about a second an export. One
+    /// export at a time holds it; a second concurrent one builds its own.
+    static func metalFrame() throws -> MetalFrame {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let cached = cachedFrame, !cachedFrameBusy {
+            cachedFrameBusy = true
+            return cached
+        }
+        let integrated = ProcessInfo.processInfo.environment["LOGGRADE_GPU"] == "integrated"
+        let device =
+            integrated
+            ? MTLCopyAllDevices().first { $0.isLowPower } : MTLCreateSystemDefaultDevice()
+        let frame = try MetalFrame(chain: try MetalChain(device: device))
+        if cachedFrame == nil {
+            cachedFrame = frame
+            cachedFrameBusy = true
+        }
+        return frame
+    }
+
+    static func release(_ frame: MetalFrame?) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let frame, frame === cachedFrame { cachedFrameBusy = false }
+    }
+
+    private static let cacheLock = NSLock()
+    private static var cachedFrame: MetalFrame?
+    private static var cachedFrameBusy = false
 
     /// How many quarter turns clockwise the track's transform shows the picture at, or nil for a
     /// transform that is not a plain rotation.
@@ -357,7 +436,7 @@ public enum NativeExport {
             // quality number its Intel implementation does not take.
             let pixels = Double(target.width * target.height) / (1080 * 1920)
             let factor: Double = delivery.quality == .max ? 2 : delivery.quality == .high ? 1.5 : 1
-            let bitrate = max(2_000_000, 27_000_000 * pixels * fps / 24 * factor)
+            let bitrate = max(2_000_000, 24_000_000 * pixels * fps / 24 * factor)
             let colour: [String: Any] = [
                 AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
                 AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
@@ -384,6 +463,8 @@ public enum NativeExport {
                         kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
                     kCVPixelBufferWidthKey as String: target.width,
                     kCVPixelBufferHeightKey as String: target.height,
+                    kCVPixelBufferMetalCompatibilityKey as String: true,
+                    kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
                 ])
             writer.add(videoInput)
             audio = delivery.audio ? try Audio(asset: asset, range: range, writer: writer) : nil
@@ -407,6 +488,42 @@ public enum NativeExport {
             }
             writer.startSession(atSourceTime: .zero)
             try audio?.start()
+        }
+
+        private var pending: CVPixelBuffer?
+
+        /// A buffer from the encoder's pool, tagged 709, once the encoder can take another frame.
+        /// Kept as the pending frame for `appendPending`.
+        func nextBuffer() throws -> CVPixelBuffer {
+            while !videoInput.isReadyForMoreMediaData {
+                if writer.status == .failed {
+                    throw Failure.writer(writer.error.map { "\($0)" } ?? "failed")
+                }
+                Thread.sleep(forTimeInterval: 0.002)
+            }
+            guard let pool = adaptor.pixelBufferPool else { throw Failure.writer("no buffer pool") }
+            var made: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &made)
+            guard let buffer = made else { throw Failure.writer("no pixel buffer") }
+            CVBufferSetAttachment(
+                buffer, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2,
+                .shouldPropagate)
+            CVBufferSetAttachment(
+                buffer, kCVImageBufferTransferFunctionKey,
+                kCVImageBufferTransferFunction_ITU_R_709_2, .shouldPropagate)
+            CVBufferSetAttachment(
+                buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+                .shouldPropagate)
+            pending = buffer
+            return buffer
+        }
+
+        func appendPending(at time: CMTime) throws {
+            guard let buffer = pending else { throw Failure.frame }
+            pending = nil
+            guard adaptor.append(buffer, withPresentationTime: time) else {
+                throw Failure.writer(writer.error.map { "\($0)" } ?? "append failed")
+            }
         }
 
         /// Crops and scales the graded RGBA frame to the deliverable, converts it to video-range
