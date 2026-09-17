@@ -5,9 +5,10 @@
     "stock's own. Each clip's exposure and white balance are metered in linear before the cube",
     "(scripts/solve-exposure.py) against match.reference_stops; correct.* still adds on top.",
     "",
-    "Portra 160 on 35mm, a lab scan: +1 stop, the gentlest of the stocks, soft contrast and",
-    "colour. The finest-grained Portra, so grain is present but quiet. Stills stocks carry an",
-    "anti-halation layer, so the glow is slight."
+    "Portra 160 on 35mm, a lab scan: +1 stop, luminous mids brighter than Neutral, soft",
+    "contrast, greens kept alive, warm-neutral whites; matched to straight public scans, not yet",
+    "to the partner's. The finest-grained Portra, so grain is present but quiet. Stills stocks",
+    "carry an anti-halation layer, so the glow is slight."
   ],
   "convert": {
     "cube": "portra160"
