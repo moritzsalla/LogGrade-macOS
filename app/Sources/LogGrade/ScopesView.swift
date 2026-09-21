@@ -34,6 +34,8 @@ struct ScopesView: View {
             content()
                 .frame(height: 78)
                 .background(Palette.well)
+                // Traces are light added to black; on a light ground they wash out.
+                .environment(\.colorScheme, .dark)
                 .border(Palette.hairline)
         }
     }

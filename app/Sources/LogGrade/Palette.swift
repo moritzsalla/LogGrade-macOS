@@ -1,3 +1,4 @@
+import AppKit
 import GradeKit
 import SwiftUI
 
@@ -11,13 +12,14 @@ import SwiftUI
 /// The one accent is RAL 1021, the plate yellow this pipeline measures against. A tool's accent
 /// should be a colour it knows the value of.
 enum Palette {
-    static let surround = Color(red: 0.098, green: 0.098, blue: 0.098)  // #191919
-    static let panel = Color(red: 0.125, green: 0.125, blue: 0.125)  // #202020
-    static let well = Color(red: 0.055, green: 0.055, blue: 0.055)  // #0E0E0E
-    static let hairline = Color(red: 0.180, green: 0.180, blue: 0.180)  // #2E2E2E
-    static let ink = Color(red: 0.910, green: 0.910, blue: 0.910)  // #E8E8E8
-    static let inkSecondary = Color(red: 0.604, green: 0.604, blue: 0.604)
-    static let inkTertiary = Color(red: 0.431, green: 0.431, blue: 0.431)
+    // Follows the system appearance. Light mode keeps the same rule: true greys only.
+    static let surround = adaptive(light: 0.925, dark: 0.098)  // #ECECEC / #191919
+    static let panel = adaptive(light: 0.965, dark: 0.125)  // #F6F6F6 / #202020
+    static let well = adaptive(light: 0.870, dark: 0.055)  // #DEDEDE / #0E0E0E
+    static let hairline = adaptive(light: 0.820, dark: 0.180)  // #D1D1D1 / #2E2E2E
+    static let ink = adaptive(light: 0.100, dark: 0.910)  // #1A1A1A / #E8E8E8
+    static let inkSecondary = adaptive(light: 0.360, dark: 0.604)
+    static let inkTertiary = adaptive(light: 0.540, dark: 0.431)
     static let plate = Color(
         red: Scopes.plateYellow.rgb.0, green: Scopes.plateYellow.rgb.1,
         blue: Scopes.plateYellow.rgb.2)  // #F3C300, RAL 1021
@@ -86,5 +88,16 @@ struct Readout: View {
             .font(Type.value)
             .monospacedDigit()
             .foregroundColor(muted ? Palette.inkTertiary : Palette.inkSecondary)
+    }
+}
+
+extension Palette {
+    fileprivate static func adaptive(light: CGFloat, dark: CGFloat) -> Color {
+        Color(
+            nsColor: NSColor(name: nil) { appearance in
+                let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                let v = isDark ? dark : light
+                return NSColor(srgbRed: v, green: v, blue: v, alpha: 1)
+            })
     }
 }
