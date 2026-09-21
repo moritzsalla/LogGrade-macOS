@@ -26,15 +26,15 @@ Portra 800 is a derivative of 160 (the user's call): re-derive it after 160 move
   Scene A (pale brick, ivy) = IMG_0609, 0616; scene B (red brick, red and green ivy) = IMG_0618,
   0619, 0624. IMG_0624's sky is clipped in the source.
 - Round log, method, findings and every scorecard: `docs/research/portra160-calibration/README.md`
-  (local only; currently in the `portra160-from-scans` worktree — `fd -H portra160-calibration`).
+  (local only, in the main checkout).
   Read its "Findings" before changing the model; each one is a failure already paid for. Every new
   tryout (script, round log, raw output, sheets) goes to `docs/research/<topic>/` too, kept as proof
   of method and never committed: the sheets show the partner's scans. Prefer the main checkout's
   copy; a worktree's is deleted with the worktree.
-- `calib.py` (fit/proof/bake), `register_full.py`, `verify.py`, `crops.py` were written to the
-  2026-09-21 session's scratchpad (`/private/tmp/claude-501/*/377ee745-*/scratchpad/`). /tmp is
-  purged: if they are still only there, copy them into the research folder first. Their paths are
-  hard-coded at the top (`S`, `MAIN`, `WT`); repoint them.
+- `calib.py` (fit/proof/bake), `register_full.py`, `verify.py`, `crops.py` and the round caches live
+  in `~/Documents/ffgrade-film-bake/calib/` (rescued from a purged /tmp scratchpad). Their paths are
+  hard-coded at the top: `S` points at that folder, `WT` (where `bake` writes the cube) must be
+  repointed at the current worktree before a run.
 
 ## Route A: calibrate against the scans
 
