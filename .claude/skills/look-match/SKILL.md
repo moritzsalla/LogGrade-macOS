@@ -70,7 +70,7 @@ literal paths):
 # from the repo root; the params are the JSON in the current cube's TITLE, edited. ~80 s per bake.
 B=~/Documents/ffgrade-film-bake; V=$B/venv/bin/python
 $V $B/scan_bake3.py $S/NAME.cube kodak_portra_800 '{...}' 2>&1 | grep -v Warning | tail -1
-python3 .claude/skills/look-match/apple.py $S/NAME.cube luts/film/NAME.cube scripts
+python3 .claude/skills/look-match/reencode-for-apple-display.py $S/NAME.cube luts/film/NAME.cube scripts
 bash $B/looks/frames360.sh look.json neutral              # once: the Neutral stills the Hald is applied to
 bash $B/looks/frames360.sh presets/portra800.json NAME    # 360-line stills of IMG_0607/0610/0613/0616
 $V $B/looks/refmeasure.py "$B/looks/hald/Kodak Portra 800 2.png" NAME   # L p5/p50/p95, grey a/b, skin/foliage/sky/red C and hue
@@ -78,11 +78,11 @@ rm luts/film/NAME.cube                                    # unless it replaces t
 ```
 Bake variants in parallel (one output name each); `frames360.sh` shares a work dir, so run it serially.
 Super 8: `trim.py IN OUT CHROMA CONTRAST [PIVOT [CAST_A CAST_B [RED_ROT BLUE_SAT [SKY_ROT [GREEN_SAT]]]]]`
-on a Kodachrome base from `bake2.py OUT kodak_kodachrome_64 kodak_2383 '<the TITLE's JSON>'`, then the same `apple.py` step.
-`looks/tune.sh` and `tune_s8.sh` chain these but call a dead `/tmp` copy of `apple.py`; use the one here.
-**Never skip `apple.py`:** the bake scripts write gamma 2.4, every committed cube is Apple playback
+on a Kodachrome base from `bake2.py OUT kodak_kodachrome_64 kodak_2383 '<the TITLE's JSON>'`, then the same `reencode-for-apple-display.py` step.
+`looks/tune.sh` and `tune_s8.sh` chain these from the repo root, via `${TMPDIR:-/tmp}/ffgrade-tune/`; `tune_s8.sh` reads the Kodachrome base from there as `k_b.cube`.
+**Never skip `reencode-for-apple-display.py`:** the bake scripts write gamma 2.4, every committed cube is Apple playback
 (`display=apple`). Proof the chain first: rebaking the committed TITLE's params and running
-`apple.py ... luts/film/portra160.cube` as COMPARE prints max diff 0.0 (checked 2026-09-21: the shipped Portra 160 came from this route; route A has not landed yet).
+`reencode-for-apple-display.py ... luts/film/portra160.cube` as COMPARE prints max diff 0.0 (checked 2026-09-21: the shipped Portra 160 came from this route; route A has not landed yet).
 
 ## Scorecard (route A, in `calib.py`)
 

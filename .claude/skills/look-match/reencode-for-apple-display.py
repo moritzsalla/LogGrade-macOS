@@ -2,7 +2,7 @@
 committed film cube is (`display=apple` in its TITLE, luts/film/CHANGELOG.txt). scan_bake3.py and trim.py
 still write gamma 2.4; a cube copied in without this step renders milky on every Mac and iPhone.
 
-usage: python3 apple.py IN.cube OUT.cube REPO/scripts [COMPARE.cube]
+usage: python3 reencode-for-apple-display.py IN.cube OUT.cube REPO/scripts [COMPARE.cube]
 COMPARE prints the max difference against another cube, e.g. the committed one, to prove a re-bake
 reproduces it.
 """
