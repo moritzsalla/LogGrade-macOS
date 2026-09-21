@@ -1,6 +1,7 @@
 """Re-encode a BT.1886 (gamma 2.4) bake from ~/Documents/ffgrade-film-bake for Apple playback, as every
-committed film cube is (`display=apple` in its TITLE, luts/film/CHANGELOG.txt). scan_bake3.py and trim.py
-still write gamma 2.4; a cube copied in without this step renders milky on every Mac and iPhone.
+committed film cube is (`display=apple1.961` in its TITLE, luts/film/CHANGELOG.txt; plain
+`display=apple` was the inverse BT.709 OETF, whose shadows playback shows too dark). scan_bake3.py and
+trim.py still write gamma 2.4; a cube copied in without this step renders milky on every Mac and iPhone.
 
 usage: python3 reencode-for-apple-display.py IN.cube OUT.cube REPO/scripts [COMPARE.cube]
 COMPARE prints the max difference against another cube, e.g. the committed one, to prove a re-bake
@@ -16,7 +17,7 @@ with open(src) as fh, open(dst, "w") as out:
     for line in fh:
         s = line.split()
         if line.startswith("TITLE"):
-            out.write(line.rstrip("\n").rstrip('"') + ' display=apple"\n')
+            out.write(line.rstrip("\n").rstrip('"') + ' display=apple1.961"\n')
         elif len(s) == 3 and s[0][0] in "-0123456789.":
             out.write(" ".join("%.6f" % display_encode(max(0.0, float(v)) ** 2.4) for v in s) + "\n")
         else:

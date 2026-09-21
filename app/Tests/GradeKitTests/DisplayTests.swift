@@ -28,20 +28,16 @@ final class DisplayTests: XCTestCase {
         return context.makeImage()!
     }
 
-    func testThePreviewShowsAGreyAsQuickTimeShowsTheExport() throws {
+    /// A Rec.709-tagged H.264 of flat grey at limited-range luma `y`, as AVFoundation shows it.
+    private func exported(y: Int, in work: URL) throws -> Float {
         guard let ffmpeg = EngineLocation.resolveTool("ffmpeg") else { throw XCTSkip("no ffmpeg") }
-        let work = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("display-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: work) }
-        let movie = work.appendingPathComponent("grey.mp4")
-        // Limited-range Y 126 is code (126 - 16) / 219 = 0.5023, which 8-bit 128 (0.5020) matches.
+        let movie = work.appendingPathComponent("grey-\(y).mp4")
         // Set exactly: a `color=` source's grey is converted to Y, and lands a code value away.
         let encode = Process()
         encode.executableURL = ffmpeg
         encode.arguments = [
             "-v", "error", "-y", "-f", "lavfi", "-i",
-            "color=c=black:s=64x64:d=0.2:r=24,format=yuv420p,lutyuv=y=126:u=128:v=128,"
+            "color=c=black:s=64x64:d=0.2:r=24,format=yuv420p,lutyuv=y=\(y):u=128:v=128,"
                 + "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv",
             "-c:v", "libx264", "-profile:v", "high", "-crf", "1",
             "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", movie.path,
@@ -49,25 +45,43 @@ final class DisplayTests: XCTestCase {
         try encode.run()
         encode.waitUntilExit()
         XCTAssertEqual(encode.terminationStatus, 0)
-
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: movie))
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
-        let exported = light(try generator.copyCGImage(at: .zero, actualTime: nil))
-        let previewed = light(LiveChain.forDisplay(grey(128)))
-        let untagged = light(grey(128))
-        XCTAssertEqual(previewed, exported, accuracy: 0.003, "the preview and the export disagree")
-        // And the untagged picture really was the mismatch, or this test proves nothing.
-        XCTAssertGreaterThan(abs(untagged - exported), 0.03, "untagged already matched")
+        return light(try generator.copyCGImage(at: .zero, actualTime: nil))
+    }
+
+    /// Checked in the shadows as well as at mid grey: the inverse BT.709 OETF agrees with playback
+    /// at mid grey and shows luma 36 over twice as light, so a mid-grey check alone passed it.
+    func testThePreviewShowsAGreyAsQuickTimeShowsTheExport() throws {
+        let work = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("display-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: work) }
+        // Luma 36 is code 20/219 = 0.0913 and 126 is 0.5023; 8-bit 23 (0.0902) and 128 (0.5020)
+        // land within the tolerance of them.
+        for (y, code) in [(36, UInt8(23)), (126, UInt8(128))] {
+            let exported = try exported(y: y, in: work)
+            let previewed = light(LiveChain.forDisplay(grey(code)))
+            XCTAssertEqual(
+                previewed, exported, accuracy: 0.0015,
+                "luma \(y): the preview and the export disagree")
+            XCTAssertEqual(
+                Double(exported), HueCube.displayDecode(Double(y - 16) / 219), accuracy: 0.0015,
+                "luma \(y): playback is not the curve the cubes are encoded for")
+            if y == 126 {
+                // The untagged picture really was the mismatch, or this proves nothing about tagging.
+                XCTAssertGreaterThan(
+                    abs(light(grey(code)) - exported), 0.03, "untagged already matched")
+            }
+        }
     }
 
     /// The Swift display curve is the Python one, which is what every cube is encoded with.
-    func testTheDisplayCurveRoundTripsAndMatchesAppleColourSync() throws {
+    func testTheDisplayCurveRoundTrips() {
         for code in stride(from: 0.0, through: 1.0, by: 0.05) {
             XCTAssertEqual(
                 HueCube.displayEncode(HueCube.displayDecode(code)), code, accuracy: 1e-12)
         }
-        let previewed = light(LiveChain.forDisplay(grey(128)))
-        XCTAssertEqual(Double(previewed), HueCube.displayDecode(128.0 / 255.0), accuracy: 0.002)
     }
 }

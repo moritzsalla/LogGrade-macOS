@@ -83,7 +83,7 @@ GAMUT_KNEE = 0.75
 # here as everywhere (scripts/cubefile.py), and the parameters alone do not describe the cube: a
 # change to the rendering itself left every committed cube "already current" and silently stale.
 # Raise it whenever this file's output changes for unchanged parameters.
-REVISION = 3
+REVISION = 4
 GAMUT_THRESHOLD, GAMUT_LIMIT, GAMUT_POWER = 0.9, 1.15, 1.2
 
 

@@ -42,7 +42,7 @@ import sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cubefile import display_decode, display_encode, is_current, number, title, write_staged  # noqa: E402
+from cubefile import APPLE_DISPLAY_GAMMA, display_decode, display_encode, is_current, number, title, write_staged  # noqa: E402
 
 KNOTS = 12
 SPAN = 360.0 / KNOTS
@@ -153,9 +153,10 @@ def is_neutral(a):
 
 
 def fingerprint(a):
-    return title("Hue curves (rot=%s sat=%s lum=%s size=%d)" % (
+    # The display curve is stamped too: a cached cube from before it changed has the same knots.
+    return title("Hue curves (rot=%s sat=%s lum=%s size=%d display=%s)" % (
         ",".join(number(v) for v in a.rot), ",".join(number(v) for v in a.sat),
-        ",".join(number(v) for v in a.lum), a.size))
+        ",".join(number(v) for v in a.lum), a.size, number(APPLE_DISPLAY_GAMMA)))
 
 
 def main():

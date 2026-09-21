@@ -12,10 +12,17 @@ These cubes encode spektrafilm profiles and are therefore under CC BY-SA 4.0
 Every cube is Apple Log (full-range RGB, as ffmpeg lut3d reads it) in, Rec.709
 display code values for Apple playback (scripts/cubefile.py) out, 65^3, and replaces Apple's
 AppleLogToRec709 cube as the conversion. Each TITLE carries its exact bake
-parameters. They were baked for BT.1886 (gamma 2.4) and re-encoded on
-2026-09-16 to Apple playback, value by value (the same light, a different code
-value); "display=apple" in each TITLE marks it. portra160 and portra800 were
-baked on 2026-09-16 the same way, so their TITLEs carry it too.
+parameters. They are baked for BT.1886 (gamma 2.4) and re-encoded to Apple
+playback (gamma 502/256), value by value (the same light, a different code
+value); "display=apple1.961" in each TITLE marks it. On 2026-09-21
+super8_kodachrome64 was rebaked from its TITLE (reproducing the previous cube
+exactly) and re-encoded from "display=apple", the inverse BT.709 OETF, whose
+shadows played darker. The calibrated portra160 and the portra800 derived from
+it keep "display=apple" and were NOT re-encoded: their fit matched code values
+to the partner's Adobe RGB codes, so no encode of light describes them. As
+played (gamma 1.961) against the edits as displayed (Adobe RGB), median Oklab
+error 0.041; re-encoded as Adobe RGB light (code^(563/502)) 0.026, darker by
+0.036 L; the same-light re-encode 0.056. Left for the next calibration round.
 
 What was modified
 -----------------

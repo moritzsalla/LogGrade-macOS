@@ -48,20 +48,24 @@ def write_staged(path, text):
         raise
 
 
-# THE DISPLAY EVERY CUBE ENCODES FOR: Apple playback. QuickTime, Photos and iOS decode a Rec.709-tagged
-# file with the inverse of the BT.709 camera curve, not the BT.1886 gamma 2.4 a reference monitor
-# uses. Measured through AVFoundation: code 0.511 displays at 0.259 linear, where 2.4 gives 0.20, so a
-# rendering built for 2.4 looked milky on every Mac and iPhone, shadows 2.6 times too light. The app's
-# preview is tagged the same way (LiveChain), so what is judged there is what an iPhone shows. Final
-# Cut sits here; Premiere calls it viewer gamma 1.96 (QuickTime).
+# THE DISPLAY EVERY CUBE ENCODES FOR: Apple playback. AVFoundation shows a 1-1-1 file through the
+# "HDTV" ICC profile CoreVideo builds from those tags: Rec.709 primaries and a pure gamma, curv 0x01F6
+# = 502/256. Not BT.1886's 2.4 (a rendering built for it looked milky on every Mac and iPhone) and
+# NOT the inverse BT.709 OETF (CGColorSpace.itur_709): the two agree at mid grey (0.259 linear at code
+# 0.502) and so passed a mid-grey check, but the OETF's linear toe shows code 23/255 2.2 times too
+# light. Delivered proofs of four clips decoded by AVFoundation, as sRGB: this gamma 0.5-0.6/255 off
+# on average; the OETF +9 to +13 in shadows (codes < 0.15), +6 in the lower mids. The app's preview is
+# tagged with the same CoreVideo space (LiveChain), so what is judged there is what playback shows.
+# Premiere calls it viewer gamma 1.96 (QuickTime).
+APPLE_DISPLAY_GAMMA = 502.0 / 256.0
+
+
 def display_decode(v):
     """A display code value to the light Apple playback shows for it."""
-    v = max(0.0, v)
-    return v / 4.5 if v < 0.081 else ((v + 0.099) / 1.099) ** (1.0 / 0.45)
+    return max(0.0, v) ** APPLE_DISPLAY_GAMMA
 
 
 def display_encode(light):
     """Light to the display code value Apple playback shows as that light."""
-    light = min(1.0, max(0.0, light))
-    return 4.5 * light if light < 0.018 else 1.099 * light ** 0.45 - 0.099
+    return min(1.0, max(0.0, light)) ** (1.0 / APPLE_DISPLAY_GAMMA)
 

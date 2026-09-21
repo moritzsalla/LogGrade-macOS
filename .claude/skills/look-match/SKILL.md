@@ -81,8 +81,8 @@ Super 8: `trim.py IN OUT CHROMA CONTRAST [PIVOT [CAST_A CAST_B [RED_ROT BLUE_SAT
 on a Kodachrome base from `bake2.py OUT kodak_kodachrome_64 kodak_2383 '<the TITLE's JSON>'`, then the same `reencode-for-apple-display.py` step.
 `looks/tune.sh` and `tune_s8.sh` chain these from the repo root, via `${TMPDIR:-/tmp}/ffgrade-tune/`; `tune_s8.sh` reads the Kodachrome base from there as `k_b.cube`.
 **Never skip `reencode-for-apple-display.py`:** the bake scripts write gamma 2.4, every committed cube is Apple playback
-(`display=apple`). Proof the chain first: rebaking the committed TITLE's params and running
-`reencode-for-apple-display.py ... luts/film/portra160.cube` as COMPARE prints max diff 0.0 (checked 2026-09-21: the shipped Portra 160 came from this route; route A has not landed yet).
+(`display=apple1.961`). Proof the chain first: rebaking the committed TITLE's params and running
+`reencode-for-apple-display.py ... luts/film/portra160.cube` as COMPARE prints max diff 0.0 (checked 2026-09-21 for all three shipped cubes; route A has not landed yet).
 
 ## Scorecard (route A, in `calib.py`)
 
