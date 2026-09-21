@@ -52,8 +52,8 @@ H=720
 # gamma (its curv tag is 0x01F6). A PNG with no profile is opened as sRGB instead (ImageIO reports
 # kCGColorSpaceSRGB), so a sheet of raw codes shows every tile darker than QuickTime shows the
 # file. Against AVFoundation's own rendering of an IMG_0607 proof frame, as sRGB: raw codes 8.9/255
-# darker on average, the inverse BT.709 OETF (ITU-709.icc, cubefile.py) 4.2 off and 12 too light at
-# code 23 of a grey ramp, gamma 1.961 0.9. Only after a zscale decode: swscale reads the same YUV
+# darker on average, the inverse BT.709 OETF (ITU-709.icc) 4.2 off and 12 too light at code 23 of a
+# grey ramp, gamma 1.961 (cubefile.py) 0.9. Only after a zscale decode: swscale reads the same YUV
 # 1.8 codes darker.
 DISPLAY_TO_SRGB="lutrgb=r='$(
 	e="st(0,pow(val/maxval,1.961));maxval*if(lte(ld(0),0.0031308),12.92*ld(0),1.055*pow(ld(0),1/2.4)-0.055)"

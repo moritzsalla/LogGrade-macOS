@@ -50,14 +50,14 @@ public struct HueCube {
     }
 
     /// Apple playback's display curve, as `cubefile.py` defines it and says why.
+    static let appleDisplayGamma = 502.0 / 256.0
+
     static func displayDecode(_ v: Double) -> Double {
-        let v = max(0, v)
-        return v < 0.081 ? v / 4.5 : pow((v + 0.099) / 1.099, 1.0 / 0.45)
+        pow(max(0, v), appleDisplayGamma)
     }
 
     static func displayEncode(_ light: Double) -> Double {
-        let light = min(1, max(0, light))
-        return light < 0.018 ? 4.5 * light : 1.099 * pow(light, 0.45) - 0.099
+        pow(min(1, max(0, light)), 1.0 / appleDisplayGamma)
     }
 
     /// Python's `%` for a positive divisor: the result takes the divisor's sign.

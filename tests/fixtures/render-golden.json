@@ -6,7 +6,7 @@
     "This is the DEFAULT image this repo renders, recorded from its own chain. Moving it",
     "is allowed and takes a reason, which lands in recorded_because."
   ],
-  "recorded_because": "grain in the negative: noise added to the log picture before the conversion cube instead of luma grain after the sharpener, chosen by the user (option D) from a side-by-side grain prototype sheet; mean luma +0.3 codes",
+  "recorded_because": "display_encode is now gamma 1.961 (502/256), AVFoundation's playback curve, not the inverse BT.709 OETF: measured on four delivered proofs, gamma 1.961 predicts playback within 0.6/255, the OETF +9 to +13 in shadows; user signed off the sheets in docs/research/apple-display-gamma",
   "clip": {
     "name": "IMG_0607.mov",
     "bytes": 399774249
@@ -14,19 +14,20 @@
   "proof_secs": 0.1,
   "ffmpeg": "ffmpeg version 9.0.1-tessus  https://evermeet.cx/ffmpeg/  Copyright (c) 2000-2026 the FFmpeg developers",
   "arch": "x86_64",
-  "stream_md5": "50496f321869f564efc4620fb3a9d0d0",
+  "stream_md5": "e77989757a325d7a8e36e6f1e2ce6ec5",
   "inputs": {
     "look.json": "682f1e697b9ebe34ee71ea6a3cb0a70a8be4c8d2b893a23637039ffc97d2288c",
     "scripts/applelog.py": "97be85a467ef03b9510a22ee8c3e93aaae02d17cad46397ea3669b8d3215b6ae",
-    "scripts/cubefile.py": "3d80062c87b274ed0d085b643aeef024af94eb6259ecbe3deeedc06eb1d0f7ee",
+    "scripts/cubefile.py": "fd31fe63c543b9b204cb9725666e9f5ae581160e4a507350f89efcb279752781",
     "scripts/grade.sh": "007905f9157f4a251e378d75ae1b6f0ed7eea2bbe1c43a59434a6574e218a40d",
     "scripts/lib.sh": "2765ba1811be9c560a9a60eb451e46fe3416c248906fa1fde5a60cad7e111bdb",
+    "scripts/look-sheet.sh": "1ad9c9dbd2260a228f8d9e5221c7986f7eb7413865fb64cad6c9bf25a3b30ba2",
     "scripts/make-correct-lut.py": "2e57a92492a4d2aa5b390b83c1a2a24f3fea7f09d39bad54b21cdc780924c11e",
     "scripts/make-halation-luts.py": "574e21ef03435c9b6ee8f1d81cde19e06dafdd1bd38a6c54157767f911d3351a",
-    "scripts/make-hue-lut.py": "72d2c085be8460f8db960ee2ae14511f91f7a13029743dd87f85f526bb0ea5a8",
-    "scripts/make-rendering-lut.py": "765162615c9d230ec2a3ef383ac3096bf94ac85e9f1eaff8fa891ef6202e15ba",
+    "scripts/make-hue-lut.py": "f79591e9cada0f8a05294c003fc4918de5429e3d752d28732baa4c7f280687ba",
+    "scripts/make-rendering-lut.py": "12c35cf63a9c033de1728d4fe380ccf765dc12d9ae96ccac8bcc00f5f71ed559",
     "scripts/make-tone-lut.py": "7554f9ba678413ecd4a5b3f18f6302d61d86e33b8e03ad6d59ad75becd48535a",
     "scripts/solve-exposure.py": "69b2d5fc6a5ae3edb1064c4b900f248628445f8e4373984fce7106dbcc829143",
-    "luts/rendering/neutral.cube": "6b80d40390ec77bc1572045332071c603651cb8d0726b8bcc733f9e3b8cb40f2"
+    "luts/rendering/neutral.cube": "737f2b59d389335f941c453fa05e6804b8ea04fc9af417e38ad3becaffac2a83"
   }
 }

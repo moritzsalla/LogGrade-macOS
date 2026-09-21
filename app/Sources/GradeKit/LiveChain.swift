@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreVideo
 import Foundation
 
 /// The whole grade, applied in this process to the decoded source frame.
@@ -226,17 +227,28 @@ public struct LiveChain {
         return out
     }
 
-    /// The picture as it is SHOWN: the same pixels, tagged as Rec.709 so macOS displays them the
-    /// way QuickTime, Photos and iOS display the exported file (`scripts/cubefile.py`). Untagged, a
-    /// Mac shows them as sRGB, lighter than the export in the midtones and darker in the shadows, so
-    /// the preview and the file disagreed about exactly what was being judged.
+    /// The picture as it is SHOWN: the same pixels, tagged with the colour space CoreVideo builds
+    /// for a 1-1-1 frame, which is how QuickTime, Photos and iOS display the exported file
+    /// (`scripts/cubefile.py`). Untagged, a Mac shows them as sRGB, lighter than the export in the
+    /// midtones and darker in the shadows. NOT `CGColorSpace.itur_709`: that is the inverse OETF,
+    /// which matches playback at mid grey but shows code 23/255 2.2 times lighter than it plays.
     ///
     /// ONLY FOR DISPLAY. Scopes and the live grade read pixel values by drawing into an untagged
     /// context, and a tagged image drawn there is colour-converted on the way in.
     public static func forDisplay(_ image: CGImage) -> CGImage {
-        guard let space = CGColorSpace(name: CGColorSpace.itur_709) else { return image }
+        guard let space = playbackSpace else { return image }
         return image.copy(colorSpace: space) ?? image
     }
+
+    static let playbackSpace: CGColorSpace? = {
+        let tags = [
+            kCVImageBufferColorPrimariesKey: kCVImageBufferColorPrimaries_ITU_R_709_2,
+            kCVImageBufferTransferFunctionKey: kCVImageBufferTransferFunction_ITU_R_709_2,
+            kCVImageBufferYCbCrMatrixKey: kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+        ]
+        return CVImageBufferCreateColorSpaceFromAttachments(tags as CFDictionary)?
+            .takeRetainedValue()
+    }()
 
     /// Splits the rows into one band per core and runs them at once.
     ///

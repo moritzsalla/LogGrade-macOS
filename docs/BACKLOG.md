@@ -50,7 +50,9 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
    (dark neutrals had almost no samples), the clouds' blue shadows (sky colour per lightness band),
    saturated signs a touch dull, the palest brick ~19% short of the film's chroma. Method, findings
    and every round: the `look-match` skill. More scanned scenes with dark neutrals and blue would
-   help more than more model.
+   help more than more model. `calib.py` compares codes decoded with the inverse BT.709 OETF on
+   both sides, but the edits are Adobe RGB and playback is gamma 1.961 (`cubefile.py`): decode
+   each side by its own curve and primaries in the next round (numbers in `luts/film/CHANGELOG.txt`).
 3. **Cross-check Super 8** against professional emulations (licence permitting, comparison only)
    and more reference stills per stock.
 4. **Delete the engine controls no look uses**, once the looks are signed off: wheels, hue curves,
