@@ -2966,3 +2966,29 @@ _low_band_db() {  # _low_band_db <file> <hz>
 	[[ "$output" == *"recorded with 'ffmpeg version 0-other'"* ]] || fail "skipped without naming the build: $output"
 	[[ "$output" != *"clip:"* ]] || fail "rendered against a golden from another build: $output"
 }
+
+# A sheet of raw Rec.709 codes opens as sRGB and shows every look darker than playback does. Holds a
+# tile to the still grade.sh renders, carried through Apple's 1.961 display gamma to sRGB, and the
+# sheet to an embedded sRGB profile.
+# bats test_tags=slow
+@test "a look sheet shows a render the way playback shows it, tagged sRGB" {
+	command -v sips >/dev/null || skip "sips is macOS only"
+	local sheet="$BATS_TEST_TMPDIR/sheet.png" work="$BATS_TEST_TMPDIR/work" still v tile expected raw
+	LOGGRADE_CACHE="$BATS_TEST_TMPDIR/cache" run "$BATS_TEST_DIRNAME/../scripts/look-sheet.sh" \
+		-n -t 0 -c neutral -o "$sheet" "$FIXTURES/portrait_tagged.mov"
+	[ "$status" -eq 0 ] || fail "look-sheet failed: $output"
+	[[ "$(sips -g profile "$sheet")" == *"profile: sRGB"* ]] || fail "sheet not tagged sRGB: $(sips -g profile "$sheet")"
+
+	mkdir -p "$work"
+	still="$(JSON=1 FRAME=0 FRAME_HEIGHT=128 GRADE_WORK_DIR="$work" "$BATS_TEST_DIRNAME/../scripts/grade.sh" \
+		"$FIXTURES/portrait_tagged.mov" 2>/dev/null | jq -r 'select(.event == "frame") | .path')"
+	v="$(ffmpeg -v error -i "$still" -vf "crop=1:1:36:64,format=rgb48le" -f rawvideo - | od -An -tu2 | awk '{ print $2 }')"
+	tile="$(ffmpeg -v error -i "$sheet" -vf "crop=1:1:203:400,format=rgb24" -f rawvideo - | od -An -tu1 | awk '{ print $2 }')"
+	expected="$(awk -v v="$v" 'BEGIN { l = (v / 65535) ^ 1.961
+		printf "%d", 255 * (l <= 0.0031308 ? 12.92 * l : 1.055 * l ^ (1 / 2.4) - 0.055) + 0.5 }')"
+	raw="$(awk -v v="$v" 'BEGIN { printf "%d", v / 257 + 0.5 }')"
+	awk -v a="$tile" -v b="$expected" 'BEGIN { exit !(a - b <= 1 && b - a <= 1) }' \
+		|| fail "tile green $tile, expected $expected from still code $v"
+	awk -v a="$expected" -v b="$raw" 'BEGIN { exit !(a - b >= 3) }' \
+		|| fail "fixture grey too dark or light to tell the conversion from none ($expected vs $raw)"
+}

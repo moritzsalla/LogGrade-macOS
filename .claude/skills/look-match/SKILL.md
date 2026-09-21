@@ -117,9 +117,9 @@ to `scorecards/roundN.txt`, back up `calib.py` and its `.npy` as `_roundN` befor
 
 ## Judging by eye
 
-Use the `look-sheet` skill (`scripts/look-sheet.sh`) for comparison sheets, once it exists. A sheet built by hand
-must re-encode Apple-playback code values to sRGB, or everything reads too dark ("the references are
-less dark in Finder"). Judge definition on an export, not a still: the scan resolves more.
+Use the `look-sheet` skill (`scripts/look-sheet.sh`, `-r` for the scans) for comparison sheets, never a
+hand-built one: it gets the display colour wrong. Judge definition on an export (`-d`), not a still: the
+scan resolves more.
 
 ## Landing it
 
