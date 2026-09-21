@@ -59,10 +59,10 @@ if command -v shellcheck >/dev/null; then
 	# stops testing anything. Use a plain loop.
 	# tests/ is included because a shell script there is production code too: render-golden.sh is
 	# the guard on the default image, and a script there once went unlinted for as long as this
-	# loop only looked in scripts/.
+	# loop only looked in scripts/. app/drive/ for the same reason: sessions run it to drive the app.
 	(
 		targets=""
-		for f in scripts/* tests/*; do
+		for f in scripts/* tests/* app/drive/*; do
 			[ -f "$f" ] || continue
 			head -1 "$f" | grep -q '^#!/.*bash' && targets="$targets $f"
 		done
