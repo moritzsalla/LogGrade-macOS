@@ -44,7 +44,7 @@ Query one field at a time with `-of default=nw=1:nk=1`, and validate the answer 
 - `pipefail` is on: `grep -qv` reports 141, and `$(ls glob | head -1)` fails on no match.
 - A refusal test asserts the refusal's own words, and that the work was not attempted.
 - A grep guard needs a word boundary, and must not match prose.
-- Mutation-test a new guard: confirm the mutation applied, and run only the covering test against it.
+- Mutation-test a new guard with `tests/mutate.sh`: it confirms the mutation applied, runs only the covering test, and restores the file.
 - The filter graph needs a real render (`PROOF=<seconds>`). Camera quirks need real footage from `src/`, skipping when it is absent.
 - Test interpolation on something that is not smooth.
 - Measure timing in release or not at all. Two renders at one timecode share a path.
