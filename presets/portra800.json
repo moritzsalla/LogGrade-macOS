@@ -5,10 +5,10 @@
     "stock's own. Each clip's exposure and white balance are metered in linear before the cube",
     "(scripts/solve-exposure.py) against match.reference_stops; correct.* still adds on top.",
     "",
-    "Portra 800 on 35mm, a lab scan: +1 stop, bright and airy with olive greens, matched to",
-    "straight daylight scans. The fastest Portra, so the grain is coarse: 12, judged at delivery",
-    "size, where 8 vanished in the encode. Stills stocks carry an anti-halation layer, so the",
-    "glow is slight."
+    "Portra 800: the calibrated Portra 160 look at a higher speed (softer, lifted black, less",
+    "chroma; luts/film/CHANGELOG.txt), not a separate fit. The fastest Portra, so the grain is",
+    "coarse: 12, judged at delivery size, where 8 vanished in the encode. Stills stocks carry an",
+    "anti-halation layer, so the glow is slight."
   ],
   "convert": {
     "cube": "portra800"
