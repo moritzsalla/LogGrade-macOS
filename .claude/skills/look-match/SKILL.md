@@ -81,9 +81,10 @@ Super 8: `trim.py IN OUT CHROMA CONTRAST [PIVOT [CAST_A CAST_B [RED_ROT BLUE_SAT
 on a Kodachrome base from `bake2.py OUT kodak_kodachrome_64 kodak_2383 '<the TITLE's JSON>'`, then the same `reencode-for-apple-display.py` step.
 `looks/tune.sh` and `tune_s8.sh` chain these from the repo root, via `${TMPDIR:-/tmp}/ffgrade-tune/`; `tune_s8.sh` reads the Kodachrome base from there as `k_b.cube`.
 **Never skip `reencode-for-apple-display.py`:** the bake scripts write gamma 2.4, every committed cube is Apple playback
-(`display=apple1.961`; the calibrated Portra 160 and its 800 are code-space fits, still `display=apple`, see
+(`display=apple1.961`; the calibrated Portra 160 and its 800 are re-encoded as Adobe RGB light instead, see
 `luts/film/CHANGELOG.txt`). Proof the chain first: rebaking the committed TITLE's params and running
-`reencode-for-apple-display.py ... luts/film/super8_kodachrome64.cube` as COMPARE prints max diff 0.0 (checked 2026-09-21; Portra 160 now comes from route A's `calib.py bake`).
+`reencode-for-apple-display.py ... luts/film/super8_kodachrome64.cube` as COMPARE prints max diff 0.0 (checked 2026-09-21). Portra 160 and 800 come from route A: `calib.py bake` / `bake_final.py`, then
+`reencode-adobe-fit.py` (not the gamma 2.4 step).
 
 ## Scorecard (route A, in `calib.py`)
 
