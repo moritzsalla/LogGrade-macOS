@@ -18,11 +18,11 @@ value); "display=apple1.961" in each TITLE marks it. On 2026-09-21
 super8_kodachrome64 was rebaked from its TITLE (reproducing the previous cube
 exactly) and re-encoded from "display=apple", the inverse BT.709 OETF, whose
 shadows played darker. The calibrated portra160 and the portra800 derived from
-it keep "display=apple" and were NOT re-encoded: their fit matched code values
-to the partner's Adobe RGB codes, so no encode of light describes them. As
-played (gamma 1.961) against the edits as displayed (Adobe RGB), median Oklab
-error 0.041; re-encoded as Adobe RGB light (code^(563/502)) 0.026, darker by
-0.036 L; the same-light re-encode 0.056. Left for the next calibration round.
+it were fitted code for code to the partner's Adobe RGB edits, so they are
+re-encoded as Adobe RGB light instead ("from=adobergb-power": code^(563/502),
+primaries left alone; converting them clipped 8% of the lattice). Median Oklab
+error against the edits as displayed: portra160 0.041 -> 0.026, portra800
+0.061 -> 0.036.
 
 What was modified
 -----------------
