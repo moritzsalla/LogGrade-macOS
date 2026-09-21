@@ -14,7 +14,7 @@ way for whoever doesn't want it. Judge every entry by that.
 |---|---|---|
 | Neutral: our own rendering, finished, nothing clipped for effect | off | eye |
 | **Portra 160**, the one that matters most | on | the partner's analog scans |
-| Portra 800 | coarse | public references, then eye |
+| Portra 800 | coarse | derived from Portra 160 (a faster stock of the same look) |
 | Super 8 | heavy | public references, then eye |
 
 Sign-off is both users calling a look good enough. It stays improvable. Moritz called Portra 800,
@@ -45,8 +45,12 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
      Left: the grade chain on the GPU, shared with Export.
    - **Export:** AVAssetReader, the same chain, the delivery stage, VideoToolbox H.264/HEVC through
      AVAssetWriter. ProRes, stabilisation and Super 8's gauge stay on grade.sh until at parity.
-2. **Portra 160 against the partner's scans** when they arrive. Until then it is matched to public
-   scans and RawTherapee's emulation (#76).
+2. **Portra 160, the next calibration round.** Calibrated against the partner's scans (median 0.0073
+   Oklab against their edits); still off, by the scorecard and by eye: the road and pavement too warm
+   (dark neutrals had almost no samples), the clouds' blue shadows (sky colour per lightness band),
+   saturated signs a touch dull, the palest brick ~19% short of the film's chroma. Method, findings
+   and every round: the `look-match` skill. More scanned scenes with dark neutrals and blue would
+   help more than more model.
 3. **Cross-check Super 8** against professional emulations (licence permitting, comparison only)
    and more reference stills per stock.
 4. **Delete the engine controls no look uses**, once the looks are signed off: wheels, hue curves,

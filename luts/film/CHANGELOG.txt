@@ -35,6 +35,22 @@ portra160.cube, portra800.cube
     portra160       kodak_portra_160, +1 stop, scanned
     portra800       kodak_portra_800, +1 stop, scanned
 
+portra160.cube, 2026-09-21: calibrated against the partner's Portra 160 scans
+  The cube above, composed with a correction fitted to the partner's edits of
+  two Portra 160 lab scans, pixel-registered to Apple Log video of the same
+  scenes: one tone curve before the stock, then a near-identity matrix in
+  linear light, per-channel curves, a Michaelis-Menten chroma curve and an
+  Oklab hue polynomial that is zero on the grey axis. Curves are pinned at 0
+  and 1 with a minimum slope, so nothing clips that the stock did not. Fit
+  hash in the TITLE ("fit=partner-scans:"), every parameter on the "# fit"
+  lines. Median error against the edits 0.0073 Oklab (the uncalibrated cube:
+  0.069).
+
+portra800.cube, 2026-09-21: derived from the calibrated portra160.cube
+  Portra 800 is the 160 look at a higher speed, not a separate fit: Oklab
+  lightness contrast 0.9 about 0.6, black lifted 0.02 (fading to 0 at white),
+  chroma 0.9 ("800=" in the TITLE). Its coarser grain is the preset's.
+
 super8_kodachrome64.cube
   kodak_kodachrome_64 reversal, +0.2 stop, scanned directly (io.scan_film:
   the kodak_2383 print named in the TITLE is not applied), scanner white and
