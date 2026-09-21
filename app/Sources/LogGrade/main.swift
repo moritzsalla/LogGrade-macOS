@@ -317,9 +317,8 @@ let window = NSWindow(
     backing: .buffered,
     defer: false)
 window.title = "LogGrade"
-// The window is part of the room: a light title bar beside a graded frame is a bright object in
-// the field of view, which is the thing a grading suite is dark to avoid.
-window.appearance = NSAppearance(named: .darkAqua)
+// No forced appearance: the window follows the system, and `Palette` adapts with it. Forcing
+// darkAqua left sheets and open/save panels in the system's own appearance.
 window.titlebarAppearsTransparent = true
 window.backgroundColor = NSColor(Palette.surround)
 // Remembered between launches: where the window was, and what was open. Setting the frame
