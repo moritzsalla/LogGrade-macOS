@@ -18,8 +18,6 @@ final class GradeModel: ObservableObject {
     // it off the property means a new path cannot forget.
     @Published var selectedClip: ClipList.Entry? {
         didSet {
-            // Each clip carries its own look, so the curve can change with the selection.
-            refreshCurve()
             renderPreview()
             if isComparing {
                 preview.baseline = nil
@@ -77,7 +75,6 @@ final class GradeModel: ObservableObject {
             case .grain: s.grain = enabled
             }
         }
-        refreshCurve()
         renderPreview()
     }
 
@@ -169,9 +166,7 @@ final class GradeModel: ObservableObject {
 
     /// The chain's stages, built and cached in GradeKit so the export assembles them the same way.
     private lazy var chainBuilder = ChainBuilder(engine: engine)
-    /// The source through the colour stages, kept so a tone or trim drag costs only the curve.
-    /// Dragging midtone does not move the correction, the conversion or the hue curves, and those
-    /// are most of the work.
+    /// The source through the colour stages, kept so a redraw that moves none of them reuses it.
     private var convertedFrame: LiveChain.Converted?
     private var convertedFor: ChainBuilder.ColourKey?
     /// Which source pixels `convertedFrame` came from, compared by identity. A new clip replaces
@@ -336,11 +331,7 @@ final class GradeModel: ObservableObject {
                         self.preview.isRendering = false
                         self.preview.isOutOfDate = self.preview.image != nil
                         self.preview.say(reason, failure: true)
-                    case .graded(_, let tone, let curve):
-                        if tone != self.publishedTone {
-                            self.preview.curve = curve
-                            self.publishedTone = tone
-                        }
+                    case .graded:
                         if let finished { self.show(finished) }
                         if unmetered {
                             self.preview.say(
@@ -385,12 +376,12 @@ final class GradeModel: ObservableObject {
     }
 
     private enum LiveOutcome {
-        case graded(CGImage, Look.Tone, ToneCurve)
+        case graded(CGImage)
         case refused(String)
         case failed
 
         var frame: CGImage? {
-            if case .graded(let image, _, _) = self { return image }
+            if case .graded(let image) = self { return image }
             return nil
         }
     }
@@ -421,11 +412,8 @@ final class GradeModel: ObservableObject {
                 convertedFrom = source
             }
         }
-        guard let graded = converted.flatMap({ LiveChain.graded($0, with: built.chain.grade) })
-        else {
-            return .failed
-        }
-        return .graded(graded, built.tone, built.curve)
+        guard let graded = converted?.image else { return .failed }
+        return .graded(graded)
     }
 
     // MARK: - metering
@@ -501,7 +489,6 @@ final class GradeModel: ObservableObject {
         if let remembered = UserDefaults.standard.stringArray(forKey: DefaultsKey.openStages) {
             self.openStages = Set(remembered)
         }
-        refreshCurve()
 
         for changed in [
             $selectedClip.map { _ in () }.eraseToAnyPublisher(),
@@ -532,25 +519,9 @@ final class GradeModel: ObservableObject {
     let changes = Changes()
     private var relayed: Set<AnyCancellable> = []
 
-    /// The curve the render will apply, built here.
-    ///
-    /// Synchronous, and cheap enough to call on every control change: 4096 entries of arithmetic.
-    /// It was a subprocess, which put the graph and the live picture a tenth of a second behind the
-    /// pointer; `ToneCurvePortTests` holds it to the generator it replaced, entry for entry.
-    func refreshCurve() {
-        let tone = effectiveLook.tone
-        guard tone != publishedTone else { return }
-        preview.curve = ToneCurve.generated(tone: tone)
-        publishedTone = tone
-    }
-
-    private var publishedTone: Look.Tone?
-
     // MARK: - presets and the project file
 
-    /// Switches to a preset, which replaces the whole grade: a look cube together with its tone
-    /// and trims. They are switched as a pair because the shipped curve was tuned with its cube in
-    /// the chain, so swapping one alone is a different grade rather than another film stock.
+    /// Switches to a preset, which replaces the whole look.
     ///
     /// FOR THE SELECTED CLIP. It also becomes the look of every clip not given one yet, so a shoot
     /// graded with one choice still takes one click; a clip already given a look keeps it.
@@ -562,7 +533,6 @@ final class GradeModel: ObservableObject {
             $0.look = name
             $0.grain = nil
         }
-        refreshCurve()
         renderPreview()
     }
 
@@ -570,7 +540,6 @@ final class GradeModel: ObservableObject {
     /// while looking at one clip must not undo work on eighteen others.
     func resetAdjustments() {
         editClip { $0 = $0.gradeReset }
-        refreshCurve()
         renderPreview()
     }
 
@@ -595,7 +564,6 @@ final class GradeModel: ObservableObject {
         project = opened
         projectURL = url
         UserDefaults.standard.set(url, forKey: DefaultsKey.lastProject)
-        refreshCurve()
         renderPreview()
     }
 
@@ -922,7 +890,6 @@ final class GradeModel: ObservableObject {
             pendingLook = nil
             settleLook = nil
             show(cached)
-            refreshCurve()
             // For the drag that may follow.
             prepareSource()
             return

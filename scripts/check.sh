@@ -8,7 +8,7 @@
 # Run both.
 #
 # A MISSING TOOL IS A FAILURE, NOT A PASS. This is the command CLAUDE.md tells you to trust, and
-# it used to exit 0 having skipped shellcheck and the grade parity check — so "green" could mean
+# it used to exit 0 having skipped shellcheck — so "green" could mean
 # "ran the bats suite and nothing else". Each skip is now recorded and the run exits non-zero at
 # the end, naming what did not run. Pass --allow-skips when you genuinely want a partial run, e.g.
 # iterating on one bats test without the Swift toolchain installed.
@@ -72,21 +72,6 @@ if command -v shellcheck >/dev/null; then
 else
 	echo "shellcheck NOT INSTALLED (binary: github.com/koalaman/shellcheck/releases)"
 	SKIPPED="$SKIPPED shellcheck"
-fi
-
-echo
-echo "== grade golden (ffmpeg's recorded output, against the chain and the probe) =="
-# It used to gate on node, because this check ran the browser Bench's JavaScript. The Bench is
-# gone and the per-pixel comparison moved to LiveGradeTests, which the swift block
-# below runs. What is left here is the golden itself: fresh against grade_chain, matching the probe
-# it was measured on, and still carrying a tolerance for every case — that last one is what keeps
-# LiveGradeTests from silently skipping a case and reading as coverage.
-if command -v python3 >/dev/null; then
-	./tests/grade-parity.py
-else
-	echo "python3 NOT INSTALLED. This is the check that catches a golden describing a chain that"
-	echo "no longer exists, which would leave the app's parity gate measuring nothing."
-	SKIPPED="$SKIPPED grade-golden"
 fi
 
 echo

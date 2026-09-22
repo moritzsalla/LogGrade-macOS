@@ -279,7 +279,7 @@ require_hz() {  # require_hz <label> <value>  -> echoes the value, or fails
 	printf '%s\n' "$2"
 }
 
-# A comma-separated list of numbers, such as a CDL wheel's "1,1,1" or a tint. These are handed to
+# A comma-separated list of numbers, such as halation's tint. These are handed to
 # a generator's argv UNQUOTED, one flag list per call, so whitespace in one would split into extra
 # arguments — and a generator that then dies of an argparse error answers --check-neutral with
 # nothing, which reads as "not active" and drops the stage in silence. How MANY numbers is the
@@ -293,8 +293,8 @@ require_numbers() {  # require_numbers <label> <value>  -> echoes the value, or 
 	printf '%s\n' "$2"
 }
 
-# Clip names become path components AND reach the filter graph, via the per-clip tone LUT
-# (`lut1d=file='<cache>/<clip>_tone.cube'`) and the transform (`vidstabtransform=input='...'`).
+# Clip names become path components AND reach the filter graph, via the per-clip correction cube
+# (`lut3d=file='<cache>/<clip>_correct.cube'`) and the transform (`vidstabtransform=input='...'`).
 #
 # Two refusals, for two different failures:
 #   - `/` makes the name a path. Outputs are built as "<folder>/${CLIP}_x.ext" and their folders
@@ -315,7 +315,7 @@ require_clip_name() {  # require_clip_name <name>
 			return 1;;
 		*[\'\"\,\;\[\]\\]*|*:*)
 			echo "REFUSING: clip name '$1' contains a character ffmpeg reads as filter syntax." >&2
-			echo "  It would reach the filter graph through the tone-LUT and transform paths." >&2
+			echo "  It would reach the filter graph through the correction-cube and transform paths." >&2
 			echo "  Rename the clip, then retry." >&2
 			return 1;;
 	esac
@@ -506,8 +506,6 @@ report_encode() {  # report_encode <label> <file> <elapsed-ms>
 
 # --- the look -----------------------------------------------------------------
 # One source for every look value: look.json at the repo root. Nothing else may hardcode one.
-# Before this existed, `SAT=1.27` was written out in two scripts and had already started to drift
-# in the obvious way — two copies, one edited.
 # NO FALLBACK, on purpose. The parameter that used to be here had no caller and could not get one:
 # substituting a default for a missing key is how a run silently renders a different look, which is
 # the failure this whole file exists to end. A missing key stops the run. That makes the key set a
@@ -524,31 +522,16 @@ look() {  # look <jq-path>
 # copies had drifted by a flag, so a key added at one call site would have reached the generator's
 # argparse DEFAULT at another — a different look, rendered in silence.
 #
-# EVERY VALUE IS VALIDATED INSIDE, AND EVERY CALLER MUST ASSIGN FIRST: `args="$(tone_shape_args)"
+# EVERY VALUE IS VALIDATED INSIDE, AND EVERY CALLER MUST ASSIGN FIRST: `args="$(correction_args)"
 # || exit 1`. Spliced straight into a command, a failed read inside `$(...)` is swallowed, the
 # generator receives a partial flag list, and a --check-neutral that dies of it answers with
 # nothing — which a string comparison reads as "neutral". That is the stage dropped in silence.
 
-# The tone curve's shape. Gamma is not here because it is the one term solved per clip.
-#
-# Keys are written out literally rather than looped over: the suite's key-contract test finds what
-# the scripts read by grepping for each literal read, and a computed key is invisible to it.
-tone_shape_args() {  # tone_shape_args  -> "--pivot P --contrast C --toe T --shoulder S --black B"
-	local pivot contrast toe shoulder black
-	pivot="$(require_number tone.pivot "$(look .tone.pivot)")" || return 1
-	contrast="$(require_number tone.contrast "$(look .tone.contrast)")" || return 1
-	toe="$(require_number tone.toe "$(look .tone.toe)")" || return 1
-	shoulder="$(require_number tone.shoulder "$(look .tone.shoulder)")" || return 1
-	black="$(require_number tone.black "$(look .tone.black)")" || return 1
-	printf -- '--pivot %s --contrast %s --toe %s --shoulder %s --black %s\n' \
-		"$pivot" "$contrast" "$toe" "$shoulder" "$black"
-}
-
 # The input correction. The size is a render setting rather than a look value, so it is not here.
 # The optional three are a clip's metered exposure, temp and tint (probe_scene_exposure), ADDED to
 # look.json's, so a hand correction still moves a metered clip the way it moves any other.
-correction_args() {  # correction_args [stops temp tint]  -> "--exposure E ... --lum-mix L"
-	local exposure temp tint slope offset power lum_mix contrast saturation
+correction_args() {  # correction_args [stops temp tint]  -> "--exposure E ... --saturation S"
+	local exposure temp tint contrast saturation
 	exposure="$(require_number correct.exposure "$(look .correct.exposure)")" || return 1
 	temp="$(require_number correct.temp "$(look .correct.temp)")" || return 1
 	tint="$(require_number correct.tint "$(look .correct.tint)")" || return 1
@@ -557,14 +540,10 @@ correction_args() {  # correction_args [stops temp tint]  -> "--exposure E ... -
 		temp="$(require_number temp "$(awk -v a="$temp" -v b="$2" 'BEGIN { printf "%g", a + b }')")" || return 1
 		tint="$(require_number tint "$(awk -v a="$tint" -v b="$3" 'BEGIN { printf "%g", a + b }')")" || return 1
 	fi
-	slope="$(require_numbers correct.slope "$(look .correct.slope)")" || return 1
-	offset="$(require_numbers correct.offset "$(look .correct.offset)")" || return 1
-	power="$(require_numbers correct.power "$(look .correct.power)")" || return 1
-	lum_mix="$(require_number correct.lum_mix "$(look .correct.lum_mix)")" || return 1
 	contrast="$(require_number correct.contrast "$(look .correct.contrast)")" || return 1
 	saturation="$(require_number correct.saturation "$(look .correct.saturation)")" || return 1
-	printf -- '--exposure %s --temp %s --tint %s --slope %s --offset %s --power %s --lum-mix %s --contrast %s --saturation %s\n' \
-		"$exposure" "$temp" "$tint" "$slope" "$offset" "$power" "$lum_mix" "$contrast" "$saturation"
+	printf -- '--exposure %s --temp %s --tint %s --contrast %s --saturation %s\n' \
+		"$exposure" "$temp" "$tint" "$contrast" "$saturation"
 }
 
 # Whether each pre-conversion stage does anything, as the word its generator prints. The rule lives
@@ -575,45 +554,6 @@ correction_state() {  # correction_state [stops temp tint]  -> neutral|active
 	args="$(correction_args "$@")" || return 1
 	# shellcheck disable=SC2086
 	"$LIB_ROOT/scripts/make-correct-lut.py" --check-neutral $args
-}
-
-# Gamma is an argument because it is the one tone term solved per clip: under exposure matching the
-# curve a clip gets is not look.json's.
-tone_state() {  # tone_state <gamma>  -> neutral|active
-	local gamma shape
-	gamma="$(require_number gamma "$1")" || return 1
-	shape="$(tone_shape_args)" || return 1
-	# shellcheck disable=SC2086
-	"$LIB_ROOT/scripts/make-tone-lut.py" --check-neutral --gamma "$gamma" $shape
-}
-
-hue_args() {  # hue_args  -> "--rot R --sat S --lum L"
-	local rot sat lum
-	rot="$(require_numbers hue.rot "$(look .hue.rot)")" || return 1
-	sat="$(require_numbers hue.sat "$(look .hue.sat)")" || return 1
-	lum="$(require_numbers hue.lum "$(look .hue.lum)")" || return 1
-	printf -- '--rot %s --sat %s --lum %s\n' "$rot" "$sat" "$lum"
-}
-
-hue_state() {  # hue_state  -> neutral|active
-	local args
-	args="$(hue_args)" || return 1
-	# shellcheck disable=SC2086
-	"$LIB_ROOT/scripts/make-hue-lut.py" --check-neutral $args
-}
-
-# The hue curves' cube, generated into <dir> and named in HUE_LUT, or HUE_LUT empty when the curves
-# are flat. A global, so call it at the top level: `ensure_hue_lut "$CACHE" || exit 1`.
-ensure_hue_lut() {  # ensure_hue_lut <dir>
-	local args state
-	args="$(hue_args)" || return 1
-	state="$(hue_state)" || return 1
-	HUE_LUT=""
-	[ "$state" = active ] || return 0
-	mkdir -p "$1"
-	HUE_LUT="$1/hue.cube"
-	# shellcheck disable=SC2086
-	"$LIB_ROOT/scripts/make-hue-lut.py" "$HUE_LUT" $args >/dev/null
 }
 
 halation_state() {  # halation_state  -> neutral|active
@@ -773,18 +713,6 @@ crop_description() {  # crop_description "crop=W:H:X:Y,"  -> text
 	printf 'cropped %sx%s at %s,%s\n' "$cw" "$ch" "$x" "${y%,}"
 }
 
-# The clip's post-CST luma mean, from ONE decoded frame rather than a pass. It is what the exposure
-# match solves against, and it does not change when a look does — so an interface adjusting a curve
-# re-measures the same number on every render, which is why grade.sh lets a caller hand it back.
-#
-# `metadata=print:file=-`, never a plain `metadata=print`: the latter logs at INFO level, which
-# `-v error` suppresses, so the probe returned EMPTY on every clip and every clip silently got the
-# reference gamma. The exposure match appeared to run and did nothing.
-#
-# Lives here rather than inline in grade.sh because two callers need the IDENTICAL command: the
-# per-clip match and the batch reference. Two copies of this string is how the INFO-level bug would
-# come back in one of them.
-#
 # --- deliverables -------------------------------------------------------------------------
 # A deliverable was two names with their sizes written into a `case` branch, so "any other shape"
 # meant editing the pipeline. It is DATA now: an aspect, an optional crop offset, and a name that
@@ -1024,21 +952,8 @@ delivery_encode_args() {  # delivery_encode_args  -> sets DELIVERY_ARGS
 # cut the peak less (1.3 dB against 1.8) and cost 1.8 dB at 80-120 Hz. docs/PIPELINE.md, "Encode".
 DELIVERY_AUDIO_HIGHPASS_HZ=60
 
-# The colour trims, which a render path hands grade_chain as arguments: a caller measuring the
-# chain at other values must not have look.json's read in underneath it.
-#
-# UNSET IS NOT EMPTY: a value already set is kept, and only an unset one is read. Call it at the
-# top level, `load_grade_look || exit 1`: it sets globals, which a `$(...)` would throw away.
-load_grade_look() {
-	if [ -z "${SAT+set}" ]; then
-		SAT="$(require_number colour.saturation "$(look .colour.saturation)")" || return 1
-	fi
-	if [ -z "${WARM+set}" ]; then
-		WARM="$(require_number colour.warmth "$(look .colour.warmth)")" || return 1
-	fi
-}
-
-# The look values the delivery tail reads, into globals, for the same reasons. SMOOTHING and
+# The look values the delivery tail reads, into globals. Call it at the top level,
+# `load_delivery_look || exit 1`: a `$(...)` would throw the globals away. SMOOTHING and
 # GRAIN_STRENGTH take an environment override.
 load_delivery_look() {
 	SMOOTHING="$(require_number SMOOTHING "${SMOOTHING:-$(look .stabilisation.smoothing)}")" || return 1
@@ -1116,51 +1031,14 @@ delivery_pix_fmt() {  # delivery_pix_fmt  -> yuv420p|yuv420p10le|yuv422p10le
 	esac
 }
 
-# THE GRADE ITSELF, as a spliceable filter chain: hue curves, tone curve, saturation, warmth. Built
-# only here: two copies of it had already drifted once, in silence.
-#
-# TONE ON THE LUMA PLANE ONLY. A per-channel contrast curve crushes a saturated colour's two low
-# channels harder than its high one, so saturated things get more saturated — the traffic signage
-# went visibly neon long before it was measured. Curving luma and merging the ORIGINAL chroma back
-# gives the same tone with colour untouched. `0x001112` = plane 0 from input 0 (the toned luma),
-# planes 1 and 2 from input 1. Measurements and consequences in ADR 0003; why the lost saturation
-# must NOT be won back with a uniform boost is in docs/PIPELINE.md, "Tried and rejected".
-#
-# `format=yuv444p10le` ON BOTH BRANCHES is required, not decoration: mergeplanes needs matching
-# plane dimensions and 4:2:2 chroma is half width, so without it the graph dies on a bare
-# "Invalid argument" naming nothing.
-#
-# Internal labels are prefixed because callers splice this into a bigger graph and choose their
-# own — grade.sh already uses [b] for the image branch that continues from here.
-#
-# <head> and <tag> are prefixes carrying their own trailing comma, like delivery_image_chain's, so
-# that an absent one leaves no trace: head is the camera CST, and tag is DELIVERY_SETPARAMS wherever the result feeds filters
-# that negotiate a colourspace.
-#
-# A NEUTRAL STAGE IS ABSENT: an empty <tone-lut> leaves out the whole luma
-# branch (whether a curve is neutral is the caller's `tone_state`), saturation 1 leaves out `hue`,
-# and warmth 0 leaves out `colorbalance`, which would otherwise round-trip every pixel through RGB.
-# With every stage neutral the grade is the head and the tag, which is what makes "everything off"
-# a plain CST export. With nothing at all it is `null`, so a caller's `[0:v]...[o]` stays a graph.
-grade_chain() {  # grade_chain <tone-lut|empty> <sat> <warm> [head-prefix] [tag-prefix]
-	local tone="$1" sat="$2" warm="$3" head="${4:-}" tag="${5:-}" chain
-	chain="$head"
-	# THE HUE CURVES follow the conversion, so they act on the colours on screen, and precede
-	# the tone curve, which is luma-only and keeps their chroma. A caller that never generated the
-	# cube gets flat curves left out, and active ones refused rather than dropped in silence.
-	if [ -z "${HUE_LUT+set}" ]; then
-		local hue_state_now
-		hue_state_now="$(hue_state)" || return 1
-		if [ "$hue_state_now" = active ]; then
-			echo "hue curves are set but no cube was generated: call ensure_hue_lut first" >&2
-			return 1
-		fi
-	fi
-	[ -z "${HUE_LUT:-}" ] || chain="${chain}lut3d=file='${HUE_LUT}':interp=tetrahedral,"
-	[ -z "$tone" ] || chain="${chain}format=yuv444p10le,split=2[gc_y][gc_c];[gc_y]lut1d=file='$tone':interp=linear,format=yuv444p10le[gc_t];[gc_t][gc_c]mergeplanes=0x001112:yuv444p10le,"
-	chain="$chain$tag"
-	[ "$(awk -v k="$sat" 'BEGIN { print (k == 1) }')" = 1 ] || chain="${chain}hue=s=$sat,"
-	[ "$(awk -v k="$warm" 'BEGIN { print (k == 0) }')" = 1 ] || chain="${chain}colorbalance=rm=$warm:bm=-$warm,"
+# THE GRADE ITSELF, as a spliceable filter chain. Built only here: two copies of it had already
+# drifted once, in silence. Every look's character is its conversion cube, so the chain is the
+# <head> (correction, halation, grain, the cube) and the <tag>, each a prefix carrying its own
+# trailing comma so an absent one leaves no trace. tag is DELIVERY_SETPARAMS wherever the result
+# feeds filters that negotiate a colourspace. With neither it is `null`, so a caller's
+# `[0:v]...[o]` stays a graph.
+grade_chain() {  # grade_chain [head-prefix] [tag-prefix]
+	local chain="${1:-}${2:-}"
 	chain="${chain%,}"
 	printf '%s' "${chain:-null}"
 }

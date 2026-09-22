@@ -1,13 +1,7 @@
 /// Rec.709's luma coefficients, and the chroma scales that follow from them.
 ///
-/// ONE COPY, because three places need them to be the same numbers: `LiveGrade` models the plane
-/// split ffmpeg does around `lut1d`, `Scopes` measures the frame that split produced, and
-/// `CorrectionCube` transcribes the generator's luminance mix. A scope that disagreed with the
-/// model about what luma is would show a picture the grade did not make.
-///
-/// The scales are written as literals rather than computed as 2(1 - k): the golden `LiveGradeTests`
-/// compares against was made from these spellings, and `2 * (1 - 0.0722)` is not bit-identical to
-/// `1.8556`.
+/// ONE COPY, because `Scopes` and `CorrectionCube` (the generator's saturation) need the same
+/// numbers.
 enum Rec709 {
     static let kr = 0.2126
     static let kg = 0.7152

@@ -9,8 +9,7 @@ import Metal
 /// A TRANSCRIPTION, held to `LiveChain` by `MetalChainTests` pixel for pixel, not to a tolerance
 /// chosen after the fact. What it must reproduce, and each was a CPU decision first:
 ///   - tetrahedral cube sampling (`Cube3D.sample`), corner by corner, not the GPU's trilinear filter;
-///   - the colour stages truncated to 8 bits, as `LiveChain.store` truncates them;
-///   - the tone curve read from the same 256-entry table, merged by `LiveGrade.merge`, truncated.
+///   - the colour stages truncated to 8 bits, as `LiveChain.store` truncates them.
 public final class MetalChain {
     public enum Failure: Error, CustomStringConvertible {
         case noDevice
@@ -56,7 +55,7 @@ public final class MetalChain {
         }
         var made: [String: MTLComputePipelineState] = [:]
         for name in [
-            "correct", "highlight", "blurAcross", "blurDown", "glow", "convert", "grade",
+            "correct", "highlight", "blurAcross", "blurDown", "glow", "convert",
             "grainNoise", "grainAcross", "grainDown", "grainAdd",
         ] {
             guard let function = library.makeFunction(name: name) else {
@@ -69,8 +68,8 @@ public final class MetalChain {
 
     // MARK: public entry
 
-    /// The graded frame from 16-bit RGBA source pixels, as `LiveChain.converted` then
-    /// `LiveChain.gradedPixels` give it: 8-bit RGBA, opaque.
+    /// The graded frame from 16-bit RGBA source pixels, as `LiveChain.converted` gives it: 8-bit
+    /// RGBA, opaque.
     public func graded(
         rgba16: [UInt16], width: Int, height: Int, chain: LiveChain, grain: LiveGrain? = nil,
         frame: Int = 0
@@ -139,26 +138,12 @@ public final class MetalChain {
             converting = try grained(converting, grain, frame: frame, buffer)
         }
 
-        let codes = try scratch("codes", .rgba32Float, width, height)
         try run("convert", buffer, width, height) { e in
             e.setTexture(converting, index: 0)
-            e.setTexture(codes, index: 1)
-            e.setTexture(try self.cubeTexture(stages.conversion), index: 2)
-            e.setTexture(try self.cubeTexture(stages.hue) ?? identity!, index: 3)
-            var sizes = SIMD2<Int32>(Int32(stages.conversion.size), Int32(stages.hue?.size ?? 2))
-            var useHue: Int32 = stages.hue == nil ? 0 : 1
-            e.setBytes(&sizes, length: 8, index: 0)
-            e.setBytes(&useHue, length: 4, index: 1)
-        }
-
-        var table = [Float](repeating: 0, count: 256)
-        for i in 0..<256 { table[i] = Float(chain.grade.curve.value(at: Double(i) / 255) * 255) }
-        var trims = SIMD2<Float>(Float(chain.grade.saturation), Float(chain.grade.warmth))
-        try run("grade", buffer, width, height) { e in
-            e.setTexture(codes, index: 0)
             e.setTexture(out, index: 1)
-            e.setBytes(&table, length: 256 * 4, index: 0)
-            e.setBytes(&trims, length: 8, index: 1)
+            e.setTexture(try self.cubeTexture(stages.conversion), index: 2)
+            var size = Int32(stages.conversion.size)
+            e.setBytes(&size, length: 4, index: 0)
         }
     }
 
@@ -489,14 +474,12 @@ public final class MetalChain {
         kernel void convert(texture2d<float, access::read> src [[texture(0)]],
                             texture2d<float, access::write> dst [[texture(1)]],
                             texture3d<float, access::read> conversion [[texture(2)]],
-                            texture3d<float, access::read> hue [[texture(3)]],
-                            constant int2 &sizes [[buffer(0)]], constant int &useHue [[buffer(1)]],
+                            constant int &size [[buffer(0)]],
                             uint2 id [[thread_position_in_grid]]) {
             if (id.x >= dst.get_width() || id.y >= dst.get_height()) return;
-            float3 c = tetra(conversion, sizes.x, src.read(id).rgb);
-            if (useHue != 0) c = tetra(hue, sizes.y, c);
+            float3 c = tetra(conversion, size, src.read(id).rgb);
             // LiveChain.store: truncated to 8 bits.
-            dst.write(float4(floor(clamp(c * 255.0, 0.0, 255.0)), 1), id);
+            dst.write(float4(floor(clamp(c * 255.0, 0.0, 255.0)) / 255.0, 1), id);
         }
 
         // LiveGrain.hash and LiveGrain.gaussian, the same arithmetic: channel 0 shared, 1-3 R G B.
@@ -557,33 +540,5 @@ public final class MetalChain {
             dst.write(float4(c, 1), id);
         }
 
-        static float midtoneWeight(float level) {
-            if (level <= 0.1059 || level >= 0.3922) return 0;
-            if (level < 0.2314) return (level - 0.1059) / (0.2314 - 0.1059) * 0.6999;
-            if (level <= 0.2510) return 0.6999;
-            return (0.3922 - level) / (0.3922 - 0.2510) * 0.6999;
-        }
-
-        // LiveGrade.merge on the 8-bit codes, truncated as LiveChain.gradedPixels truncates.
-        kernel void grade(texture2d<float, access::read> src [[texture(0)]],
-                          texture2d<float, access::write> dst [[texture(1)]],
-                          constant float *curve [[buffer(0)]], constant float2 &trims [[buffer(1)]],
-                          uint2 id [[thread_position_in_grid]]) {
-            if (id.x >= dst.get_width() || id.y >= dst.get_height()) return;
-            const float kr = 0.2126, kg = 0.7152, kb = 0.0722, cbS = 1.8556, crS = 1.5748;
-            float3 c = src.read(id).rgb;
-            float y = kr * c.r + kg * c.g + kb * c.b;
-            float cb = (c.b - y) / cbS, cr = (c.r - y) / crS;
-            float lr = curve[int(c.r)], lg = curve[int(c.g)], lb = curve[int(c.b)];
-            float ny = kr * lr + kg * lg + kb * lb;
-            if (trims.x != 1) { cb *= trims.x; cr *= trims.x; }
-            ny = clamp(ny, 0.0, 255.0); cb = clamp(cb, -128.0, 127.0); cr = clamp(cr, -128.0, 127.0);
-            float r = ny + crS * cr;
-            float g = ny - (kr * crS / kg) * cr - (kb * cbS / kg) * cb;
-            float b = ny + cbS * cb;
-            if (trims.y != 0) { float w = trims.y * 255.0 * midtoneWeight(ny / 255.0); r += w; b -= w; }
-            float3 o = floor(clamp(float3(r, g, b), 0.0, 255.0));
-            dst.write(float4(o / 255.0, 1), id);
-        }
         """
 }

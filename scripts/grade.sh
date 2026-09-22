@@ -83,8 +83,8 @@ RUN_T0="$(now_ms)"
 # than the export folder. Two reasons it exists. A proof is the sign-off before committing to the slow
 # render. And
 # nothing in the suite executed this filter graph at all: shellcheck cannot see inside the string
-# (it reported clean on both previously shipped load-bearing bugs), the parity check touches only
-# the tone curve, and every other test stopped at DRY=1 — so a dropped label went green and failed
+# (it reported clean on both previously shipped load-bearing bugs), and every other test stopped
+# at DRY=1 — so a dropped label went green and failed
 # three minutes into a 19-clip run.
 PROOF="${PROOF:-}"
 # Validated because it is spliced UNQUOTED below (`-t $PROOF`) so that an empty value disappears
@@ -96,9 +96,9 @@ PROOF="${PROOF:-}"
 # FRAME=<seconds> renders a single frame through the REAL grade chain and stops. It is the app's
 # exact preview: a still cannot show grain, the sharpener, the chroma denoise, the stabiliser or
 # the dither, all of which are delivery-stage, so this deliberately covers the grade only and the
-# interface says so. What it does cover is everything a slider moves — the conversion, the hue curves, the
-# tone curve, saturation and warmth — at full resolution, resampled to display size after
-# the grade exactly as the delivery chain resamples after it.
+# interface says so. What it does cover is everything a slider moves — the correction, halation and
+# the conversion — at full resolution, resampled to display size after the grade exactly as the
+# delivery chain resamples after it.
 FRAME="${FRAME:-}"
 [ -z "$FRAME" ] || FRAME="$(require_number FRAME "$FRAME")"
 FRAME_HEIGHT="$(require_number FRAME_HEIGHT "${FRAME_HEIGHT:-1440}")"
@@ -142,7 +142,7 @@ fi
 	"$(printf '%s' "$FRAME_METERED" | tr ' ' ,)" | tr , ' ')" || exit 1
 FRAME_DIR="$(work_cache "$WORK")/frames"
 # Everything except an ungraded preview frame runs Apple's conversion, including the exposure probe
-# that would otherwise fail into an empty measurement and plan every clip at the reference gamma.
+# that would otherwise fail into an empty measurement and plan every clip unmetered.
 # A film cube is a conversion too: resolve_conversion refuses a missing one either way.
 CONVERT_NAME="${CONVERT:-$(look .convert.cube)}" || exit 1
 CST="$(resolve_conversion "$CONVERT_NAME")" || exit 1
@@ -173,26 +173,20 @@ else
 fi
 # Reports are not deliverables — keep them out of the folder someone uploads from.
 REPORT_DIR="$(work_cache "$WORK")/reports"
-# A persistent cache for the per-clip tone LUTs the exposure match generates. It used to be
+# A persistent cache for the per-clip cubes the exposure match generates. It used to be
 # assigned over WORK itself, which left one name meaning two things — and the stabilisation
 # path below was then built from the wrong one, landing inside the cache instead of at
 # transform_path. WORK stays the work-dir root.
 CACHE="$(work_cache "$WORK")/work"
 
 # --- the look. Every value comes from look.json; nothing here holds a copy. ---
-# This script used to carry its own tone block while reading colour, grain and stabilisation from
-# look.json: the two-copies-one-edited failure look() was written to end. No fallbacks on purpose: a missing value must stop the
-# run, not quietly substitute a different look.
-# Every one of these is spliced into an ffmpeg filter graph, and the look file is usually the
+# No fallbacks on purpose: a missing value must stop the run, not quietly substitute a different
+# look. Every one of these is spliced into an ffmpeg filter graph, and the look file is usually the
 # app's LOOK_FILE rather than typed — see require_number in lib.sh for why that matters.
-# The loaders keep a value that is already set, which is for callers that source lib.sh — so the
-# names are cleared first, or a stray SAT in someone's environment would become the grade.
-unset SAT WARM HUE_LUT
-load_grade_look || exit 1
 load_delivery_look || exit 1
 
 # --- the input correction ---------------------------------------------------------------
-# Exposure, white balance and the CDL wheels, generated into one cube that runs BEFORE Apple's
+# Exposure, white balance, contrast and saturation, generated into one cube that runs BEFORE Apple's
 # conversion. Before, because Apple Log decodes to 12x diffuse white at code 1.0 — about 3.6 stops
 # of highlight headroom — and the Rec.709 cube lands all of it on a display ceiling of 1.0: a
 # correction applied after it works on display-referred pixels and clips highlights the source
@@ -231,8 +225,6 @@ if [ -n "${_extra:-}" ] || [ -z "${_tb:-}" ]; then
 	exit 1
 fi
 HAL_DIR=""
-TONE_SHAPE_ARGS="$(tone_shape_args)" || exit 1
-TONE_GAMMA="$(require_number gamma "$(look .tone.gamma)")"
 # Where a clip's metered log-average lands, in stops from mid grey.
 REF_STOPS="$(require_number reference_stops "$(look .match.reference_stops)")"
 STAB="${STAB:-1}"; MATCH="${MATCH:-1}"; DRY="${DRY:-0}"
@@ -430,22 +422,20 @@ if [ "$CORRECT_STATE" = "active" ]; then
 	"$SCRIPT_DIR/make-correct-lut.py" "$CORRECT_LUT" $CORRECT_ARGS --size "$CORRECT_SIZE" >/dev/null
 	CORRECT_PREFIX="lut3d=file='${CORRECT_LUT}':interp=tetrahedral,"
 fi
-# The hue curves' cube, once per run; grade_chain splices it in after the print.
-[ "$SOURCE_ONLY" = 1 ] || ensure_hue_lut "$CACHE" || exit 1
 # The cubes depend only on the threshold, so they are made once per run. The prefix itself is built
 # per clip below, because its radius is a fraction of each clip's own frame.
 if [ "$HAL_STATE" = "active" ]; then
 	HAL_DIR="$CACHE/halation"
-	# Not on a dry run, which renders nothing — the same rule the per-clip tone cube follows.
+	# Not on a dry run, which renders nothing — the same rule the per-clip correction cube follows.
 	[ "$DRY" = "1" ] || "$SCRIPT_DIR/make-halation-luts.py" "$HAL_DIR" --threshold "$HAL_THRESHOLD" >/dev/null
 fi
 
 # Phase totals for the report's summary, in integer milliseconds (see now_ms). Everything from the
 # first line of this script to here — argument checks, the crop probe, the correction cube — is
 # "preflight".
-T_PREFLIGHT=$(( $(now_ms) - RUN_T0 - T_MEASURE )); T_PROBE=0; T_STAB=0; T_TONE=0; T_ENCODE=0; T_FRAME=0
+T_PREFLIGHT=$(( $(now_ms) - RUN_T0 - T_MEASURE )); T_PROBE=0; T_STAB=0; T_ENCODE=0; T_FRAME=0
 say "grade run $(date '+%Y-%m-%d %H:%M:%S')  —  ${#CLIPS[@]} clip(s)"
-say "look: gamma=$TONE_GAMMA sat=$SAT warm=$WARM grain=$GRAIN_STRENGTH stab=$STAB exposure-match=$MATCH"
+say "look: grain=$GRAIN_STRENGTH stab=$STAB exposure-match=$MATCH"
 say "convert: $CONVERT_NAME"
 # The flags themselves, which are exactly what the generator ran on, rather than a second spelling.
 [ -z "$CORRECT_PREFIX" ] || say "correction: $CORRECT_ARGS (${CORRECT_SIZE}-point cube)"
@@ -459,7 +449,7 @@ report_line "knobs:   deliverables=$(IFS=,; printf '%s' "${D_NAME[*]}") width=$W
 report_line "work:    $WORK"
 report_line "preflight took $(fmt_ms "$T_PREFLIGHT")"
 say ""
-emit run_start clips "${#CLIPS[@]}" saturation "$SAT" warmth "$WARM" \
+emit run_start clips "${#CLIPS[@]}" \
 	grain "$GRAIN_STRENGTH" stabilisation "$STAB" exposure_match "$MATCH" \
 	exposure_reference "$REF_STOPS" deliverables "$(IFS=,; printf '%s' "${D_NAME[*]}")" \
 	proof "${PROOF:-0}" dry "$DRY" report "$REPORT" out_dir "$OUT_DIR"
@@ -473,7 +463,7 @@ for SRC in "${CLIPS[@]}"; do
 	CLIP_T0=$(now_ms)
 
 	# The clip name becomes a path component AND reaches the filter graph, through the per-clip
-	# tone LUT and the transform path. It is the one input nobody types.
+	# correction cube and the transform path. It is the one input nobody types.
 	CLIP="$(require_clip_name "$(basename "${SRC%.*}")")"
 
 	# Measured up front, with the crop refusal. Every crop and the halation radius come from these
@@ -496,8 +486,8 @@ for SRC in "${CLIPS[@]}"; do
 	# program built by interpolation cannot be tested, and a degenerate frame must answer "no
 	# correction" instead of taking the batch down at clip n. Arguments go through argv.
 	#
-	# The per-clip correction cube it feeds is built below, after the dry-run exit, like the tone
-	# cube: a plan renders nothing.
+	# The per-clip correction cube it feeds is built below, after the dry-run exit: a plan renders
+	# nothing.
 	METERED="0 0 0"
 	if [ "$MATCH" != "0" ] && [ -n "$FRAME_METERED" ]; then
 		METERED="$FRAME_METERED"
@@ -509,8 +499,6 @@ for SRC in "${CLIPS[@]}"; do
 		_t=$(( $(now_ms) - _t )); T_PROBE=$(( T_PROBE + _t ))
 		report_line "      exposure meter took $(fmt_ms "$_t")"
 	fi
-
-	TONE="$CACHE/${CLIP}_tone.cube"
 
 	# --- stabilisation: detect on the SOURCE, so no intermediate is needed ---------------
 	SFX=""
@@ -572,22 +560,6 @@ for SRC in "${CLIPS[@]}"; do
 	fi
 	[ "$DRY" = "1" ] && continue
 
-	# Generated AFTER the dry-run exit, not before: DRY=1 is documented as "plan only, render
-	# nothing", and this was writing a 4096-entry cube per clip on a run that renders nothing. The
-	# probe and the solve still happen above, because the solved gamma IS the plan.
-	# A neutral curve is no cube and no luma branch; see grade_chain.
-	TONE_STATE=neutral
-	[ "$SOURCE_ONLY" = 1 ] || TONE_STATE="$(tone_state "$TONE_GAMMA")" || exit 1
-	if [ "$TONE_STATE" = neutral ]; then
-		TONE=""
-	else
-		_t=$(now_ms)
-		# shellcheck disable=SC2086  # deliberate split: a flag list of validated values
-		"$SCRIPT_DIR/make-tone-lut.py" "$TONE" --gamma "$TONE_GAMMA" $TONE_SHAPE_ARGS >/dev/null
-		_t=$(( $(now_ms) - _t )); T_TONE=$(( T_TONE + _t ))
-		report_line "      tone cube took $(fmt_ms "$_t")"
-	fi
-
 	CLIP_CORRECT_PREFIX="$CORRECT_PREFIX"
 	if [ "$METERED" != "0 0 0" ] && [ "$SOURCE_ONLY" = 0 ]; then
 		# shellcheck disable=SC2086  # deliberate split: three validated numbers
@@ -605,9 +577,8 @@ for SRC in "${CLIPS[@]}"; do
 		fi
 	fi
 
-	# The preview stops here: same chain head, same tone cube, no delivery stage. It goes through
-	# grade_chain like everything else, so it cannot drift from what the render does — the suite's
-	# "grade chain is built in exactly one place" test is what holds that.
+	# The preview stops here: same chain head, no delivery stage. It goes through
+	# grade_chain like everything else, so it cannot drift from what the render does.
 	if [ -n "$FRAME" ]; then
 		# The stage is in the NAME. Two frames of one clip at one timecode differ only by which
 		# chain produced them, and holding a URL while the other stage renders over it is how a
@@ -624,7 +595,7 @@ for SRC in "${CLIPS[@]}"; do
 			# untagged-probe mistake, which cost hours once already.
 			frame_graph="format=gbrp16le,scale=-2:${FRAME_HEIGHT}:flags=lanczos"
 		else
-			frame_graph="$(grade_chain "$TONE" "$SAT" "$WARM" \
+			frame_graph="$(grade_chain \
 				"${CLIP_CORRECT_PREFIX}${HALATION_PREFIX}lut3d=file='${CST}':interp=tetrahedral,"),scale=-2:${FRAME_HEIGHT}:flags=lanczos"
 		fi
 		# One argument list for both the report and ffmpeg, so what is recorded cannot drift from what
@@ -655,7 +626,7 @@ for SRC in "${CLIPS[@]}"; do
 	fi
 
 	# What makes this path ONE pass is the head: the CST is spliced into grade_chain rather than
-	# spent on its own decode, so conversion, look and tone all happen in the single graph below.
+	# spent on its own decode, so correction, halation and conversion all happen in the single graph below.
 	# The warp, crop and reduction come FIRST (delivery_geometry), so the grade runs at delivery
 	# size; the pieces live in lib.sh, which is where the measurements for each part of them live.
 	#
@@ -692,7 +663,7 @@ for SRC in "${CLIPS[@]}"; do
 		[ "$GAUGE" != super8 ] || { grain_size="$SUPER8_GRAIN_SIZE"; grain_gain="$SUPER8_GRAIN_GAIN"; }
 		grain="$(grain_prefix "$fw" "$fh" "$FPS" "$GRAIN_STRENGTH" "$grain_size" "$grain_gain")"
 		local shared
-		shared="$(delivery_geometry "$fw" "$fh" "$stab")$(grade_chain "$TONE" "$SAT" "$WARM" \
+		shared="$(delivery_geometry "$fw" "$fh" "$stab")$(grade_chain \
   "${DENOISE_PREFIX}${CLIP_CORRECT_PREFIX}${HALATION_PREFIX}${grain}lut3d=file='${CST}':interp=tetrahedral," "${DELIVERY_SETPARAMS},")"
 		local args=() label=""
 		for (( i = 0; i < n; i++ )); do
@@ -778,10 +749,9 @@ report_line "  preflight       $(fmt_ms "$T_PREFLIGHT")"
 report_line "  frame measure   $(fmt_ms "$T_MEASURE")"
 report_line "  exposure probe  $(fmt_ms "$T_PROBE")"
 report_line "  stabilisation   $(fmt_ms "$T_STAB")"
-report_line "  tone cube       $(fmt_ms "$T_TONE")"
 report_line "  encode          $(fmt_ms "$T_ENCODE")"
 report_line "  frame render    $(fmt_ms "$T_FRAME")"
-report_line "  other           $(fmt_ms $(( RUN_MS - T_PREFLIGHT - T_MEASURE - T_PROBE - T_STAB - T_TONE - T_ENCODE - T_FRAME )))"
+report_line "  other           $(fmt_ms $(( RUN_MS - T_PREFLIGHT - T_MEASURE - T_PROBE - T_STAB - T_ENCODE - T_FRAME )))"
 say "report: $REPORT"
 emit run_done rendered "$OK" skipped "$SKIPPED" failed "$FAILED" report "$REPORT"
 [ "$FAILED" -eq 0 ] || exit 1

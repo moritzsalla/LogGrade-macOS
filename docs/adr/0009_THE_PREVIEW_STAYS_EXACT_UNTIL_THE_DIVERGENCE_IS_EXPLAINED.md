@@ -7,8 +7,7 @@ preset or a reset, and for hold-C compare. No engine render replaces it (the 144
 `grade.sh FRAME` render took 2–4 s on the Intel Mac). `GradeModel` decodes the clip with
 `NativeSource` at 1080 lines, meters it with the engine's own `probe_scene_exposure`
 (`ExposureMeter`, keyed by clip and `match.reference_stops`), and `GradeKit/LiveChain.swift` puts it
-through the correction, halation, Apple's conversion or the film look, and the hue curves, then
-`LiveGrade` for the tone curve and trims. Decoded frames (8) and settled pictures (24) are cached, so
+through the correction, halation, and Apple's conversion or the film look. Decoded frames (8) and settled pictures (24) are cached, so
 switching back to a clip neither decodes nor grades. Starting from an already converted frame made
 the correction stage impossible to preview, so don't go back to that.
 
@@ -27,14 +26,12 @@ at 1920.
 | decode, any height | 0.35–1.3 s, cached |
 | colour stages, 1920x1080 | ~55 ms; ~125 ms with halation |
 | colour stages, 608x1080 portrait | ~22 ms; ~128 ms with halation |
-| tone and trims only | 6–25 ms |
 
-No subprocess is on the grade path. Three generators were transcribed into Swift, and each is held
+No subprocess is on the grade path. Two generators were transcribed into Swift, and each is held
 by an exact-equivalence test, not a tolerance:
 
 - **`CorrectionCube`** replaces a 419ms `make-correct-lut.py` call (1.4ms). All 107,811 numbers
   agree to the last `Float` unit.
-- **`ToneCurve.generated`** replaces `make-tone-lut.py` (~100ms → 0.12ms), across all 4096 entries.
 - **The exposure meter** is the engine's function, sourced from `lib.sh` and run beside the decode
   (`NativeSourceTests`).
 

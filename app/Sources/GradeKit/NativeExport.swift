@@ -173,7 +173,7 @@ public enum NativeExport {
                         rgba16: pixels, width: plan.frameWidth, height: plan.frameHeight,
                         through: built.chain.stages, grain: grain, frame: index)
                 else { throw Failure.frame }
-                let rgba = LiveChain.gradedPixels(converted, with: built.chain.grade)
+                let rgba = converted.pixels
                 for output in outputs {
                     try output.append(
                         rgba: rgba, width: plan.frameWidth, height: plan.frameHeight,

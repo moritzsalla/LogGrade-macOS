@@ -16,34 +16,28 @@ public final class ChainBuilder {
         case conversion(String)
         case correction
         case halation
-        case hue
 
         public var description: String {
             switch self {
             case .conversion(let stem): return "The conversion “\(stem)” couldn’t be read."
             case .correction: return "That correction isn’t a value the engine accepts."
             case .halation: return "That halation tint isn’t a value the engine accepts."
-            case .hue: return "Those hue curves aren’t values the engine accepts."
             }
         }
     }
 
-    /// Everything the colour stages depend on, so a caller keeping a converted frame knows when a
-    /// tone drag can reuse it and nothing else can.
+    /// Everything the colour stages depend on, so a caller keeping a converted frame knows when it
+    /// can reuse it.
     public struct ColourKey: Equatable {
         let convertCube: String
         let correct: Look.Correct
         let halation: Look.Halation
-        let hue: Look.Hue
         let frameLongEdge: Int
         let sourceLongEdge: Int?
     }
 
     public struct Built {
         public let chain: LiveChain
-        /// The look's tone and its curve, which the interface draws.
-        public let tone: Look.Tone
-        public let curve: ToneCurve
         public let colourKey: ColourKey
     }
 
@@ -53,8 +47,6 @@ public final class ChainBuilder {
     /// frame does.
     private var conversions: [URL: Cube3D] = [:]
     private var correction: (Look.Correct, Cube3D?)?
-    private var hue: (Look.Hue, Cube3D?)?
-    private var curve: (Look.Tone, ToneCurve)?
 
     public init(engine: EngineLocation) {
         self.engine = engine
@@ -101,31 +93,12 @@ public final class ChainBuilder {
             look.halation, frameLongEdge: frameLongEdge, sourceLongEdge: sourceLongEdge)
         if !look.halation.isNeutral && halation == nil { throw Refusal.halation }
 
-        if hue?.0 != look.hue {
-            hue = (
-                look.hue,
-                look.hue.isNeutral ? nil : HueCube.cube(for: look.hue, size: Self.cubeSize)
-            )
-        }
-        let hueCube = hue?.1
-        if !look.hue.isNeutral && hueCube == nil { throw Refusal.hue }
-
-        if curve?.0 != look.tone {
-            curve = (look.tone, ToneCurve.generated(tone: look.tone))
-        }
-        let toneCurve = curve!.1
-
         return Built(
             chain: LiveChain(
                 stages: LiveChain.colourStages(
-                    correction: correctionCube, halation: halation, conversion: conversion,
-                    hue: hueCube),
-                grade: LiveGrade(
-                    curve: toneCurve, saturation: look.colour.saturation,
-                    warmth: look.colour.warmth)),
-            tone: look.tone, curve: toneCurve,
+                    correction: correctionCube, halation: halation, conversion: conversion)),
             colourKey: ColourKey(
                 convertCube: look.convertCube, correct: look.correct, halation: look.halation,
-                hue: look.hue, frameLongEdge: frameLongEdge, sourceLongEdge: sourceLongEdge))
+                frameLongEdge: frameLongEdge, sourceLongEdge: sourceLongEdge))
     }
 }

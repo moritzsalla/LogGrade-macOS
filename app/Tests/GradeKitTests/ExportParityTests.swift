@@ -439,7 +439,7 @@ enum Media {
 
 struct Frame {
     let width: Int, height: Int
-    /// Displayed light per channel, decoded as Apple playback decodes (`HueCube.displayDecode`).
+    /// Displayed light per channel, decoded as Apple playback decodes (`LiveChain.displayDecode`).
     /// Empty unless asked for: only the grade check reads colour.
     let r: [Double], g: [Double], b: [Double]
     /// Luma as the file stores it, in 8-bit code values: banding, grain and sharpening are
@@ -448,7 +448,7 @@ struct Frame {
 
     /// The decode, tabulated over every 16-bit code: a `pow` per pixel dominated a debug build.
     static let displayLight: [Double] = (0...65535).map { code in
-        HueCube.displayDecode(Double(code) / 65535)
+        LiveChain.displayDecode(Double(code) / 65535)
     }
 
     init(_ file: URL, _ n: Int, colour: Bool = false) throws {

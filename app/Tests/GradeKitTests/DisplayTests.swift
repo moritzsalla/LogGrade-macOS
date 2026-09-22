@@ -67,7 +67,7 @@ final class DisplayTests: XCTestCase {
                 previewed, exported, accuracy: 0.0015,
                 "luma \(y): the preview and the export disagree")
             XCTAssertEqual(
-                Double(exported), HueCube.displayDecode(Double(y - 16) / 219), accuracy: 0.0015,
+                Double(exported), LiveChain.displayDecode(Double(y - 16) / 219), accuracy: 0.0015,
                 "luma \(y): playback is not the curve the cubes are encoded for")
             if y == 126 {
                 // The untagged picture really was the mismatch, or this proves nothing about tagging.
@@ -81,7 +81,7 @@ final class DisplayTests: XCTestCase {
     func testTheDisplayCurveRoundTrips() {
         for code in stride(from: 0.0, through: 1.0, by: 0.05) {
             XCTAssertEqual(
-                HueCube.displayEncode(HueCube.displayDecode(code)), code, accuracy: 1e-12)
+                LiveChain.displayEncode(LiveChain.displayDecode(code)), code, accuracy: 1e-12)
         }
     }
 }

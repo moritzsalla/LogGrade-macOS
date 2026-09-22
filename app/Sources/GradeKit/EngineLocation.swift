@@ -20,7 +20,6 @@ public struct EngineLocation {
 
     public var gradeScript: URL { root.appendingPathComponent("scripts/grade.sh") }
     public var lookFile: URL { root.appendingPathComponent("look.json") }
-    public var toneGenerator: URL { root.appendingPathComponent("scripts/make-tone-lut.py") }
     public var correctGenerator: URL { root.appendingPathComponent("scripts/make-correct-lut.py") }
     public var halationGenerator: URL {
         root.appendingPathComponent("scripts/make-halation-luts.py")
@@ -141,7 +140,7 @@ public struct EngineLocation {
     /// Everything wrong with this engine, in the order a person would fix it. Empty means it runs.
     public func preflight(fileManager: FileManager = .default) -> [Problem] {
         var problems: [Problem] = []
-        for url in [gradeScript, toneGenerator, correctGenerator, halationGenerator] {
+        for url in [gradeScript, correctGenerator, halationGenerator] {
             if !fileManager.fileExists(atPath: url.path) {
                 problems.append(.missingFile(url))
             } else if !fileManager.isExecutableFile(atPath: url.path) {

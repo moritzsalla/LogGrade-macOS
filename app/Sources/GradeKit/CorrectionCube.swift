@@ -5,9 +5,8 @@ import Foundation
 /// A SECOND IMPLEMENTATION OF AN IMAGE DECISION. It exists because the engine's
 /// `scripts/make-correct-lut.py` costs 419ms a call — almost all of it Python starting up rather
 /// than the 36,000 samples — and a control that redraws twice a second is not a control you can
-/// find a value with. It is one of several such transcriptions in the live preview, alongside
-/// `ToneCurve.generated`, `LiveHalation` and `LiveGrade`, each held to the engine by its own test;
-/// the conversion cube is read from the files the render also reads.
+/// find a value with. `LiveHalation` is the live preview's other transcription; the conversion cube
+/// is read from the files the render also reads.
 ///
 /// WHAT MAKES IT SAFE. `CorrectionCubeTests` builds a cube here and the same cube with the
 /// generator and compares every one of the 107,811 numbers. It is not a tolerance test: the two
@@ -40,15 +39,9 @@ public struct CorrectionCube {
         return gamma * log2(r + beta) + delta
     }
 
-    /// One triple of Apple Log code values in, one out. Nil when a value the generator would
-    /// reject reaches it, so a malformed CDL refuses rather than rendering something arbitrary.
+    /// Nil for a size the generator would refuse.
     public static func cube(for correct: Look.Correct, size: Int) -> Cube3D? {
-        guard size > 1,
-            let slope = Look.Correct.parse(correct.slope),
-            let offset = Look.Correct.parse(correct.offset),
-            let power = Look.Correct.parse(correct.power),
-            power.0 > 0, power.1 > 0, power.2 > 0
-        else { return nil }
+        guard size > 1 else { return nil }
 
         // Temperature and tint as per-channel linear gains, on the generator's scale.
         let wb = (
@@ -57,7 +50,6 @@ public struct CorrectionCube {
             max(0.05, 1 - 0.30 * correct.temp - 0.15 * correct.tint)
         )
         let exposureGain = correct.exposure == 0 ? 1 : pow(2, correct.exposure)
-        let hasCDL = slope != (1, 1, 1) || offset != (0, 0, 0) || power != (1, 1, 1)
         let midGrey = encode(0.18)
 
         var samples = [SIMD3<Float>](repeating: .zero, count: size * size * size)
@@ -75,27 +67,6 @@ public struct CorrectionCube {
                         decode(b) * exposureGain * wb.2
                     )
                     out = (encode(out.0), encode(out.1), encode(out.2))
-
-                    if hasCDL {
-                        func cdl(_ v: Double, _ s: Double, _ o: Double, _ p: Double) -> Double {
-                            let lifted = max(0, v * s + o)
-                            return p == 1 ? lifted : pow(lifted, 1 / p)
-                        }
-                        out = (
-                            cdl(out.0, slope.0, offset.0, power.0),
-                            cdl(out.1, slope.1, offset.1, power.1),
-                            cdl(out.2, slope.2, offset.2, power.2)
-                        )
-                    }
-
-                    if correct.lumMix != 1 {
-                        let yIn = Rec709.luma(r, g, b)
-                        let yOut = Rec709.luma(out.0, out.1, out.2)
-                        if yOut > 1e-6 {
-                            let k = (1 - correct.lumMix) * (yIn / yOut) + correct.lumMix
-                            out = (out.0 * k, out.1 * k, out.2 * k)
-                        }
-                    }
 
                     if correct.contrast != 1 {
                         let c = correct.contrast

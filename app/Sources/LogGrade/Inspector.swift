@@ -4,9 +4,9 @@ import SwiftUI
 /// A look, then optional sections, all closed at first. The preset is meant to be the finished
 /// picture, so everything under it is for a clip that needs help or a small creative move.
 ///
-/// NO GRADING CONTROLS BEYOND THESE. Hue curves, wheels, halation and the tone internals belong to
-/// the presets and are tuned in their files, not here (docs/BACKLOG.md). Execution order stays in
-/// `grade_chain()` (scripts/lib.sh); nothing here decides it.
+/// NO GRADING CONTROLS BEYOND THESE. Halation belongs to the presets and is tuned in their files,
+/// not here (docs/BACKLOG.md). Execution order stays in `grade_chain()` (scripts/lib.sh); nothing
+/// here decides it.
 struct InspectorView: View {
     @ObservedObject var model: GradeModel
 
@@ -214,14 +214,12 @@ struct InspectorView: View {
                     .onTapGesture(count: 2) {
                         guard let original else { return }
                         set(original)
-                        model.refreshCurve()
                         model.liveUpdate()
                         model.renderPreview()
                     }
                     .help(original == nil ? "" : "Double-click to reset")
                 Slider(value: binding, in: range) { editing in
                     guard !editing else { return }
-                    model.refreshCurve()
                     // On release, so the settled picture is kept for switching back.
                     model.renderPreview()
                 }
@@ -232,7 +230,6 @@ struct InspectorView: View {
                 .onChange(of: value) { _ in model.liveUpdate() }
                 // A typed value is final, like a release.
                 ValueField(value: binding, format: format) {
-                    model.refreshCurve()
                     model.renderPreview()
                 }
             }
@@ -307,35 +304,5 @@ struct InspectorView: View {
         f.maximumFractionDigits = precision
         f.positivePrefix = format.contains("+") ? "+" : ""
         return f
-    }
-}
-
-/// The tone curve, drawn from the engine's own table, in the colour the tool measures.
-struct CurveView: View {
-    let curve: ToneCurve?
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                Rectangle().fill(Palette.well)
-                Path { p in
-                    p.move(to: CGPoint(x: 0, y: geo.size.height))
-                    p.addLine(to: CGPoint(x: geo.size.width, y: 0))
-                }.stroke(Palette.hairline, lineWidth: 1)
-                if let curve {
-                    Path { p in
-                        let steps = 128
-                        for i in 0...steps {
-                            let x = Double(i) / Double(steps)
-                            let point = CGPoint(
-                                x: x * geo.size.width,
-                                y: (1 - curve.value(at: x)) * geo.size.height)
-                            if i == 0 { p.move(to: point) } else { p.addLine(to: point) }
-                        }
-                    }.stroke(Palette.plate, lineWidth: 1.4)
-                }
-            }
-            .border(Palette.hairline)
-        }
     }
 }

@@ -3,7 +3,7 @@ import SwiftUI
 /// The small "?" that opens a popover, which is where macOS puts reference text.
 ///
 /// WHY NOT IN THE PANEL. Every stage of this chain has a paragraph behind it worth reading once —
-/// why the correction runs before Apple's conversion, why the tone curve only touches luma — and
+/// why the correction runs before Apple's conversion, why halation is computed in linear — and
 /// all of it used to sit under the controls as running prose. Read once it is useful; read on
 /// every visit it is a wall between you and the sliders. A popover keeps it one click away and out
 /// of the way, which is what Apple's own inspectors do.

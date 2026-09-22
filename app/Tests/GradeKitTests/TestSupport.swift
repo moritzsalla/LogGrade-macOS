@@ -32,7 +32,7 @@ func stubEngine(script: String) throws -> EngineLocation {
         to: root.appendingPathComponent("luts/rendering/neutral.cube"),
         atomically: true, encoding: .utf8)
     for name in [
-        "grade.sh", "make-tone-lut.py", "make-correct-lut.py", "make-halation-luts.py",
+        "grade.sh", "make-correct-lut.py", "make-halation-luts.py",
     ] {
         let url = scripts.appendingPathComponent(name)
         try (name == "grade.sh" ? script : "#!/bin/bash\n")
@@ -87,14 +87,11 @@ func libSh(_ engine: EngineLocation, _ function: String, _ arguments: [String]) 
 /// A complete look.json, so a test that needs a `Look` does not depend on the checkout's file —
 /// which is re-tuned — and does not repeat the whole key set, which is a contract that grows.
 /// Every key is present because `Look` refuses a missing one, as the engine does.
-func lookFixture(gamma: Double = 2.02) throws -> Look {
+func lookFixture(grain: Double = 8) throws -> Look {
     let json = """
-        {"correct":{"exposure":0,"temp":0,"tint":0,"slope":"1,1,1","offset":"0,0,0",
-         "power":"1,1,1","lum_mix":1,"contrast":1,"saturation":1},
+        {"correct":{"exposure":0,"temp":0,"tint":0,"contrast":1,"saturation":1},
          "halation":{"strength":0,"threshold":1,"radius":0.006,"tint":"1,0.3,0.05"},
-         "tone":{"gamma":\(gamma),"pivot":0.39,"contrast":1.09,"toe":0,"shoulder":0.1,"black":0.025},
-         "colour":{"saturation":1.27,"warmth":0.005},"grain":{"strength":8},
-         "hue":{"rot":"0,0,0,0,0,0,0,0,0,0,0,0","sat":"0,0,0,0,0,0,0,0,0,0,0,0","lum":"0,0,0,0,0,0,0,0,0,0,0,0"},
+         "grain":{"strength":\(grain)},
          "stabilisation":{"smoothing":30},"match":{"reference_stops":-0.4},
          "convert":{"cube":"neutral"},"finish":{"denoise":0,"sharpen":0.6,"gauge":"none"}}
         """

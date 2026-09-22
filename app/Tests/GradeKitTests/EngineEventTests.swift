@@ -24,7 +24,7 @@ final class EngineEventTests: XCTestCase {
 
         let start = try XCTUnwrap(events.first { $0.name == "run_start" })
         XCTAssertEqual(start.int("clips"), 2)
-        XCTAssertEqual(start.double("saturation"), 1.0)
+        XCTAssertEqual(start.int("grain"), 3)
 
         let planned = try XCTUnwrap(events.first { $0.name == "clip_planned" })
         XCTAssertEqual(planned.clip, "TALL")
