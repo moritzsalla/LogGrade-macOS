@@ -22,10 +22,6 @@ final class LivePreview: ObservableObject {
     @Published var status = ""
     @Published var statusIsFailure = false
     @Published var isRendering = false
-    /// The tone curve, drawn beside the picture. It lives here rather than on the model because it
-    /// is regenerated on every control change, and on the model that meant every tick of a drag
-    /// invalidated the inspector for a graph the inspector does not contain.
-    @Published var curve: ToneCurve?
 
     func say(_ text: String, failure: Bool = false) {
         status = text

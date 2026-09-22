@@ -6,10 +6,10 @@ import XCTest
 /// The whole live chain against the whole render, on real footage.
 ///
 /// This is the only test that can catch the live tier being wrong in the way that matters: the
-/// picture on screen while a control is moving disagreeing with the file that comes out. The
-/// golden holds the tone and trim arithmetic, `Cube3DTests` holds the sampling, and neither would
-/// notice the two being wired together in the wrong order or the source frame arriving in a
-/// different colour space than the chain's first filter sees.
+/// picture on screen while a control is moving disagreeing with the file that comes out.
+/// `Cube3DTests` holds the sampling, and would not notice the stages being wired together in the
+/// wrong order or the source frame arriving in a different colour space than the chain's first
+/// filter sees.
 final class LiveChainTests: XCTestCase {
     private struct Rig {
         let engine: EngineLocation
@@ -56,7 +56,7 @@ final class LiveChainTests: XCTestCase {
     /// THE PERCENTILE IS THE REAL MEASURE, not the worst pixel. The live tier resamples to preview
     /// size and then grades; the render grades at full resolution and then resamples. Those two
     /// orders agree everywhere except on a hard edge, where one pixel is a blend of two colours
-    /// that the tone curve moves in different directions. The disagreement is therefore bounded to
+    /// that the grade moves in different directions. The disagreement is therefore bounded to
     /// edges and is invisible, but a single worst-pixel assertion would read it as a defect.
     private func difference(_ a: CGImage, _ b: CGImage) throws -> (
         mean: Double, p999: Double,
@@ -132,10 +132,6 @@ final class LiveChainTests: XCTestCase {
     /// pixel nearest its bound, on the rim of a glow, where the two blurs differ most. With the
     /// live glow removed entirely the same case reads 46 at the percentile and 179 at the worst,
     /// so the percentile bound is what catches a preview that has lost the stage.
-    ///
-    /// STEEP GRADES GET A WIDER PERCENTILE, and the reason is measured, not assumed. The live tier
-    /// resamples and then grades, the render grades and then resamples, and those disagree at hard
-    /// edges; a steep grade raises the contrast those edges are graded through.
     func testTheLivePictureMatchesTheRender() throws {
         let rig = try rig()
         var withCorrection = rig.look
@@ -149,14 +145,9 @@ final class LiveChainTests: XCTestCase {
         let filmPreset = try XCTUnwrap(
             rig.engine.shippedPresets().first { $0.look.convertCube == "portra160" }
         ).look
-        var withHue = filmPreset
-        withHue.hue = Look.Hue(
-            rot: "30,30,0,-20,-20,-20,0,0,0,0,30,30", sat: "1,1,0,-1,-1,-1,0,0,-1,-1,1,1",
-            lum: "0,0,0,-0.4,-0.4,-0.4,0,0,0,0,0,0")
 
-        // The percentile each case is held to; see above for why a steep grade needs more.
+        // The percentile each case is held to.
         let edgeBound = 24.0
-        let steepEdgeBound = 42.0
         let cases: [(String, Look, Double)] = [
             ("the shipped look", rig.look, edgeBound),
             // THE ONE THE OLD TIER COULD NOT DO AT ALL. A correction runs before Apple's
@@ -170,10 +161,6 @@ final class LiveChainTests: XCTestCase {
             // The conversion swapped for a film cube, with the engine's metered exposure and white
             // balance in the correction.
             ("a film preset", filmPreset, edgeBound),
-            // Every curve pushed hard, so edges are graded through steep moves: measured
-            // percentile 25. With the live hue stage dropped the same case read
-            // mean 13.2, percentile 91, worst 137.
-            ("hue curves", withHue, steepEdgeBound),
         ]
         for (name, look, percentileBound) in cases {
             let (mean, p999, worst) = try compare(rig, look: look)

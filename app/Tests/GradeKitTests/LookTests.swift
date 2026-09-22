@@ -15,10 +15,8 @@ final class LookTests: XCTestCase {
             (raw[block] as? [String: Any])?[key]
         }
         XCTAssertEqual(look.convertCube, field("convert", "cube") as? String)
-        XCTAssertEqual(look.tone.gamma, (field("tone", "gamma") as? NSNumber)?.doubleValue)
         XCTAssertEqual(
-            look.colour.saturation,
-            (field("colour", "saturation") as? NSNumber)?.doubleValue)
+            look.grainStrength, (field("grain", "strength") as? NSNumber)?.doubleValue)
         XCTAssertEqual(look.halation.tint, field("halation", "tint") as? String)
         XCTAssertTrue(look.correct.isNeutral, "the shipped correction does nothing, by design")
         // The file's own commentary is not modelled and must survive a round trip, or a look sent
@@ -33,7 +31,7 @@ final class LookTests: XCTestCase {
         let look = try Look(data: try Data(contentsOf: root.appendingPathComponent("look.json")))
         // Change something, so this is not accidentally testing the file it read.
         var edited = look
-        edited.tone.gamma = 1.77
+        edited.grainStrength = 7
         edited.correct.exposure = 0.25
         let out = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("\(UUID().uuidString).json")
@@ -74,8 +72,7 @@ final class LookTests: XCTestCase {
 
     func testAMissingKeyIsRefusedRatherThanDefaulted() throws {
         // Inherited from the engine: a silent substitution is a different look under the same name.
-        let partial =
-            #"{"tone":{"gamma":2.0,"pivot":0.4,"contrast":1.1,"toe":0,"shoulder":0.1,"black":0}}"#
+        let partial = #"{"grain":{"strength":4}}"#
         XCTAssertThrowsError(try Look(data: Data(partial.utf8))) { error in
             XCTAssertTrue(
                 String(describing: error).contains("correct"),
@@ -89,14 +86,14 @@ final class LookTests: XCTestCase {
         var object =
             try JSONSerialization.jsonObject(with: try Data(contentsOf: root))
             as? [String: Any] ?? [:]
-        var tone = object["tone"] as? [String: Any] ?? [:]
-        tone.removeValue(forKey: "shoulder")
-        object["tone"] = tone
+        var halation = object["halation"] as? [String: Any] ?? [:]
+        halation.removeValue(forKey: "radius")
+        object["halation"] = halation
         XCTAssertThrowsError(
             try Look(data: try JSONSerialization.data(withJSONObject: object))
         ) { error in
             XCTAssertTrue(
-                String(describing: error).contains("tone.shoulder"),
+                String(describing: error).contains("halation.radius"),
                 "should name the exact key, got \(error)")
         }
     }
@@ -108,7 +105,7 @@ final class LookTests: XCTestCase {
         // deliberately compares the GRADE and not the commentary — so this asserts on the bytes.
         let url = try engineCheckout().root.appendingPathComponent("look.json")
         var look = try Look(data: try Data(contentsOf: url))
-        look.tone.gamma = 1.33
+        look.grainStrength = 7
         let out = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("\(UUID().uuidString).json")
         try look.write(to: out)
@@ -132,18 +129,11 @@ final class LookTests: XCTestCase {
         var look = try lookFixture()
         look.correct.exposure = 0.5
         look.halation.strength = 0.8
-        look.tone.contrast = 1.4
         look.finish.denoise = 1
         let off = look.bypassing(Set(Look.Stage.allCases))
         XCTAssertTrue(off.correct.isNeutral)
-        XCTAssertEqual(off.colour, Look.Colour(saturation: 1, warmth: 0))
         XCTAssertEqual(off.grainStrength, 0)
         XCTAssertEqual(off.finish.denoise, 0)
-        let curve = ToneCurve.generated(tone: off.tone)
-        for x in stride(from: 0.0, through: 1.0, by: 0.05) {
-            XCTAssertEqual(
-                curve.value(at: x), x, accuracy: 1e-3, "tone off is not identity at \(x)")
-        }
         XCTAssertEqual(
             off.halation, look.halation,
             "halation belongs to the preset, so switching Adjust off must keep it")
@@ -302,7 +292,7 @@ final class ProjectTests: XCTestCase {
             var project = Project(
                 presets: [
                     .init(name: "Mamiya RZ67 Portra 400", look: deleted),
-                    .init(name: "Portra 800", look: try! lookFixture(gamma: 1.5)),
+                    .init(name: "Portra 800", look: try! lookFixture(grain: 5)),
                 ], activePreset: active)
             project.adopt(presets: current, fallback: "Neutral")
             return project
@@ -386,8 +376,6 @@ final class ProjectTests: XCTestCase {
         XCTAssertEqual(moved.correct.tint, look.correct.tint - 0.1, accuracy: 1e-12)
         XCTAssertEqual(moved.correct.contrast, look.correct.contrast * 1.2, accuracy: 1e-12)
         XCTAssertEqual(moved.correct.saturation, look.correct.saturation * 0.8, accuracy: 1e-12)
-        XCTAssertEqual(moved.tone, look.tone, "contrast is the correction's now, before the cube")
-        XCTAssertEqual(moved.colour, look.colour)
         XCTAssertEqual(moved.convertCube, look.convertCube)
         XCTAssertEqual(moved.halation, look.halation)
     }
@@ -479,10 +467,10 @@ final class LookEngineIntegrationTests: XCTestCase {
         }
         try XCTSkipIf(!engine.preflight().isEmpty, "engine preflight not clean")
 
-        // A saturation nothing in the repo contains, so a pass can only come from the engine
-        // reading the file this test wrote and reporting it back.
+        // A grain nothing in the repo contains, so a pass can only come from the engine reading
+        // the file this test wrote and reporting it back.
         var look = try Look(data: try Data(contentsOf: engine.lookFile))
-        look.colour.saturation = 1.61
+        look.grainStrength = 17
         let lookFile = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("\(UUID().uuidString)-look.json")
         try look.write(to: lookFile)
@@ -505,7 +493,7 @@ final class LookEngineIntegrationTests: XCTestCase {
             outcome.events.first { $0.name == "run_start" },
             "no run in: \(outcome.events.map(\.name))")
         XCTAssertEqual(
-            start.double("saturation"), 1.61,
+            start.double("grain"), 17,
             "the engine did not read the look the app wrote")
         XCTAssertTrue(
             outcome.malformed.isEmpty,
@@ -515,7 +503,7 @@ final class LookEngineIntegrationTests: XCTestCase {
 
 /// Presets and the project file, exercised through the model's own operations rather than the UI.
 final class PresetTests: XCTestCase {
-    private func aLook(gamma: Double = 2.02) throws -> Look { try lookFixture(gamma: gamma) }
+    private func aLook(grain: Double = 8) throws -> Look { try lookFixture(grain: grain) }
 
     func testAProjectSurvivesBeingSavedAndReopened() throws {
         var project = Project(
@@ -546,7 +534,7 @@ final class PresetTests: XCTestCase {
         XCTAssertEqual(reopened.delivery.container, .mov)
         XCTAssertFalse(reopened.delivery.audio)
         XCTAssertEqual(reopened.presets.map(\.name), ["shipped"])
-        XCTAssertEqual(reopened.active?.look.tone.gamma, 2.02)
+        XCTAssertEqual(reopened.active?.look.grainStrength, 8)
     }
 
     /// A preset renders its own fixed settings and keeps Custom's for later; ProRes is forced to
@@ -615,127 +603,4 @@ final class OutputDestinationTests: XCTestCase {
             reread.outputDirectory?.path, "/Users/someone/Footage/shoot",
             "a chosen destination has to survive the project file")
     }
-}
-
-/// The wheels, and the one way they can quietly break a default render.
-final class WheelTests: XCTestCase {
-    /// THE TRAP THIS EXISTS FOR. The wire format is a string and the engine decides whether a
-    /// correction is neutral by parsing it. Joining three doubles the obvious way writes
-    /// "1.0,1.0,1.0" — the same correction, a different string — so a wheel dragged and returned
-    /// to centre would put the correction cube back in the filter graph and move a default render
-    /// for a look nobody changed.
-    func testAWheelMovedAndReturnedIsNeutralAgain() {
-        var correct = Look.Correct()
-        XCTAssertTrue(correct.isNeutral, "the default correction is not neutral")
-        for wheel in Look.Correct.Wheel.allCases {
-            for channel in 0..<3 {
-                correct.setValue(wheel, channel, wheel.neutral + 0.25)
-                XCTAssertFalse(
-                    correct.isNeutral, "\(wheel) \(channel) moved and still reads neutral")
-                correct.setValue(wheel, channel, wheel.neutral)
-                XCTAssertTrue(
-                    correct.isNeutral,
-                    "\(wheel) \(channel) returned to centre and reads as a correction — "
-                        + "the engine would put the cube back in the graph")
-            }
-        }
-        // And the text is spelled the default way, so a centred wheel writes back the file it
-        // read. Nothing in the engine compares this spelling: its neutrality check parses the
-        // values, which is the only thing a wheel's text has to survive.
-        XCTAssertEqual(correct.slope, "1,1,1")
-        XCTAssertEqual(correct.offset, "0,0,0")
-        XCTAssertEqual(correct.power, "1,1,1")
-    }
-
-    /// look.json is documented as hand-editable, so a neutral correction reaches this code spelled
-    /// however a person felt like spelling it. The engine's own check parses before comparing;
-    /// this one has to as well, or a hand-written "1.0,1.0,1.0" puts a lookup that returns its own
-    /// input into the filter graph for every pixel of every render.
-    func testNeutralityIsDecidedByValueNotBySpelling() {
-        XCTAssertTrue(
-            Look.Correct(
-                slope: "1.0,1.0,1.0", offset: "0.0,0.0,0.0",
-                power: "1.00,1.00,1.00"
-            ).isNeutral)
-        XCTAssertTrue(
-            Look.Correct(slope: "1", offset: "0", power: "1").isNeutral,
-            "the generator accepts one value for three; so must this")
-        XCTAssertFalse(Look.Correct(slope: "1,1,1.0001").isNeutral)
-        XCTAssertFalse(
-            Look.Correct(slope: "nonsense").isNeutral,
-            "an unparseable triple is not a neutral one — the engine would refuse it")
-    }
-
-    /// `isNeutral` is a second copy of the generator's `is_neutral`, and the generator's is the one
-    /// that decides whether the cube enters the render. So each case is put to the generator with
-    /// the exact arguments the app passes it, and the two answers have to match. The cases are the
-    /// ones a copy gets wrong: a spelling that differs from the default, one value for three, and
-    /// `lum_mix` moved alone, which the generator deliberately ignores because it scales a
-    /// correction that is not there.
-    func testNeutralityAgreesWithTheGenerator() throws {
-        let engine = try engineCheckout()
-        let cases: [(String, Look.Correct)] = [
-            ("the default", .init()),
-            ("exposure", .init(exposure: 0.1)),
-            ("temp", .init(temp: 0.1)),
-            ("tint", .init(tint: -0.1)),
-            ("slope", .init(slope: "1,1,1.1")),
-            ("offset", .init(offset: "0,0.01,0")),
-            ("power", .init(power: "0.9,1,1")),
-            ("contrast", .init(contrast: 1.1)),
-            ("saturation", .init(saturation: 0.9)),
-            (
-                "spelled by hand",
-                .init(
-                    slope: "1.0,1.0,1.0", offset: "0.0,0.0,0.0",
-                    power: "1.00,1.00,1.00")
-            ),
-            ("one value for three", .init(slope: "1", offset: "0", power: "1")),
-            ("lum_mix alone", .init(lumMix: 0)),
-            ("a trailing comma", .init(slope: "1,")),
-        ]
-        for (name, correct) in cases {
-            let answer = try runToCompletion(
-                engine.correctGenerator,
-                correct.generatorArguments(size: 2) + ["--check-neutral"])
-            let verdict = answer.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-            if answer.status != 0 {
-                // A value the generator refuses cannot be a neutral one: the engine stops there.
-                XCTAssertFalse(
-                    correct.isNeutral,
-                    "\(name): the generator refuses it and the app calls it neutral")
-                continue
-            }
-            XCTAssertTrue(
-                verdict == "neutral" || verdict == "active",
-                "\(name): the generator answered '\(verdict)' \(answer.stderr)")
-            XCTAssertEqual(
-                correct.isNeutral, verdict == "neutral",
-                "\(name): the generator says \(verdict)")
-        }
-    }
-
-    func testEachWheelAndChannelIsItsOwnValue() {
-        var correct = Look.Correct()
-        correct.setValue(.slope, 0, 1.1)
-        correct.setValue(.offset, 1, -0.02)
-        correct.setValue(.power, 2, 1.15)
-        XCTAssertEqual(correct.slope, "1.1,1,1")
-        XCTAssertEqual(correct.offset, "0,-0.02,0")
-        XCTAssertEqual(correct.power, "1,1,1.15")
-        XCTAssertEqual(correct.value(.slope, 0), 1.1)
-        XCTAssertEqual(correct.value(.offset, 1), -0.02)
-        XCTAssertEqual(correct.value(.power, 2), 1.15)
-        XCTAssertEqual(correct.value(.slope, 1), 1, "a channel nobody moved changed anyway")
-    }
-
-    /// A file written by hand can carry a single value meaning all three, which the generator
-    /// accepts. Reading it must not silently lose the other two.
-    func testAOneValueTripleReadsAsThreeChannels() {
-        var correct = Look.Correct(slope: "1.2")
-        XCTAssertEqual(correct.value(.slope, 2), 1.2)
-        correct.setValue(.slope, 0, 1.3)
-        XCTAssertEqual(correct.slope, "1.3,1.2,1.2")
-    }
-
 }

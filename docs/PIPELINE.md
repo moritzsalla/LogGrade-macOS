@@ -1,8 +1,7 @@
 # Pipeline findings
 
 Measured findings that are not already a comment beside the code. The ffprobe misreports, the float
-clamps, `gblur` and the halation cost live in `scripts/lib.sh`. The `lut1d` round trip lives in
-ADR 0003.
+clamps, `gblur` and the halation cost live in `scripts/lib.sh`.
 
 ## Stages
 
@@ -53,18 +52,12 @@ amount 0 in flat sky; hw = lag where horizontal autocorrelation falls below 0.5.
 The radius scales with the short edge against 1080 (`delivery_image_chain`), as the grain's softening
 does (`grain_prefix`). About 1.6 of each sharpen RMS is sky noise and encode disagreement.
 
-## Tone shaping
+## Curves
 
-A generated 1D LUT (`make-tone-lut.py`) rather than `curves`, because `curves` is a cubic spline and
-overshoots. The curve is applied to luma and the original chroma is kept, via `mergeplanes`
-(ADR 0003). A per-channel curve turns saturated signage *neon*.
-
-- Contrast pivoted below the image's average brightens it. The generator applies `--gamma` first,
-  to bring the level down to the pivot.
-- Luma-only shaping raises apparent saturation as it darkens: red purity went 0.33 / 0.30 / 0.27 at
-  gamma 1.85 / 1.95 / 2.05. Gamma is the dial between "darker" and "less neon".
-- `format=yuv444p10le` on both `mergeplanes` branches is required. Without it the error is a bare
-  `Invalid argument`.
+- A generated 1D LUT beats `curves`, which is a cubic spline and overshoots.
+- A per-channel contrast curve turns saturated signage *neon*; a film cube carries its own curve.
+- `mergeplanes` needs matching plane sizes: `format=yuv444p10le` on every input, or the error is a
+  bare `Invalid argument`.
 
 ## Where the picture is lost
 

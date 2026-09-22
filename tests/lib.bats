@@ -443,7 +443,7 @@ _exports() {  # _exports <work>
 # --- smoke: the scripts must actually RUN -------------------------------------
 # These exist because the rest of this suite once passed in full while FOUR functions were missing
 # from lib.sh and every script died on the first line with "command not found". shellcheck
-# does not run the code, the parity check does not touch lib.sh, and the unit tests only call the
+# does not run the code, and the unit tests only call the
 # handful of functions they cover — so nothing noticed the pipeline was completely broken.
 #
 # A suite that cannot detect "the program does not start" is not a suite.
@@ -516,7 +516,7 @@ _exports() {  # _exports <work>
 	local src
 	src="$(_real_clip)"; [ -n "$src" ] || skip "no source footage"
 	# Real footage in, but the OUTPUT goes to a temp dir. Without GRADE_WORK_DIR this ran against
-	# the repo root, so every check.sh run left a .loggrade/reports/run-*.txt and a per-clip tone cube
+	# the repo root, so every check.sh run left a .loggrade/reports/run-*.txt and a per-clip cube
 	# in the tree someone actually delivers from — 38 report files had accumulated.
 	mkdir -p "$BATS_TEST_TMPDIR/dryrun"
 	GRADE_WORK_DIR="$BATS_TEST_TMPDIR/dryrun" DRY=1 run "$BATS_TEST_DIRNAME/../scripts/grade.sh" "$src"
@@ -557,31 +557,28 @@ _exports() {  # _exports <work>
 	[[ "$output" != *"stabilising from"* ]] || fail "[[ \"$output\" != *\"stabilising from\"* ]]"
 }
 
-@test "grade.sh takes its tone values from look.json, not from itself" {
+@test "grade.sh takes its look values from look.json, not from itself" {
 	# "Look values live in look.json, never hardcoded in a script" is a settled rule, and the
-	# production path was breaking it: it read colour, grain and stabilisation from look.json but
-	# carried its own copy of the whole tone block — the two-copies-one-edited failure that look()
-	# exists to end, one layer up.
+	# production path once broke it by carrying its own copy of a whole block — the
+	# two-copies-one-edited failure that look() exists to end, one layer up.
 	local work="$BATS_TEST_TMPDIR/lookwork" look="$BATS_TEST_TMPDIR/other-look.json"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	# A gamma nothing in the repo contains, so a pass can only come from reading this file.
+	# A grain strength nothing in the repo contains, so a pass can only come from reading this file.
 	#
 	# DERIVED from the real look.json rather than written out here. look() has no fallbacks, so the
-	# key set is a contract — and a hand-written copy of it goes stale the moment a key is added,
-	# which is how adding the correction block turned this test red for a reason that had nothing
-	# to do with what it asserts.
+	# key set is a contract — and a hand-written copy of it goes stale the moment a key is added.
 	python3 - "$BATS_TEST_DIRNAME/../look.json" "$look" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-d["tone"]["gamma"] = 1.44
+d["grain"]["strength"] = 17
 json.dump(d, open(sys.argv[2], "w"))
 PY
 	LOOK_FILE="$look" GRADE_WORK_DIR="$work" DRY=1 MATCH=0 STAB=0 \
-		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
+		run env -u GRAIN_STRENGTH "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"gamma=1.44"* ]] \
-		|| fail "grade.sh ignored look.json's tone block: $output"
+	[[ "$output" == *"grain=17"* ]] \
+		|| fail "grade.sh ignored look.json's grain: $output"
 }
 
 @test "safe_retag leaves a correctly tagged file untouched" {
@@ -713,8 +710,8 @@ PY
 # bats test_tags=slow
 @test "the production filter graph renders a real clip end to end" {
 	# NOTHING else in this suite executes this graph. shellcheck cannot see inside a filter string
-	# — it reported clean on both of the previously shipped load-bearing bugs — the parity check
-	# touches only the tone curve, and every other grade.sh test stops at DRY=1. So dropping a
+	# — it reported clean on both of the previously shipped load-bearing bugs — and every other
+	# grade.sh test stops at DRY=1. So dropping a
 	# label here went green and failed three minutes into a 19-clip run, after the render had
 	# already truncated the deliverable it was overwriting.
 	#
@@ -726,8 +723,8 @@ PY
 	work="$BATS_TEST_TMPDIR/render"
 	mkdir -p "$work"
 
-	# 0.1 seconds through the whole chain: the conversion, look LUT, luma-only tone via
-	# mergeplanes, saturation, warmth, grain in the negative, the dithered 10->8 reduction, sharpener.
+	# 0.1 seconds through the whole chain: the conversion, grain in the negative, the dithered
+	# 10->8 reduction, sharpener.
 	# MATCH stays on so the exposure meter runs too.
 	PROOF=0.1 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$src"
 	[ "$status" -eq 0 ] || fail "$output"
@@ -897,7 +894,7 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 
 @test "look refuses a missing key rather than substituting a different look" {
 	local look="$BATS_TEST_TMPDIR/partial.json"
-	printf '{ "tone": { "gamma": 2.02 } }\n' > "$look"
+	printf '{ "finish": { "sharpen": 0.6 } }\n' > "$look"
 	LOOK_FILE="$look" run look .grain.strength
 	[ "$status" -ne 0 ]
 	[[ "$output" == *"missing .grain.strength"* ]] || fail "unhelpful message: $output"
@@ -977,21 +974,6 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 	[ -z "$(ls -A "$work")" ] || fail "a usage error created $(find "$work" -mindepth 1 | tr '\n' ' ')"
 }
 
-# --- the grade chain: one builder -------------------------------------------
-# The hue curves, the luma-only tone curve and the colour ops are assembled by grade_chain alone.
-# Two copies of it had already drifted once, and a second copy would render outside the goldens.
-
-@test "the grade chain is built in exactly one place" {
-	# Structural, because a render test cannot see a second copy appearing. The
-	# tell is mergeplanes: it is the one filter that only the grade head uses, so any script
-	# naming it has started building its own copy again.
-	local offenders
-	# Comments are excluded, or the pointers explaining the rule trip the rule.
-	offenders=$(grep -n 'mergeplanes' "$SCRIPTS"/*.sh \
-		| grep -v '/lib\.sh:' | grep -v ':[0-9]*:[[:space:]]*#' || true)
-	[ -z "$offenders" ] || fail "builds its own grade chain instead of calling grade_chain:$offenders"
-}
-
 @test "every file path named in prose or in a script actually exists" {
 	# Removing rotation left a runbook step telling you to pass an argument that had been silently
 	# dropped, and CLAUDE.md's own rule is that deleting a concept means grepping for its name in
@@ -1037,20 +1019,20 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 # would have reinstated an inlined copy of the graph.
 
 @test "require_number accepts a number and rejects a filter fragment" {
-	run require_number SAT 1.27
+	run require_number EXPOSURE 1.27
 	[ "$status" -eq 0 ]
 	[ "$output" = "1.27" ]
 
 	run require_number BLACK "-0.08"
 	[ "$status" -eq 0 ]
 
-	run require_number SAT "1.27,metadata=print:file=/tmp/x"
+	run require_number EXPOSURE "1.27,metadata=print:file=/tmp/x"
 	[ "$status" -ne 0 ]
 	[[ "$output" == *"must be numeric"* ]] || fail "unhelpful message: $output"
 
-	run require_number SAT ""
+	run require_number EXPOSURE ""
 	[ "$status" -ne 0 ]
-	[[ "$output" == *"SAT must be numeric: got ''"* ]] || fail "empty refused, but not by the guard: $output"
+	[[ "$output" == *"EXPOSURE must be numeric: got ''"* ]] || fail "empty refused, but not by the guard: $output"
 }
 
 @test "require_clip_name refuses a path and refuses filter syntax" {
@@ -1127,8 +1109,8 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 }
 
 @test "grade.sh refuses a clip whose FILENAME would break the filter graph" {
-	# The clip name reaches lut1d=file='...' and vidstabtransform=input='...' via the tone-LUT and
-	# transform paths, so a quote in it closes ffmpeg's quoting from the inside.
+	# The clip name reaches lut3d=file='...' and vidstabtransform=input='...' via the correction-cube
+	# and transform paths, so a quote in it closes ffmpeg's quoting from the inside.
 	local work="$BATS_TEST_TMPDIR/quotename"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/IMG_0609'.mov"
@@ -1146,7 +1128,7 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 	python3 - "$BATS_TEST_DIRNAME/../look.json" "$look" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-d["colour"]["saturation"] = "1.27,metadata=print:file=/tmp/pwned"
+d["correct"]["saturation"] = "1.27,metadata=print:file=/tmp/pwned"
 json.dump(d, open(sys.argv[2], "w"))
 PY
 	LOOK_FILE="$look" GRADE_WORK_DIR="$work" MATCH=0 STAB=0 \
@@ -1203,13 +1185,9 @@ PY
 # is what lets a 72x128 fixture finish the delivery chain; at 1080x1920 it fails reinitialising.
 # bats test_tags=slow
 @test "the run report records the machine, the knobs, the graph and the timing of a real render" {
-	local work="$BATS_TEST_TMPDIR/report-proof" look="$BATS_TEST_TMPDIR/report-look.json"
+	local work="$BATS_TEST_TMPDIR/report-proof" look="$BATS_TEST_DIRNAME/../look.json"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/probe_mid.mov" "$work/src/CLIP.mov"
-	# A CURVE THE SHIPPED LOOK DOES NOT HAVE. Its tone stage is neutral — the rendering is the
-	# picture — and a neutral curve is no cube and so no line to time. The report's job is to time
-	# the stages a render actually ran, so the render is given one.
-	jq '.tone.gamma = 1.5' "$BATS_TEST_DIRNAME/../look.json" > "$look"
 	# JSON=1 so the same run also proves none of it leaks onto the event stream.
 	JSON=1 HEIGHT=128 PROOF=0.5 STAB=0 LOOK_FILE="$look" GRADE_WORK_DIR="$work" \
 		run --separate-stderr "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
@@ -1224,7 +1202,6 @@ PY
 	grep -qE '^knobs: .*deliverables=reels .*height=128 .*proof=0\.5 ' "$report" || fail "no knobs: $(cat "$report")"
 	grep -qE 'source: 72x128 at 24/1 fps, 2\.0+s, 48 frames' "$report" || fail "no source facts: $(cat "$report")"
 	grep -qE 'exposure meter took [0-9]+\.[0-9]{3}s$' "$report" || fail "meter untimed: $(cat "$report")"
-	grep -qE 'tone cube took [0-9]+\.[0-9]{3}s$' "$report" || fail "tone cube untimed: $(cat "$report")"
 	# 0.5s at 24fps is 12 frames: counted from the file that landed, not assumed from the source.
 	grep -qE 'reels-stories_9x16 encode took [0-9]+\.[0-9]{3}s, 12 frames at [0-9.]+ fps, [0-9.]+x realtime, [0-9.]+ Mbit/s' \
 		"$report" || fail "no encode speed: $(cat "$report")"
@@ -1239,17 +1216,14 @@ PY
 }
 
 # Every stage off must be the CST and the delivery shape, with nothing idle left in: an identity
-# lut1d, hue=s=1 and a zero colorbalance each still move pixels through a conversion. The whole
-# graph is compared, not a list of absent words, because a leftover format= is a stage too.
+# cube still moves pixels by its interpolation. The whole graph is compared, not a list of absent words, because a leftover format= is a stage too.
 # bats test_tags=slow
 @test "a look with every stage off renders the CST and nothing else" {
 	local work="$BATS_TEST_TMPDIR/all-off" look="$BATS_TEST_TMPDIR/all-off.json"
 	mkdir -p "$work/src"
 	cp "$FIXTURES/probe_mid.mov" "$work/src/CLIP.mov"
-	jq '.correct = {exposure: 0, temp: 0, tint: 0, slope: "1,1,1", offset: "0,0,0", power: "1,1,1", lum_mix: 1, contrast: 1, saturation: 1}
-		| .halation.strength = 0
-		| .tone += {gamma: 1, contrast: 1, toe: 0, shoulder: 0, black: 0}
-		| .colour = {saturation: 1, warmth: 0} | .grain.strength = 0' \
+	jq '.correct = {exposure: 0, temp: 0, tint: 0, contrast: 1, saturation: 1}
+		| .halation.strength = 0 | .grain.strength = 0' \
 		"$BATS_TEST_DIRNAME/../look.json" > "$look"
 	LOOK_FILE="$look" MATCH=0 FINISH=0 STAB=0 HEIGHT=128 PROOF=0.5 GRADE_WORK_DIR="$work" \
 		run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
@@ -1526,46 +1500,39 @@ PY
 	[[ "$output" != *"stabilising from"* ]] || fail "FRAME claimed to stabilise a still: $output"
 }
 
-@test "the tone generator writes the same curve to stdout as to a file" {
-	# The preview regenerates this curve on every slider move and wants it in memory. If the two
-	# paths could differ, the preview would be predicting a curve the render never uses — and the
-	# whole reason the generator is subprocessed rather than ported is that there is one curve.
-	local f="$BATS_TEST_TMPDIR/tone.cube"
-	run "$SCRIPTS/make-tone-lut.py" "$f" --gamma 2.02 --pivot 0.39 --contrast 1.09 \
-		--toe 0 --shoulder 0.1 --black 0.025
+@test "the correction generator writes the same cube to stdout as to a file" {
+	# CorrectionCubeTests holds the app's cube to the generator's stdout. If the two paths could
+	# differ, that test would be holding the app to a cube the render never uses.
+	local f="$BATS_TEST_TMPDIR/correct.cube" args="--exposure 0.5 --temp 0.2 --tint 0 --contrast 1.1 --saturation 0.9 --size 5"
+	# shellcheck disable=SC2086
+	run "$SCRIPTS/make-correct-lut.py" "$f" $args
 	[ "$status" -eq 0 ]
-	run --separate-stderr "$SCRIPTS/make-tone-lut.py" --stdout --gamma 2.02 --pivot 0.39 \
-		--contrast 1.09 --toe 0 --shoulder 0.1 --black 0.025
+	# shellcheck disable=SC2086
+	run --separate-stderr "$SCRIPTS/make-correct-lut.py" --stdout $args
 	[ "$status" -eq 0 ]
 	printf '%s\n' "$output" > "$BATS_TEST_TMPDIR/from-stdout.cube"
 	cmp "$f" "$BATS_TEST_TMPDIR/from-stdout.cube" \
-		|| fail "the stdout curve is not the curve that gets rendered"
+		|| fail "the stdout cube is not the cube that gets rendered"
 }
 
-@test "the tone generator keeps its commentary out of the curve" {
+@test "the correction generator keeps its commentary out of the cube" {
 	# A progress line mixed into the table is read as an entry by whatever parses it.
-	run --separate-stderr "$SCRIPTS/make-tone-lut.py" --stdout --gamma 1 --pivot 0.5 \
-		--contrast 1 --toe 0 --shoulder 0 --black 0
+	run --separate-stderr "$SCRIPTS/make-correct-lut.py" --stdout --exposure 0.5 --size 3
 	[ "$status" -eq 0 ]
 	[[ "$output" == TITLE* ]] || fail "stdout did not begin with the cube's TITLE: ${output:0:80}"
 	[[ "$stderr" == *"stdout"* ]] || fail "no confirmation on stderr: $stderr"
 	# `grep -qv` would have been the obvious assertion and is wrong under pipefail: -q closes the
 	# pipe on the first match, printf dies of SIGPIPE, and the pipeline reports 141 whatever the
 	# content was. Negate a positive match instead, which reads the whole input when it passes.
-	! printf '%s\n' "$output" | grep -q '^wrote' || fail "commentary leaked into the curve"
+	! printf '%s\n' "$output" | grep -q '^wrote' || fail "commentary leaked into the cube"
 }
 
-@test "the tone generator refuses an ambiguous destination" {
-	# Every tone flag is given, so the destination is the only thing left to refuse — the generator
-	# also refuses a missing tone flag, and status alone cannot tell the two apart.
-	local tone="--gamma 1 --pivot 0.5 --contrast 1 --toe 0 --shoulder 0 --black 0"
-	# shellcheck disable=SC2086
-	run "$SCRIPTS/make-tone-lut.py" "$BATS_TEST_TMPDIR/x.cube" --stdout $tone
+@test "the correction generator refuses an ambiguous destination" {
+	run "$SCRIPTS/make-correct-lut.py" "$BATS_TEST_TMPDIR/x.cube" --stdout --exposure 0.5
 	[ "$status" -ne 0 ] || fail "accepted both a file and stdout"
 	[[ "$output" == *"exactly one of OUT or --stdout"* ]] || fail "not refused at the destination: $output"
 	[ ! -e "$BATS_TEST_TMPDIR/x.cube" ] || fail "wrote the file anyway"
-	# shellcheck disable=SC2086
-	run "$SCRIPTS/make-tone-lut.py" $tone
+	run "$SCRIPTS/make-correct-lut.py" --exposure 0.5
 	[ "$status" -ne 0 ] || fail "accepted neither a file nor stdout"
 	[[ "$output" == *"exactly one of OUT or --stdout"* ]] || fail "not refused at the destination: $output"
 }
@@ -1873,7 +1840,7 @@ PY
 
 # --- exposure metering ---------------------------------------------------------
 # Each clip's own log-average and grey balance, measured from one decoded frame and applied in
-# LINEAR light before the conversion. It replaced a gamma solved against one frame of one shoot.
+# LINEAR light before the conversion.
 
 # bats test_tags=slow
 @test "metering brightens a dark clip and darkens a bright one, damped" {
@@ -1934,164 +1901,8 @@ PY
 	[ "$b_size" != "$a_size" ] || fail "the kept clip reported the skipped clip's frame ($b_size)"
 }
 
-# --- the grade golden ---------------------------------------------------------
-# tests/grade-parity.py records ffmpeg's own output in tests/fixtures/grade-golden.json, and
-# LiveGradeTests holds Swift's model to it. That makes the golden a claim about a chain, and a claim
-# about a chain goes stale the moment the chain moves. It used to hold the browser Bench's
-# JavaScript to the same numbers; the Bench is gone and the golden outlived it.
-#
-# These two guards are the cheap half of that: they need no ffmpeg, so they run everywhere the suite
-# runs, and they fail by name rather than leaving the harness to discover it.
-
-@test "the grade golden still describes the chain in lib.sh" {
-	# By CONTENT, never mtime: git does not preserve mtime, so on a fresh clone the committed
-	# golden always lands newer than lib.sh and would be trusted forever. Same reasoning as the
-	# generated cubes' TITLE fingerprint.
-	#
-	# The fingerprint is COMPUTED BY THE HARNESS that writes it, not re-derived here. This test used
-	# to carry its own copy of the normalisation and the hash, which agreed with the harness only
-	# for as long as nobody edited either.
-	local root have want
-	root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-	have="$(python3 -c '
-import importlib.util, sys
-sys.dont_write_bytecode = True
-spec = importlib.util.spec_from_file_location("parity", sys.argv[1])
-m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-print(m.chain_fingerprint())
-' "$root/tests/grade-parity.py")" || fail "could not compute the chain fingerprint: $have"
-	want="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["chain_fingerprint"])' \
-		"$root/tests/fixtures/grade-golden.json")"
-	[ "$have" = "$want" ] || fail "the grade chain changed and the golden was not regenerated.
-  lib.sh: $have
-  golden: $want
-  Re-run tests/grade-parity.py --regenerate and say in the commit what moved and why."
-}
-
-@test "the grade probe still matches the golden measured on it" {
-	local root have want
-	root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-	have="$(shasum -a 256 "$root/tests/fixtures/grade-probe.png" | cut -d' ' -f1)"
-	want="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["probe"]["sha256"])' \
-		"$root/tests/fixtures/grade-golden.json")"
-	[ "$have" = "$want" ] || fail "the probe image and the golden disagree; regenerate both"
-}
-
-
-@test "the golden records what its tolerances mean, not just what they are" {
-	# A number with no rationale beside it is the thing that gets "tidied" to make a run green.
-	# Every tolerance in the golden carries its own _why.
-	#
-	# No curve tolerance: its reader was the Bench's curve comparison, and the harness stopped
-	# writing `curve_code_values` when the Bench went. Demanding it here meant any golden the
-	# harness wrote, by --regenerate or --remeasure, failed this test; only the committed golden,
-	# written before then, passed. The curve is held exactly by the ToneCurve equivalence tests.
-	local root
-	root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-	run python3 -c '
-import json, sys
-t = json.load(open(sys.argv[1]))["tolerances"]
-need = ["conversion_floor_code_values", "grade_code_values",
-        "grade_worst_by_case", "grade_margin_code_values"]
-for k in need:
-    if k not in t: sys.exit("golden is missing tolerance %s" % k)
-for k in ("_floor_why", "_grade_why", "_margin_why"):
-    if not t.get(k): sys.exit("tolerance %s has no rationale" % k)
-if t["conversion_floor_code_values"] > 2:
-    sys.exit("the conversion floor is %.2f code values — the ruler is measuring itself"
-             % t["conversion_floor_code_values"])
-print("ok")
-' "$root/tests/fixtures/grade-golden.json"
-	[ "$status" -eq 0 ] || fail "$output"
-}
-
-@test "--remeasure refuses to run without a reason, and renders nothing" {
-	# A remeasured ceiling with no reason is a number moved with nothing to say why. The fixtures
-	# are copies under GRADE_GOLDEN_PATH, so a broken guard rewrites those rather than the tracked
-	# pair; the tracked pair's path is the same code.
-	local root work before
-	root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-	work="$BATS_TEST_TMPDIR/fixtures"
-	mkdir -p "$work"
-	cp "$root/tests/fixtures/grade-golden.json" "$root/tests/fixtures/grade-probe.png" "$work/"
-	before="$(cd "$work" && shasum -a 256 grade-golden.json grade-probe.png)"
-
-	run env GRADE_GOLDEN_PATH="$work/grade-golden.json" \
-		python3 "$root/tests/grade-parity.py" --remeasure
-	[ "$status" -ne 0 ] || fail "--remeasure with no reason did not refuse: $output"
-	[[ "$output" == *"--remeasure requires a non-empty reason"* ]] ||
-		fail "no-argument refusal is not the reason guard's: $output"
-	[[ "$output" != *"render "* ]] || fail "the no-argument refusal came after rendering: $output"
-
-	run env GRADE_GOLDEN_PATH="$work/grade-golden.json" \
-		python3 "$root/tests/grade-parity.py" --remeasure ""
-	[ "$status" -ne 0 ] || fail "--remeasure with an empty reason did not refuse: $output"
-	[[ "$output" == *"--remeasure requires a non-empty reason"* ]] ||
-		fail "empty-reason refusal is not the reason guard's: $output"
-	[[ "$output" != *"render "* ]] || fail "the empty-reason refusal came after rendering: $output"
-
-	[ "$(cd "$work" && shasum -a 256 grade-golden.json grade-probe.png)" = "$before" ] ||
-		fail "a refused --remeasure changed the golden or the probe"
-}
-
-# bats test_tags=slow,serial
-@test "--remeasure measures the render it just made, and installs numbers LiveGradeTests holds" {
-	# Serial because swift test builds into app/.build, which the make-app.sh tests also build.
-	#
-	# The defect this pins: the measurement read the COMMITTED golden while the fresh render sat in
-	# memory, so a chain change was measured against the output of the chain it replaced and
-	# stamped as fresh. With the chain unchanged both renders agree, so the numbers alone cannot
-	# show which golden was read. Two things can: the harness refuses a measurement whose golden
-	# hash is not the staged one, and a ceiling set below the measurement must turn the gate red —
-	# a gate reading any other golden stays green.
-	local root work tracked reason
-	root="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-	work="$BATS_TEST_TMPDIR/fixtures"
-	mkdir -p "$work"
-	cp "$root/tests/fixtures/grade-golden.json" "$root/tests/fixtures/grade-probe.png" "$work/"
-	tracked="$(cd "$root/tests/fixtures" && shasum -a 256 grade-golden.json grade-probe.png)"
-	reason="bats: remeasured into a scratch golden"
-
-	run env GRADE_GOLDEN_PATH="$work/grade-golden.json" \
-		python3 "$root/tests/grade-parity.py" --remeasure "$reason"
-	[ "$status" -eq 0 ] || fail "--remeasure failed: $output"
-	[[ "$output" == *"MEASURED grade_worst_by_case"* ]] || fail "no measurement reported: $output"
-
-	run python3 -c '
-import json, sys
-t = json.load(open(sys.argv[1]))["tolerances"]
-stamp = t.get("grade_worst_measured") or sys.exit("no grade_worst_measured stamp")
-if stamp.get("reason") != sys.argv[2]: sys.exit("stamp reason is %r" % stamp.get("reason"))
-if "grade_worst_carried_from" in t: sys.exit("a measured golden also claims to be carried")
-' "$work/grade-golden.json" "$reason"
-	[ "$status" -eq 0 ] || fail "the remeasured golden is not stamped as measured: $output"
-
-	run env GRADE_GOLDEN_PATH="$work/grade-golden.json" \
-		python3 "$root/tests/grade-parity.py"
-	[ "$status" -eq 0 ] || fail "the default check rejects a remeasured golden: $output"
-
-	run env GRADE_GOLDEN_PATH="$work/grade-golden.json" \
-		swift test --package-path "$root/app" --filter LiveGradeTests
-	[ "$status" -eq 0 ] || fail "LiveGradeTests fails against the numbers it just measured: $output"
-
-	python3 -c '
-import json, sys
-g = json.load(open(sys.argv[1]))
-g["tolerances"]["grade_worst_by_case"]["shipped"] = 0.0
-json.dump(g, open(sys.argv[2], "w"))
-' "$work/grade-golden.json" "$work/tight.json"
-	run env GRADE_GOLDEN_PATH="$work/tight.json" swift test --package-path "$root/app" \
-		--filter LiveGradeTests/testItMatchesFfmpegWithinTheMeasuredTolerance
-	[ "$status" -ne 0 ] || fail "a zero ceiling on shipped passed, so the gate read another golden"
-	[[ "$output" == *"shipped: "*"code values against 0.0"* ]] ||
-		fail "the gate failed, but not on the shipped ceiling: $output"
-
-	[ "$(cd "$root/tests/fixtures" && shasum -a 256 grade-golden.json grade-probe.png)" = \
-		"$tracked" ] || fail "--remeasure under GRADE_GOLDEN_PATH changed the tracked fixtures"
-}
-
 # --- the input correction -----------------------------------------------------
-# Exposure, white balance and the CDL wheels, as one generated cube that runs BEFORE Apple's
+# Exposure, white balance, contrast and saturation, as one generated cube that runs BEFORE Apple's
 # conversion — in log, where highlights up to 12x diffuse white still exist. A neutral correction leaves the
 # filter out of the graph, because an identity cube still pays interpolation error on every pixel.
 
@@ -2118,8 +1929,7 @@ print("%.1e %.4f" % (worst, mc.decode(1.0)))
 	run "$SCRIPTS/make-correct-lut.py" --check-neutral
 	[ "$status" -eq 0 ]
 	[ "$output" = "neutral" ] || fail "defaults are not neutral: $output"
-	for arg in "--exposure 0.1" "--temp 0.1" "--tint 0.1" "--slope 1.1,1,1" \
-	           "--offset 0.01,0,0" "--power 1.1,1,1" "--contrast 1.1" "--saturation 0.9"; do
+	for arg in "--exposure 0.1" "--temp 0.1" "--tint 0.1" "--contrast 1.1" "--saturation 0.9"; do
 		# shellcheck disable=SC2086
 		run "$SCRIPTS/make-correct-lut.py" --check-neutral $arg
 		[ "$output" = "active" ] || fail "$arg reported as $output"
@@ -2166,11 +1976,9 @@ PY
 @test "the correction precedes Apple's conversion in both graphs" {
 	# ORDER IS THE DECISION. Apple Log holds highlights up to 12x diffuse white, about 3.6 stops
 	# above it, which the Rec.709 cube lands on a display ceiling of 1.0, so a correction applied after it works on display-referred pixels and clips
-	# highlights the source still holds. Before it, the same move is the log-domain correction a
-	# colourist's wheels perform.
+	# highlights the source still holds. Before it, the same move is a log-domain correction.
 	#
-	# A source assertion, like the one that pins the grade chain to one place: the built graph is
-	# not printed anywhere, and a render test can only show that the correction did something, not
+	# A source assertion: the built graph is not printed anywhere, and a render test can only show that the correction did something, not
 	# where it sat. Both the delivery graph and the preview must have it ahead of the conversion.
 	local n
 	#
@@ -2184,27 +1992,8 @@ PY
 		|| fail "a pre-conversion stage was placed after the conversion"
 }
 
-@test "the tone cube is regenerated by content, never by timestamp" {
-	# grade.sh regenerates each clip's tone cube on every run and relies on make-tone-lut.py to skip
-	# the write only when the TITLE already matches. A cube stamped newer than the change is the
-	# state a timestamp check calls fresh, so the stale curve must still be replaced.
-	local cube="$BATS_TEST_TMPDIR/t.cube"
-	local shape="--pivot 0.39 --contrast 1.09 --toe 0.0 --shoulder 0.1 --black 0.025"
-	# shellcheck disable=SC2086  # a flag list, split on purpose
-	run "$SCRIPTS/make-tone-lut.py" "$cube" --gamma 1.5 $shape
-	[ "$status" -eq 0 ] || fail "$output"
-	# shellcheck disable=SC2086
-	run "$SCRIPTS/make-tone-lut.py" "$cube" --gamma 1.5 $shape
-	[[ "$output" == *"already current"* ]] || fail "rewrote a cube that already matched: $output"
-	touch -t 203001010000 "$cube"
-	# shellcheck disable=SC2086
-	run "$SCRIPTS/make-tone-lut.py" "$cube" --gamma 2.02 $shape
-	[[ "$output" != *"already current"* ]] || fail "kept a cube built at a different gamma"
-	grep -q 'gamma=2.02' "$cube" || fail "the cube does not record the gamma it was built at"
-}
-
 @test "the correction cube is regenerated by content, never by timestamp" {
-	# Same reasoning as the tone cube's TITLE: git does not preserve mtime, so a committed cube
+	# By the TITLE, not the mtime: git does not preserve mtime, so a committed cube
 	# always lands newer than the file it came from and would be trusted forever.
 	local cube="$BATS_TEST_TMPDIR/c.cube"
 	run "$SCRIPTS/make-correct-lut.py" "$cube" --exposure 0.5 --size 5
@@ -2231,24 +2020,9 @@ PY
 	[ "$status" -eq 0 ] || fail "$output"
 	run "$SCRIPTS/make-halation-luts.py" "$dir/h" --threshold 1.0000002
 	[ "$output" = "wrote halation-threshold.cube" ] || fail "halation kept a cube built at another threshold: $output"
-
-	local tone=(--pivot 0.42 --contrast 1.0 --toe 0 --shoulder 0 --black 0)
-	run "$SCRIPTS/make-tone-lut.py" "$dir/t.cube" --gamma 2.0200001 "${tone[@]}"
-	[ "$status" -eq 0 ] || fail "$output"
-	run "$SCRIPTS/make-tone-lut.py" "$dir/t.cube" --gamma 2.0200002 "${tone[@]}"
-	[ "$status" -eq 0 ] || fail "$output"
-	[[ "$output" != *"already current"* ]] || fail "the tone curve kept a cube built at another gamma"
 }
 
-@test "the correction generator refuses a malformed wheel" {
-	# Each refusal asserts its own words. A zero power exits non-zero without the guard too, from the
-	# ZeroDivisionError it raises, so a status check alone passed against a removed guard.
-	run "$SCRIPTS/make-correct-lut.py" --stdout --slope "1,2"
-	[ "$status" -ne 0 ] || fail "accepted a two-value wheel"
-	[[ "$output" == *"wants one value or three"* ]] || fail "refused the wheel without saying why: $output"
-	run "$SCRIPTS/make-correct-lut.py" --stdout --power "0,1,1"
-	[ "$status" -ne 0 ] || fail "accepted a zero power, which is a division by zero"
-	[[ "$output" == *"must be positive"* ]] || fail "zero power failed, but not at the guard: $output"
+@test "the correction generator refuses an absurd cube size" {
 	run "$SCRIPTS/make-correct-lut.py" --stdout --size 200
 	[ "$status" -ne 0 ] || fail "accepted an absurd cube size"
 	[[ "$output" == *"outside 2..64"* ]] || fail "refused the size without saying why: $output"
@@ -2261,18 +2035,18 @@ _look_with() {  # _look_with <name> <jq-assignment>
 	printf '%s\n' "$out"
 }
 
-@test "a correction wheel that cannot be read stops the run rather than dropping the stage" {
+@test "a correction value that cannot be read stops the run rather than dropping the stage" {
 	# The generator decides neutrality, and a generator handed a split argument dies of argparse
 	# and answers with nothing. Compared as a string, nothing is "not active": the correction was
 	# left out of the render in silence. It must refuse instead.
-	local work="$BATS_TEST_TMPDIR/badwheel" look
+	local work="$BATS_TEST_TMPDIR/badcorrect" look
 	mkdir -p "$work/src"
 	cp "$FIXTURES/portrait_tagged.mov" "$work/src/CLIP.mov"
-	look="$(_look_with badwheel '.correct.slope = "1.2, 1, 1"')"
+	look="$(_look_with badcorrect '.correct.contrast = "1.2 1"')"
 
 	LOOK_FILE="$look" DRY=1 MATCH=0 STAB=0 GRADE_WORK_DIR="$work" run "$SCRIPTS/grade.sh" "$work/src/CLIP.mov"
 	[ "$status" -ne 0 ] || fail "grade.sh planned a run without the correction: $output"
-	[[ "$output" == *"correct.slope must be numbers separated by commas"* ]] \
+	[[ "$output" == *"correct.contrast must be numeric"* ]] \
 		|| fail "grade.sh did not say which value: $output"
 }
 
@@ -2289,10 +2063,10 @@ _look_with() {  # _look_with <name> <jq-assignment>
 }
 
 @test "every generator's flags are spelled in lib.sh and nowhere else" {
-	# The tone block was mapped to flags in two places and the correction's in two, and the copies
-	# had drifted by a flag. A flag written at a call site is the start of the next copy.
+	# The correction was mapped to flags in two places, and the copies had drifted by a flag. A flag
+	# written at a call site is the start of the next copy.
 	local offenders
-	offenders=$(grep -nE -- '--(pivot|contrast|shoulder|black|exposure|temp|tint|slope|offset|power|lum-mix) ' \
+	offenders=$(grep -nE -- '--(exposure|temp|tint|contrast|saturation) ' \
 		"$SCRIPTS"/*.sh | grep -v '/lib\.sh:' | grep -v ':[0-9]*:[[:space:]]*#' || true)
 	[ -z "$offenders" ] || fail "spells a generator flag outside lib.sh:$offenders"
 }
@@ -2440,27 +2214,6 @@ sys.exit("; ".join(problems) or None)
 	done
 }
 
-@test "hue curves: flat is absent, active precedes the tone curve, and an ungenerated cube is refused" {
-	local root="$BATS_TEST_DIRNAME/.." chain look="$BATS_TEST_TMPDIR/hue-look.json"
-	# The shipped look's curves are flat: no cube, nothing to generate.
-	chain="$(grade_chain "" 1 0)"
-	[[ "$chain" != *hue* ]] || fail "flat curves left a stage in: $chain"
-	jq '.hue.sat="0,0,0,0,-0.5,0,0,0,0,0,0,0"' "$root/look.json" > "$look"
-	# Active, but nobody called ensure_hue_lut: refused, not silently rendered without.
-	LOOK_FILE="$look" run grade_chain "" 1 0
-	[ "$status" -ne 0 ] || fail "active curves rendered without their cube: $output"
-	[[ "$output" == *"call ensure_hue_lut first"* ]] || fail "$output"
-	chain="$(LOOK_FILE="$look" \
-		bash -c 'source "$1"; ensure_hue_lut "$2" && grade_chain t.cube 1 0' _ "$root/scripts/lib.sh" "$BATS_TEST_TMPDIR")"
-	python3 -c '
-import sys
-c = sys.argv[1]
-hue, tone = c.find("hue.cube"), c.find("lut1d")
-sys.exit(None if 0 <= hue < tone else "order is hue@%d tone@%d" % (hue, tone))
-' "$chain" || fail "the hue stage is out of order: $chain"
-	head -1 "$BATS_TEST_TMPDIR/hue.cube" | grep -q 'sat=0.0,0.0,0.0,0.0,-0.5,' || fail "the cube is not the look's curves"
-}
-
 # bats test_tags=slow
 @test "the one-pass render crops and shrinks before it grades, and sizes the glow for that frame" {
 	# The grade is per pixel or a fraction of the frame, so it runs at delivery size: a quarter of the
@@ -2513,13 +2266,6 @@ sys.exit(None if 0 <= hue < tone else "order is hue@%d tone@%d" % (hue, tone))
 		|| fail "not one pass for both: $(grep -F -- '--- graph' "$report")"
 	grep -qE '^\[0:v\].*\[gr_img\].*split=2\[s0\]\[s1\];.*\[sh1_in\]' "$report" \
 		|| fail "the second deliverable's labels are not its own: $(grep -F '[0:v]' "$report")"
-}
-
-@test "the hue generator refuses a curve it cannot mean" {
-	run "$LIB_ROOT/scripts/make-hue-lut.py" --stdout --sat "0,0,0"
-	[ "$status" -ne 0 ] && [[ "$output" == *"wants 12 values"* ]] || fail "a short curve: $output"
-	run "$LIB_ROOT/scripts/make-hue-lut.py" --stdout --rot "90,0,0,0,0,0,0,0,0,0,0,0"
-	[ "$status" -ne 0 ] && [[ "$output" == *"outside -60..60"* ]] || fail "a knot past its bound: $output"
 }
 
 # --- grain in the negative ---------------------------------------------------

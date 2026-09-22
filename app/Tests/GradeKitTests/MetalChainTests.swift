@@ -39,29 +39,21 @@ final class MetalChainTests: XCTestCase {
         let film = try XCTUnwrap(
             engine.shippedPresets().first { $0.look.convertCube == "portra160" }
         ).look
-        var hue = film
-        hue.hue = Look.Hue(
-            rot: "30,30,0,-20,-20,-20,0,0,0,0,30,30", sat: "1,1,0,-1,-1,-1,0,0,-1,-1,1,1",
-            lum: "0,0,0,-0.4,-0.4,-0.4,0,0,0,0,0,0")
-        var trims = shipped
-        trims.tone.contrast = 1.3
-        trims.colour.saturation = 1.2
-        trims.colour.warmth = 0.05
 
         let builder = ChainBuilder(engine: engine)
         for (name, look) in [
             ("shipped", shipped), ("correction", corrected), ("halation", halation),
-            ("film", film), ("hue", hue), ("trims", trims),
+            ("film", film),
         ] {
             let chain = try builder.build(
                 look, metered: nil, frameLongEdge: max(image.width, image.height),
                 sourceLongEdge: max(frame.sourceSize.width, frame.sourceSize.height)
             ).chain
-            let cpu = LiveChain.gradedPixels(
-                try XCTUnwrap(
-                    LiveChain.converted(
-                        rgba16: source, width: image.width, height: image.height,
-                        through: chain.stages)), with: chain.grade)
+            let cpu = try XCTUnwrap(
+                LiveChain.converted(
+                    rgba16: source, width: image.width, height: image.height,
+                    through: chain.stages)
+            ).pixels
             let gpu = try metal.graded(
                 rgba16: source, width: image.width, height: image.height, chain: chain)
             var worst = 0
@@ -74,11 +66,8 @@ final class MetalChainTests: XCTestCase {
                 if d > 0 { off += 1 }
             }
             let n = Double(cpu.count / 4 * 3)
-            // Measured on IMG_0607 at 480 high: worst 1 in every case, mean 0.24-0.26, and 0.004
-            // for the trims case. The one-code differences are the tone merge's truncation landing
-            // on an integer boundary in Float here and Double on the CPU: an identity curve puts
-            // most values exactly on one, a real curve almost none. Any stage wired wrong moves
-            // the mean by tens of codes (a missing readback read 99).
+            // Worst 1: Float here and on the CPU, not the same instructions. Any stage wired wrong
+            // moves the mean by tens of codes (a missing readback read 99).
             XCTAssertLessThanOrEqual(worst, 1, "\(name): a pixel is \(worst) codes off")
             XCTAssertLessThan(Double(sum) / n, 0.35, "\(name): mean \(Double(sum) / n)")
         }
@@ -124,11 +113,11 @@ final class MetalChainTests: XCTestCase {
             let gpuMs = Date().timeIntervalSince(t) / 5 * 1000
             t = Date()
             for _ in 0..<5 {
-                _ = LiveChain.gradedPixels(
-                    try XCTUnwrap(
-                        LiveChain.converted(
-                            rgba16: pixels, width: big.width, height: big.height,
-                            through: chain.stages)), with: chain.grade)
+                _ = try XCTUnwrap(
+                    LiveChain.converted(
+                        rgba16: pixels, width: big.width, height: big.height,
+                        through: chain.stages)
+                ).pixels
             }
             let cpuMs = Date().timeIntervalSince(t) / 5 * 1000
             print(
@@ -158,11 +147,10 @@ final class MetalChainTests: XCTestCase {
             let chain = try ChainBuilder(engine: engine).build(
                 look, metered: nil, frameLongEdge: width, sourceLongEdge: width
             ).chain
-            let cpu = LiveChain.gradedPixels(
-                try XCTUnwrap(
-                    LiveChain.converted(
-                        rgba16: source, width: width, height: height, through: chain.stages)),
-                with: chain.grade)
+            let cpu = try XCTUnwrap(
+                LiveChain.converted(
+                    rgba16: source, width: width, height: height, through: chain.stages)
+            ).pixels
             let gpu = try metal.graded(rgba16: source, width: width, height: height, chain: chain)
             let worst = zip(cpu, gpu).map { abs(Int($0) - Int($1)) }.max() ?? 0
             // Random 16-bit input reaches the cubes' steepest cells, which real footage does not:
@@ -194,18 +182,17 @@ final class MetalChainTests: XCTestCase {
             film, metered: nil, frameLongEdge: width, sourceLongEdge: width
         ).chain
         let grain = try XCTUnwrap(LiveGrain(strength: 12, frameWidth: 1080, frameHeight: 1920))
-        let cpu = LiveChain.gradedPixels(
-            try XCTUnwrap(
-                LiveChain.converted(
-                    rgba16: source, width: width, height: height, through: chain.stages,
-                    grain: grain, frame: 5)), with: chain.grade)
+        let cpu = try XCTUnwrap(
+            LiveChain.converted(
+                rgba16: source, width: width, height: height, through: chain.stages,
+                grain: grain, frame: 5)
+        ).pixels
         let gpu = try metal.graded(
             rgba16: source, width: width, height: height, chain: chain, grain: grain, frame: 5)
-        let plain = LiveChain.gradedPixels(
-            try XCTUnwrap(
-                LiveChain.converted(
-                    rgba16: source, width: width, height: height, through: chain.stages)),
-            with: chain.grade)
+        let plain = try XCTUnwrap(
+            LiveChain.converted(
+                rgba16: source, width: width, height: height, through: chain.stages)
+        ).pixels
         var worst = 0
         var grainEnergy = 0.0
         for i in 0..<cpu.count where i % 4 != 3 {

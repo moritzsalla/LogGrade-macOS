@@ -7,9 +7,8 @@ Reads one decoded Apple Log frame (planar float G, B, R, as ffmpeg's gbrpf32le l
 prints `<exposure-stops> <temp> <tint>`, in make-correct-lut.py's units, to add to look.json's own
 correction.
 
-WHY NOT THE GAMMA MATCH. MATCH=1 solves a tone-curve gamma after Apple's conversion, on display
-pixels. A film cube is the conversion AND the tone, so a curve after it bends the stock's own
-characteristic curve; exposure belongs before it, in linear, where a stop is a stop.
+WHY BEFORE THE CUBE. A film cube is the conversion AND the tone, so a curve after it would bend the
+stock's own characteristic curve; exposure belongs before it, in linear, where a stop is a stop.
 
 EXPOSURE is the log-average luminance: the mean of log2(Y) over the frame, which is what a meter
 averages and what the negative responds to. `reference-stops` is that mean, in stops from 0.18,

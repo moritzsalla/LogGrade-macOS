@@ -33,7 +33,7 @@ app. The two Instagram ones fix every field. _Avoid_: deliverable (that is the s
 _Avoid_: draft, test render
 
 **Preview**: the still the app shows while a control moves. It covers the grade only (correction,
-halation, conversion, hue curves, tone, trims), not grain, sharpening, denoise, stabilisation or dither.
+halation, conversion), not grain, sharpening, denoise, stabilisation or dither.
 A proof answers "is this deliverable"; a preview answers "is this the grade".
 
 ## The grade
@@ -53,16 +53,11 @@ match), stored per clip in the project. _Avoid_: override, grade
 **Halation**: the warm glow past bright edges, added in linear light before the conversion.
 _Avoid_: bloom
 
-**Hue curves**: per-colour hue, saturation and lightness, twelve knots on Oklab hue, after the
-conversion and before the tone. Set by a look, not in the panel (`make-hue-lut.py`). Distinct from the trims' global saturation.
-
-**Tone**: the generated luma curve that gives density. _Avoid_: S-curve, tone map, grade
-
-**Correction**: the input stage: exposure, white balance and wheels, applied in Apple Log before
-the conversion, and what each clip's metering and Adjust are added to. Left out of the graph when neutral.
+**Correction**: the input stage: exposure, white balance, contrast and saturation, applied in Apple
+Log before the conversion, and what each clip's metering and Adjust are added to. Left out of the graph when neutral.
 _Avoid_: colour correction, input LUT
 
-**Grade**: correction + halation + conversion + hue curves + tone + trims: the whole transform a
+**Grade**: correction + halation + conversion: the whole transform a
 look and a clip's Adjust produce. _Avoid_: edit
 
 **Colour correction**: moving colour toward its measured spec. Not the correction stage.
@@ -79,7 +74,7 @@ It says where the image is, not where it should go. _Avoid_: target, chart
 
 **Golden**: an output this repo recorded from its own engine. A change that moves it fails by name
 until someone re-records it with a reason. It says what the engine did, not whether that was good.
-Grade golden: ffmpeg's output per patch. Render golden: the default image. _Avoid_: oracle, snapshot
+Render golden: the default image. _Avoid_: oracle, snapshot
 
 **Precursor**: `ffgrade`, frozen at the fork point. Provenance, not a standard.
 _Avoid_: reference, oracle, upstream
@@ -90,7 +85,7 @@ _Avoid_: reference, oracle, upstream
 
 **Bleached**: Rec.709 pixels with a BT.2020 tag, transformed twice by a player. A tagging bug.
 
-**Neon**: a per-channel contrast curve making saturated signage glow. Why the tone is luma-only.
+**Neon**: a per-channel contrast curve making saturated signage glow.
 
 **Squashed**: a clip scaled into another shape with no warning. A wrong aspect is cropped, never
 stretched (ADR 0010). _Avoid_: stretched

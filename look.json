@@ -12,15 +12,10 @@
     "are baked into the cube's TITLE rather than kept here: it is a shipped asset like the film",
     "cubes, re-baked when it is re-tuned.",
     "",
-    "EVERY STAGE BELOW IS NEUTRAL, deliberately. The rendering is the picture, so the tone",
-    "curve, the trims and the hue curves start at the values the engine leaves out of the graph",
-    "entirely, and each slider has its full range in both directions from there. That is the",
-    "opposite of the old shipped look, which spent its tone curve undoing Apple's conversion.",
-    "",
     "correct.* is the input-correction stage, which runs BEFORE the conversion and therefore in",
     "log: exposure and white balance in linear (decoded and re-encoded with Apple's published",
-    "transfer function), then an ASC CDL — slope, offset, power, which is what lift, gamma and",
-    "gain wheels are. At the values below it does NOTHING, and a neutral correction leaves the",
+    "transfer function), then contrast and saturation in log. It is what a clip's Adjust and",
+    "metering add to. At the values below it does NOTHING, and a neutral correction leaves the",
     "filter out of the graph rather than rendering every pixel through a lookup that returns it.",
     "",
     "match.reference_stops is where a clip's metered log-average lands, in stops from mid grey;",
@@ -39,10 +34,6 @@
     "exposure": 0.0,
     "temp": 0.0,
     "tint": 0.0,
-    "slope": "1,1,1",
-    "offset": "0,0,0",
-    "power": "1,1,1",
-    "lum_mix": 1.0,
     "contrast": 1.0,
     "saturation": 1.0
   },
@@ -51,23 +42,6 @@
     "threshold": 1.0,
     "radius": 0.006,
     "tint": "1,0.3,0.05"
-  },
-  "hue": {
-    "rot": "0,0,0,0,0,0,0,0,0,0,0,0",
-    "sat": "0,0,0,0,0,0,0,0,0,0,0,0",
-    "lum": "0,0,0,0,0,0,0,0,0,0,0,0"
-  },
-  "tone": {
-    "gamma": 1.0,
-    "pivot": 0.5,
-    "contrast": 1.0,
-    "toe": 0.0,
-    "shoulder": 0.0,
-    "black": 0.0
-  },
-  "colour": {
-    "saturation": 1.0,
-    "warmth": 0.0
   },
   "grain": {
     "strength": 3

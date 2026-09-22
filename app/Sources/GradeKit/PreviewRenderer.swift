@@ -6,7 +6,7 @@ import Foundation
 /// denoise, the stabiliser or the dither, all of which are delivery-stage. What it does show is
 /// everything a control moves, at full resolution, which is exactly what a preview is for. The
 /// alternative — decoding a frame here and grading it in the app — is a second implementation of
-/// the image, which this repo permits only where a test can hold it to this one. `LiveGrade` is
+/// the image, which this repo permits only where a test can hold it to this one. `LiveChain` is
 /// that second implementation and it exists for dragging against, not for judging: this stays the
 /// picture every decision is made on.
 public final class PreviewRenderer {

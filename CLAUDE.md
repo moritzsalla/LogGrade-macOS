@@ -1,11 +1,11 @@
 # CLAUDE.md
 
-The traps, and where things live. `CONTEXT.md` defines the words (*look* ≠ *tone* ≠ *grade*).
+The traps, and where things live. `CONTEXT.md` defines the words (*look* ≠ *adjust* ≠ *grade*).
 
 ## Check
 
 ```sh
-./scripts/check.sh          # before a commit: shellcheck, grade golden, swift-format, Swift, render golden, bats
+./scripts/check.sh          # before a commit: shellcheck, swift-format, Swift, render golden, bats
 ./scripts/check.sh --fast   # while iterating; not a pass for a commit
 ```
 
@@ -19,7 +19,7 @@ The traps, and where things live. `CONTEXT.md` defines the words (*look* ≠ *to
 All silent. Measurements are in `docs/PIPELINE.md` or beside the builder in `scripts/lib.sh`.
 
 - `eq` silently drops the chain to 8-bit. Check every new filter with `-v debug | grep picking`.
-- `lut1d` and `colorbalance` cannot take a YUV plane; ffmpeg converts to RGB around them (ADR 0003).
+- `lut1d` and `colorbalance` cannot take a YUV plane; ffmpeg converts to RGB around them (`picking gbrp10le`).
 - `colorlevels` gives a flat frame here; use `curves`, and measure its spline rather than trusting the control points.
 - Only `zscale` dithers 10→8 bit.
 - Tag synthesised branches and `mergeplanes` output with `setparams`, or a `zscale` upstream fails.
@@ -53,7 +53,6 @@ Query one field at a time with `-of default=nw=1:nk=1`, and validate the answer 
 ## Code rules
 
 - Look values live only in `look.json`. `look()` has no fallbacks: a missing key stops the run.
-- Unset ≠ empty: a loader keeps a set `SAT` or `HUE_LUT`, even empty; only an unset one reads `look.json`.
 - Generated cubes are fresh by content (the `TITLE` stamp), never by mtime.
 - The grade chain, the delivery chain, encode flags, stage paths and generator flags are spelled once, in `lib.sh`. A test fails on a copy.
 - Take a generator's verdict first: `state="$(correction_state)" || exit 1`.
@@ -62,14 +61,13 @@ Query one field at a time with `-of default=nw=1:nk=1`, and validate the answer 
 - No rotation logic in the pipeline. Orientation is measured from a decoded frame (ADR 0005). Media layout is ADR 0006.
 - The app builds release by default (`make-app.sh --debug` for debug). Debug makes the live preview about 100× slower.
 - The live preview (`LiveChain`) runs the whole chain in-process, and `LiveChainTests` holds it to the render (ADR 0009).
-- A second implementation of the image (`CorrectionCube`, `ToneCurve`) needs an exact-equivalence test against the generator it replaced, not a tolerance.
+- A second implementation of the image (`CorrectionCube`) needs an exact-equivalence test against the generator it replaced, not a tolerance.
 - When deleting a concept, grep for its name in prose too.
 
 ## Open questions
 
 These were "settled", and the user has reopened them.
 
-- The look: the Portra LUT is not the reference, the partner's analog scans are. The off-spec saturation and "tone, not colour" were judged on one shoot's road signs.
 - The tests feel too heavy: keep the silent-failure guards, thin out the rest.
 
 ## Doc rules

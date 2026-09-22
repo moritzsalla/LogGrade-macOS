@@ -9,12 +9,7 @@ import Foundation
 ///
 /// It lives outside `src/`, which is read-only for the life of the project.
 public struct Project: Equatable {
-    /// A named grade: a look LUT together with its tone and trims.
-    ///
-    /// THE PAIR IS THE POINT. The shipped tone curve was tuned with the Portra cube in the chain,
-    /// so swapping the cube alone is a different grade rather than the same grade in another film
-    /// stock. A preset therefore carries both, and the interface offers presets rather than a cube
-    /// menu beside an unrelated set of sliders.
+    /// A named look: its conversion cube together with the stages tuned with it.
     public struct Preset: Equatable {
         public var name: String
         public var look: Look
@@ -450,8 +445,6 @@ extension Project {
     static let filmStagesVersion = 2
     /// The first version whose looks carry a conversion, a finish and a film exposure reference.
     static let conversionVersion = 3
-    /// The first version whose looks carry hue curves.
-    static let hueVersion = 4
     /// The first version whose looks carry no film look or print cube.
     static let noFilmLookVersion = 5
     /// The first version whose corrections carry contrast and saturation.
@@ -568,12 +561,6 @@ extension Project {
                 match["reference_stops"] = Look.defaultReferenceStops
                 look["match"] = match
             }
-            upgraded = look
-        }
-        // Before version 4 there were no hue curves: flat ones render the same picture.
-        if version < hueVersion, var look = upgraded as? [String: Any], look["hue"] == nil {
-            let flat = Look.Hue()
-            look["hue"] = ["rot": flat.rot, "sat": flat.sat, "lum": flat.lum]
             upgraded = look
         }
         // Before version 5 a look could stack a film look and a print cube on the rendering. They

@@ -23,7 +23,7 @@ judged them.
 
 **Right panel.** Everything is per clip: clips are graded and exported one at a time. Look picker
 (a clip given none follows the last look picked). Adjust: Exposure, Warmth, Tint, Contrast,
-Saturation, exposure match (on by default). Scopes (levels, parade, vectorscope) and the curve,
+Saturation, exposure match (on by default). Scopes (levels, parade, vectorscope),
 read-only. Sections with a bypass: Stabilisation (strength, off by default), Denoise (strength, off
 by default), Grain (on/off; off for Neutral, on for film).
 
@@ -45,18 +45,6 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
      Left: the grade chain on the GPU, shared with Export.
    - **Export:** AVAssetReader, the same chain, the delivery stage, VideoToolbox H.264/HEVC through
      AVAssetWriter. ProRes, stabilisation and Super 8's gauge stay on grade.sh until at parity.
-2. **Portra 160, the next calibration round.** Calibrated against the partner's scans (median 0.0073
-   Oklab against their edits); still off, by the scorecard and by eye: the road and pavement too warm
-   (dark neutrals had almost no samples), the clouds' blue shadows (sky colour per lightness band),
-   saturated signs a touch dull, the palest brick ~19% short of the film's chroma. Method, findings
-   and every round: the `look-match` skill. More scanned scenes with dark neutrals and blue would
-   help more than more model. The next fit must decode each side by its own curve: `calib.py` reads both
-   with the inverse BT.709 OETF, but the edits are Adobe RGB and playback is gamma 1.961
-   (`cubefile.py`); the shipped cubes carry an Adobe-light re-encode (`luts/film/CHANGELOG.txt`).
-3. **Cross-check Super 8** against professional emulations (licence permitting, comparison only)
-   and more reference stills per stock.
-4. **Delete the engine controls no look uses**, once the looks are signed off: wheels, hue curves,
-   halation and tone internals, with their tests and the live preview's copies.
 
 ## Also open
 
@@ -77,3 +65,6 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
 - HDR delivery.
 - Cameras other than iPhone Apple Log. Apple Log 2 maybe, much later.
 - The filmic route: it lost on colour (`docs/PIPELINE.md`).
+- Another Portra 160 calibration round: the looks were declared final on 2026-09-22 (Portra 160/800
+  fitted to the scans and encoded for Adobe-light, #102/#105).
+- A Super 8 cross-check against professional emulations: the looks were declared final on 2026-09-22.

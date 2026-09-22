@@ -42,7 +42,7 @@ THE NUMBERS:
                 anything below that clips the top of what the camera recorded.
     --black     a display black lift, in code values: a rendering's black is a flare, not a clip.
 
-HueCube's and the correction's Swift transcriptions have exact-equivalence tests. This one does
+The correction's Swift transcription has an exact-equivalence test. This one does
 NOT: the app reads the generated .cube, exactly as it reads Apple's and the film cubes, so there is
 only ever one implementation of it.
 
@@ -94,7 +94,9 @@ def mul(m, v):
 
 
 def inverse(m):
-    """Computed rather than quoted, for the reason make-hue-lut.py's copy gives."""
+    """Computed, not the inverses Oklab publishes, which are rounded to ten places: a round trip
+    must return an untouched colour, and near black the 1/2.4 power turns a 1e-6 linear error
+    into most of a code value."""
     (a, b, c), (d, e, f), (g, h, i) = m
     det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
     return ((e * i - f * h) / det, (c * h - b * i) / det, (b * f - c * e) / det),\

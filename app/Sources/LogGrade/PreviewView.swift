@@ -71,16 +71,7 @@ struct PreviewView: View {
                 // which says what is happening in words — where every native app puts one.
             }
 
-            HStack(alignment: .top, spacing: 10) {
-                ScopesView(scopes: preview.scopes)
-                // The curve lives with the picture rather than with its sliders, because the
-                // inspector scrolls and a readout you cannot see while you adjust is not a readout.
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("curve").font(Type.caption).foregroundColor(Palette.inkTertiary)
-                    CurveView(curve: preview.curve)
-                        .frame(width: 78, height: 78)
-                }
-            }
+            ScopesView(scopes: preview.scopes)
 
             HStack(spacing: 12) {
                 // NO PREVIEW BUTTON. Every path that changes the look updates the picture on its

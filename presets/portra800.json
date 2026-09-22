@@ -1,8 +1,8 @@
 {
   "_comment": [
     "A film preset. convert.cube renders Apple Log straight through a stock baked from spektrafilm",
-    "(luts/film/CHANGELOG.txt), so tone is neutral: a curve on top would bend the",
-    "stock's own. Each clip's exposure and white balance are metered in linear before the cube",
+    "(luts/film/CHANGELOG.txt); the stock's curve is the only tone curve. Each clip's exposure",
+    "and white balance are metered in linear before the cube",
     "(scripts/solve-exposure.py) against match.reference_stops; correct.* still adds on top.",
     "",
     "Portra 800: the calibrated Portra 160 look at a higher speed (softer, lifted black, less",
@@ -17,10 +17,6 @@
     "exposure": 0.0,
     "temp": 0.0,
     "tint": 0.0,
-    "slope": "1,1,1",
-    "offset": "0,0,0",
-    "power": "1,1,1",
-    "lum_mix": 1.0,
     "contrast": 1.0,
     "saturation": 1.0
   },
@@ -29,23 +25,6 @@
     "threshold": 1.0,
     "radius": 0.006,
     "tint": "1,0.3,0.05"
-  },
-  "hue": {
-    "rot": "0,0,0,0,0,0,0,0,0,0,0,0",
-    "sat": "0,0,0,0,0,0,0,0,0,0,0,0",
-    "lum": "0,0,0,0,0,0,0,0,0,0,0,0"
-  },
-  "tone": {
-    "gamma": 1.0,
-    "pivot": 0.5,
-    "contrast": 1.0,
-    "toe": 0.0,
-    "shoulder": 0.0,
-    "black": 0.0
-  },
-  "colour": {
-    "saturation": 1.0,
-    "warmth": 0.0
   },
   "grain": {
     "strength": 12
