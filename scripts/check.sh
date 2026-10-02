@@ -20,18 +20,84 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 ALLOW_SKIPS=0
 FAST=0
+ALL=0
+PLAN=0
 for a in "$@"; do
 	case "$a" in
 		--allow-skips) ALLOW_SKIPS=1;;
 		--fast) FAST=1;;
+		--all) ALL=1;;
+		--plan) PLAN=1;;  # print the scope the changes select, and run nothing
 		*) echo "unknown option: $a" >&2; exit 2;;
 	esac
 done
 SKIPPED=""
 
-# --fast is for iterating, and the full run stays the DEFAULT. This is the command CLAUDE.md says
-# to trust, so a default that quietly ran less would bring back the "green but tested nothing"
-# failure the missing-tool rule below exists for. What --fast leaves out is named at the end.
+# SCOPED BY DEFAULT: the stages are picked from what changed against origin/main, committed or not,
+# because a full run takes minutes and most changes touch one side. This map is the one place that
+# knows which side reads which path. It errs towards running MORE: a path it does not name runs
+# everything, so a new directory is checked until someone decides otherwise.
+#   shell  shellcheck, render golden, bats
+#   swift  swift-format, swift build/test, and the bats tests tagged `app` (they build the bundle)
+#   both   the app vendors scripts/ luts/ presets/ look.json (app/make-app.sh), and the Swift tests
+#          run lib.sh and read tests/fixtures/, so a change there has to pass both sides
+#   look   a film cube or a preset: both sides, without the renders (as --fast) but with the golden.
+#          The parity renders compare the live chain with the engine on the SAME cube, so new cube
+#          values cannot split them; a broken file still fails the parsers the fast tests run.
+scope_of() {  # scope_of <path> → none|shell|swift|both|look
+	case "$1" in
+		docs/*|*.md|LICENSE|.claude/*) echo none;;
+		luts/film/*|presets/*) echo look;;
+		scripts/*|luts/*|look.json|tests/fixtures/*) echo both;;
+		tests/*|app/drive/*.sh) echo shell;;
+		app/*) echo swift;;
+		*) echo both;;
+	esac
+}
+RUN_SHELL=1
+RUN_SWIFT=1
+if [ "$ALL" = "0" ]; then
+	# CHECK_PATHS stands in for git's answer, so the map can be tested without staging a repo.
+	if [ -n "${CHECK_PATHS+set}" ]; then
+		changed="$CHECK_PATHS"
+	elif base="$(git merge-base origin/main HEAD 2>/dev/null)"; then
+		changed="$(git diff --name-only "$base"; git ls-files --others --exclude-standard)"
+	else
+		changed="(no merge base with origin/main: run everything)"
+	fi
+	RUN_SHELL=0
+	RUN_SWIFT=0
+	LOOK=0
+	while IFS= read -r f; do
+		[ -n "$f" ] || continue
+		case "$(scope_of "$f")" in
+			shell) RUN_SHELL=1;;
+			swift) RUN_SWIFT=1;;
+			both) RUN_SHELL=1; RUN_SWIFT=1;;
+			look) LOOK=1;;
+		esac
+	done <<< "$changed"
+	# Only looks changed: both sides, renders left out except the golden. Anything else changed too
+	# widens it to that scope's full run.
+	if [ "$LOOK" = "1" ] && [ "$RUN_SHELL$RUN_SWIFT" = "00" ]; then
+		RUN_SHELL=1; RUN_SWIFT=1; FAST=1; LOOK_ONLY=1
+	elif [ "$LOOK" = "1" ]; then
+		RUN_SHELL=1; RUN_SWIFT=1
+	fi
+fi
+case "${LOOK_ONLY:-0}$RUN_SHELL$RUN_SWIFT" in
+	111) SCOPE=look;; *11) SCOPE=full;; *10) SCOPE=shell;; *01) SCOPE=swift;; *) SCOPE=nothing;;
+esac
+echo "scope: $SCOPE$([ "$ALL" = "1" ] && echo " (--all)" || true)"
+[ "$PLAN" = "1" ] && exit 0
+if [ "$SCOPE" = "nothing" ]; then
+	echo "nothing to check: no change outside docs and agent notes (--all runs everything)"
+	exit 0
+fi
+
+# --fast is for iterating: within the scope, it leaves out the renders. It is never the default,
+# because a default that quietly ran less would bring back the "green but tested nothing" failure
+# the missing-tool rule below exists for. What --fast leaves out is named at the end.
 #
 # The Swift classes left out are the ones that render real footage through the engine, each
 # measured at several seconds. Time a new one (`swift test --filter <Class>`) rather than guessing
@@ -52,7 +118,9 @@ if [ -n "$MISSING_MEDIA" ]; then
 fi
 
 echo "== shellcheck =="
-if command -v shellcheck >/dev/null; then
+if [ "$RUN_SHELL" = "0" ]; then
+	echo "not affected"
+elif command -v shellcheck >/dev/null; then
 	# Lint by SHEBANG, not by extension — a script with no .sh suffix was silently excluded by a
 	# `*.sh` glob for its whole existence.
 	# `mapfile` is bash 4.0+; macOS ships 3.2, where it silently does nothing and the check
@@ -84,7 +152,9 @@ echo "== swift-format =="
 #   swift build -c release --product swift-format --package-path swift-format
 #   cp swift-format/.build/release/swift-format ~/.local/bin/
 SWIFT_FORMAT_VERSION=510.1.0
-if command -v swift-format >/dev/null; then
+if [ "$RUN_SWIFT" = "0" ]; then
+	echo "not affected"
+elif command -v swift-format >/dev/null; then
 	have="$(swift-format --version)"
 	if [ "$have" != "$SWIFT_FORMAT_VERSION" ]; then
 		echo "swift-format is $have, this repo pins $SWIFT_FORMAT_VERSION (build steps in scripts/check.sh)" >&2
@@ -109,7 +179,9 @@ echo "== swift (GradeKit) =="
 # A missing toolchain is a SKIP under the same contract as every other tool here: recorded, and
 # fatal at the end unless --allow-skips. Xcode 15.2 is the newest for this machine's macOS, which
 # is why Package.swift pins the tools version rather than tracking whatever is installed.
-if command -v swift >/dev/null; then
+if [ "$RUN_SWIFT" = "0" ]; then
+	echo "not affected"
+elif command -v swift >/dev/null; then
 	# --parallel runs each test class in its own process: 104s serially, 61s parallel, measured on
 	# this 8-thread i7. Every render test works in its own UUID temp directory, which is what makes
 	# that safe.
@@ -138,7 +210,9 @@ echo "== render golden (the default image, against the one this repo recorded) =
 # A skip is fatal like any other, EXCEPT when the footage or Apple's cube is missing: every render
 # test skips then, and the NOTE at the top already says so. The remaining skip is a golden recorded
 # on a different ffmpeg build or architecture, and that is coverage this machine does not have.
-if [ "$FAST" = "1" ]; then
+if [ "$RUN_SHELL" = "0" ]; then
+	echo "not affected"
+elif [ "$FAST" = "1" ] && [ "${LOOK_ONLY:-0}" = "0" ]; then
 	echo "not run (--fast)"
 else
 	set +e; ./tests/render-golden.sh; rc=$?; set -e
@@ -162,21 +236,27 @@ if command -v bats >/dev/null; then
 	# test that is fast OR serial.
 	slow_tag=""
 	[ "$FAST" = "1" ] && slow_tag='!slow,'
+	# A Swift-only change still runs the tests tagged `app`: they build the bundle and hold the
+	# toolchain pin, which is the app's side even though bats runs them.
+	if [ "$RUN_SHELL" = "0" ]; then
+		slow_tag="${slow_tag}app,"
+		echo "(swift scope: only the tests tagged app)"
+	fi
 	if command -v parallel >/dev/null; then
 		serial_log=$(mktemp -t check-bats-serial)
 		# --allow-empty-suite: every serial test is also slow, so under --fast this pass has none.
 		bats --allow-empty-suite --filter-tags "${slow_tag}serial" tests/ > "$serial_log" 2>&1 &
 		serial_pid=$!
 		bats_rc=0
-		bats -j "$(sysctl -n hw.ncpu)" --filter-tags "${slow_tag}!serial" tests/ || bats_rc=1
+		bats --allow-empty-suite -j "$(sysctl -n hw.ncpu)" --filter-tags "${slow_tag}!serial" tests/ || bats_rc=1
 		wait "$serial_pid" || bats_rc=1
 		echo "-- serial --"
 		cat "$serial_log"
 		rm -f "$serial_log"
 		[ "$bats_rc" = "0" ] || exit 1
-	elif [ "$FAST" = "1" ]; then
+	elif [ -n "$slow_tag" ]; then
 		echo "(GNU parallel not installed: running bats serially)"
-		bats --filter-tags '!slow' tests/
+		bats --filter-tags "${slow_tag%,}" tests/
 	else
 		echo "(GNU parallel not installed: running bats serially)"
 		bats tests/
@@ -198,7 +278,11 @@ if [ -n "$SKIPPED" ]; then
 	fi
 fi
 
-if [ "$FAST" = "1" ]; then
+if [ "${LOOK_ONLY:-0}" = "1" ]; then
+	echo
+	echo "LOOK SCOPE: only film cubes or presets changed, so the bats tests tagged slow and the Swift"
+	echo "  classes ${SLOW_SWIFT//|/, } did not run. A pass for this change; judge the look on a look-sheet."
+elif [ "$FAST" = "1" ]; then
 	echo
 	echo "FAST RUN (--fast): did not run the render golden, the bats tests tagged slow, the Swift"
 	echo "  classes ${SLOW_SWIFT//|/, }, or swift build. Not a pass for a commit: run ./scripts/check.sh."

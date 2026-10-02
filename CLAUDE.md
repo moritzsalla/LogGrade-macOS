@@ -5,9 +5,12 @@ The traps, and where things live. `CONTEXT.md` defines the words (*look* ≠ *ad
 ## Check
 
 ```sh
-./scripts/check.sh          # before a commit: shellcheck, swift-format, Swift, render golden, bats
+./scripts/check.sh          # before a commit: the stages this branch's changes reach
+./scripts/check.sh --all    # everything: shellcheck, swift-format, Swift, render golden, bats
 ./scripts/check.sh --fast   # while iterating; not a pass for a commit
 ```
+
+- Scoped by the path map in `check.sh` (`--plan` prints the scope); a path it does not name runs everything. A film cube or preset alone skips the parity renders but keeps the golden; judge it on a look-sheet. Extend the map when adding a directory.
 
 - A missing tool fails the run; `--allow-skips` accepts a partial one on purpose.
 - shellcheck and bats catch different bugs. macOS runs **bash 3.2**, whose empty arrays under `set -u` differ from modern bash. Run both.
