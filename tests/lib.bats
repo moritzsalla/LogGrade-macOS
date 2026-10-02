@@ -23,7 +23,7 @@
 # requirement is stated here instead of being discovered from the noise.
 bats_require_minimum_version 1.5.0
 
-# TWO TAGS, and scripts/check.sh is what reads them.
+# THREE TAGS, and scripts/check.sh is what reads them.
 #
 #   slow    left out by `check.sh --fast`. A test measured at three seconds or more on this machine:
 #           the app builds, and renders or probes of real footage. Time a new one with
@@ -32,6 +32,8 @@ bats_require_minimum_version 1.5.0
 #           make-app.sh tests both rebuild dist/LogGrade.app, and one asserts on its contents while
 #           the other can be halfway through replacing it. Tag any new test that writes outside
 #           $BATS_TEST_TMPDIR.
+#   app     the app's side, run by a Swift-only scope: the make-app.sh tests build the bundle and hold
+#           the toolchain pin.
 #
 # A serial test runs alongside the parallel pass, one at a time, not after it: those tests
 # conflict with each other, not with the rest, and waiting for the builds would give back most of
@@ -2607,7 +2609,7 @@ _low_band_db() {  # _low_band_db <file> <hz>
 		|| fail "@Observable needs macOS 14; use ObservableObject"
 }
 
-# bats test_tags=slow,serial
+# bats test_tags=slow,serial,app
 @test "the app bundle script produces something launchable" {
 	command -v swift >/dev/null || skip "no swift toolchain"
 	local app="$BATS_TEST_DIRNAME/../dist/LogGrade.app"
@@ -2641,7 +2643,7 @@ _low_band_db() {  # _low_band_db <file> <hz>
 	codesign --verify --deep --strict "$app" || fail "the bundle's signature does not verify"
 }
 
-# bats test_tags=slow,serial
+# bats test_tags=slow,serial,app
 @test "the default build is the optimised one, because the live preview needs it" {
 	command -v swift >/dev/null || skip "no swift toolchain"
 	# THE CONFIGURATION MATTERS MORE THAN IT LOOKS. The live preview grades a whole frame per
@@ -2657,6 +2659,7 @@ _low_band_db() {  # _low_band_db <file> <hz>
 		|| fail "no optimised binary"
 }
 
+# bats test_tags=app
 @test "the app build refuses tools that are not the pinned ones, before compiling anything" {
 	command -v swift >/dev/null || skip "no swift toolchain"
 	# An empty directory stands for a fresh Mac. The message has to name the script that fixes it,
@@ -2738,4 +2741,31 @@ _low_band_db() {  # _low_band_db <file> <hz>
 		|| fail "tile green $tile, expected $expected from still code $v"
 	awk -v a="$expected" -v b="$raw" 'BEGIN { exit !(a - b >= 3) }' \
 		|| fail "fixture grey too dark or light to tell the conversion from none ($expected vs $raw)"
+}
+
+# --- check.sh scope -------------------------------------------------------------
+# The scope decides what a commit's check covers, so a mapping that narrowed silently would turn a
+# real failure into "not affected". Every row is a scope the map is meant to pick; an unknown path
+# must run everything.
+@test "check.sh picks its scope from the changed paths, and an unknown path runs everything" {
+	local root="$BATS_TEST_DIRNAME/.." row paths want got
+	while IFS='|' read -r paths want; do
+		[ -n "$paths" ] || continue
+		got="$(CHECK_PATHS="$(printf '%b' "$paths")" "$root/scripts/check.sh" --plan)"
+		[ "$got" = "scope: $want" ] || fail "paths [$paths]: wanted scope $want, got: $got"
+	done <<-'ROWS'
+		docs/BACKLOG.md|nothing
+		CLAUDE.md\n.claude/skills/x/SKILL.md|nothing
+		luts/film/portra160.cube|look
+		presets/portra160.json\ndocs/BACKLOG.md|look
+		luts/film/portra160.cube\nscripts/lib.sh|full
+		luts/film/portra160.cube\napp/Sources/GradeKit/X.swift|full
+		luts/rendering/neutral.cube|full
+		look.json|full
+		app/Sources/GradeKit/X.swift|swift
+		tests/lib.bats|shell
+		Makefile|full
+	ROWS
+	got="$(CHECK_PATHS="docs/BACKLOG.md" "$root/scripts/check.sh" --all --plan)"
+	[ "$got" = "scope: full (--all)" ] || fail "--all did not force the full run: $got"
 }
