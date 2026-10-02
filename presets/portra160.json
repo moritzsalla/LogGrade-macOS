@@ -5,9 +5,9 @@
     "and white balance are metered in linear before the cube",
     "(scripts/solve-exposure.py) against match.reference_stops; correct.* still adds on top.",
     "",
-    "Portra 160 on 35mm, a lab scan, calibrated against the partner's edits of two of their Portra",
-    "160 scans, registered to video of the same scenes (luts/film/CHANGELOG.txt). The finest-",
-    "grained Portra, so grain is present but quiet. Stills stocks carry an anti-halation layer,",
+    "Portra 160 on 35mm, a lab scan, with the partner's edit (measured scan -> edit) on top, muted",
+    "and as dense as their Portra 160 frames: chroma in the cube, density in reference_stops",
+    "(luts/film/CHANGELOG.txt). The finest-grained Portra, so grain is present but quiet. Stills stocks carry an anti-halation layer,",
     "so the glow is slight."
   ],
   "convert": {
@@ -33,7 +33,7 @@
     "smoothing": 30
   },
   "match": {
-    "reference_stops": -0.4
+    "reference_stops": -1.0
   },
   "finish": {
     "denoise": 0,

@@ -65,6 +65,7 @@ to centre, dragged per clip; export warns about clips whose framing was never lo
 - HDR delivery.
 - Cameras other than iPhone Apple Log. Apple Log 2 maybe, much later.
 - The filmic route: it lost on colour (`docs/PIPELINE.md`).
-- Another Portra 160 calibration round: the looks were declared final on 2026-09-22 (Portra 160/800
-  fitted to the scans and encoded for Adobe-light, #102/#105).
+- A per-pixel Portra 160 calibration: two frames overfit it, and the overfit turned skin grey (2026-10-02).
+  Portra 160 is her measured edit on the stock plus two global numbers; add terms only for a failure a
+  look-sheet shows.
 - A Super 8 cross-check against professional emulations: the looks were declared final on 2026-09-22.
