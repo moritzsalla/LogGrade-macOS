@@ -994,8 +994,9 @@ sys.stdout.buffer.write(array.array("f", [g] * n + [b] * n + [r] * n).tobytes())
 	# are not its business, and __pycache__ is gitignored, which is the repo already saying so.
 	# fixtures/ is excluded because a golden records the files its render READ, as they were when it
 	# was measured, and is refreshed only on a deliberate regenerate: a deleted input is history
-	# there, not a broken pointer.
-	for ref in $(grep -rhoIE --exclude-dir=__pycache__ --exclude-dir=fixtures \
+	# there, not a broken pointer. docs/research/ is local-only (.git/info/exclude) tryout scripts that
+	# name temporary files on purpose.
+	for ref in $(grep -rhoIE --exclude-dir=__pycache__ --exclude-dir=fixtures --exclude-dir=research \
 			'(docs|scripts|tests|luts|bench)/[A-Za-z0-9_/.-]+\.(md|sh|py|jsonl|json|cube|html|txt)' \
 			"$root"/*.md "$root"/docs "$root"/scripts "$root"/tests 2>/dev/null | sort -u); do
 		f="${ref%%[.,)]}"
