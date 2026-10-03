@@ -36,16 +36,16 @@ enum Palette {
 ///
 /// FOUR ROLES, NOT TEN SIZES. There were ten — 8, 9.5, 10, 10.5, 11, 12, 12.5, 13, 15, 33 — chosen
 /// one control at a time, which is how an interface ends up looking assembled rather than designed.
-/// The sizes below are macOS's own metrics for a dense inspector: 13 is the system control size,
-/// 11 is the small control size AppKit uses in inspectors and palettes, 10 is its caption.
+/// The roles are macOS's own text styles (headline 13, subheadline 11, caption 10), so they
+/// track the system's metrics rather than numbers typed here.
 ///
 /// Weight carries the hierarchy rather than size, which is what keeps a panel this dense readable:
 /// a heading is the same size as a value and heavier.
 enum Type {
-    static let heading = Font.system(size: 13, weight: .semibold)
-    static let label = Font.system(size: 11)
-    static let value = Font.system(size: 11, design: .monospaced)
-    static let caption = Font.system(size: 10)
+    static let heading = Font.headline
+    static let label = Font.subheadline
+    static let value = Font.subheadline.monospaced()
+    static let caption = Font.caption
 }
 
 /// Spacing, on a 4-point grid.
@@ -54,10 +54,7 @@ enum Type {
 /// before, which is the same problem the type scale had: no two panels agreed on what "a gap"
 /// meant, so nothing lined up across them.
 ///
-/// NOT EVERYTHING IS ON IT YET. Most gaps are one of these five, but the panel inset (18), a few
-/// row gaps in the clip column and the delivery panel (3, 6, 9, 10, 14) and the picture's
-/// `Space.s + 2` predate the grid and are left as they measure — moving them is a visual change,
-/// not a tidy-up. Don't copy them into a new view.
+/// Every gap is one of these five.
 enum Space {
     static let xs: CGFloat = 4
     static let s: CGFloat = 8

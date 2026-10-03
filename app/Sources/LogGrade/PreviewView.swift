@@ -17,7 +17,7 @@ struct PreviewView: View {
     private var comparing: Bool { model.isComparing }
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: Space.m) {
             ZStack {
                 Rectangle().fill(Palette.well)
                 // WITHOUT A BASELINE YET, THE PICTURE STAYS AS IT IS and the readout says so, rather
@@ -42,7 +42,7 @@ struct PreviewView: View {
                                 contentMode: .fit)
                         }
                     }
-                    .padding(Space.s + 2)
+                    .padding(Space.s)
                     // NOT DIMMED WHILE IT WORKS. Greying the picture out to say "busy" makes the
                     // one thing you are trying to judge unjudgeable, at exactly the moment you are
                     // judging it. The spinner in the corner says the same thing and leaves the
@@ -51,7 +51,6 @@ struct PreviewView: View {
                         if preview.isRendering {
                             ProgressView()
                                 .controlSize(.small)
-                                .scaleEffect(0.7)
                                 .padding(Space.s)
                         }
                     }
@@ -73,7 +72,7 @@ struct PreviewView: View {
 
             ScopesView(scopes: preview.scopes)
 
-            HStack(spacing: 12) {
+            HStack(spacing: Space.m) {
                 // NO PREVIEW BUTTON. Every path that changes the look updates the picture on its
                 // own. A button that re-does what just happened is a button that teaches you to
                 // distrust the picture.
@@ -90,12 +89,10 @@ struct PreviewView: View {
 
             // Said every time, not only on failure: a preview that quietly omits half the chain is
             // output that looks done, which is the failure this whole labelling exists to prevent.
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.xs) {
                 if preview.isRendering {
                     ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.6)
-                        .frame(width: 11, height: 11)
+                        .controlSize(.mini)
                         .tint(Palette.inkTertiary)
                 }
                 Text(preview.status)
@@ -105,7 +102,7 @@ struct PreviewView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(18)
+        .padding(Space.l)
         .background(Palette.surround)
     }
 }

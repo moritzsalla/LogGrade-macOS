@@ -19,7 +19,7 @@ struct DeliveryPanel: View {
     private static let cropStepperPixels = 8
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Space.s) {
             presetRow
             if model.project.exportPreset == .custom {
                 aspectRow
@@ -42,7 +42,7 @@ struct DeliveryPanel: View {
     /// ONE SHAPE. Custom used to be the Instagram checkboxes plus an "Add shape" editor, which
     /// opened with nothing ticked and so could not export; the presets already are those shapes.
     private var aspectRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Space.s) {
             Text("Aspect").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
             Picker(
                 "",
@@ -87,7 +87,7 @@ struct DeliveryPanel: View {
     /// By the short edge, with the pixels it comes to for the chosen aspect, so "1080p" is never a
     /// guess about which side is 1080.
     private var sizeRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Space.s) {
             Text("Size").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
             Picker("", selection: custom(\.shortSide)) {
                 ForEach(Project.Delivery.shortSides, id: \.self) { side in
@@ -148,8 +148,8 @@ struct DeliveryPanel: View {
     // Says where 10-bit and ProRes help, because they read as simply better, and a file a platform
     // re-encodes gains nothing from either.
     private var codecRow: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: Space.xs) {
+            HStack(spacing: Space.s) {
                 Text("Codec").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
                 Picker("", selection: custom(\.codec)) {
                     ForEach(Project.Delivery.Codec.allCases, id: \.self) {
@@ -190,7 +190,7 @@ struct DeliveryPanel: View {
     }
 
     private var formatRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Space.s) {
             Text("File").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
             Picker("", selection: custom(\.container)) {
                 Text(".mp4").tag(Project.Delivery.Container.mp4)
@@ -244,7 +244,7 @@ struct DeliveryPanel: View {
     }
 
     private var saveRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Space.s) {
             Text("Save to").font(Type.label).foregroundColor(Palette.inkSecondary)
                 .fixedSize()
             Text(model.outputDirectory.map { $0.path } ?? "Add a clip first")
@@ -311,7 +311,7 @@ struct DeliveryPanel: View {
     }
 
     private var cropRow: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Space.s) {
             Text(cropLabel).font(Type.label).foregroundColor(Palette.inkSecondary)
             if let geometry = model.cropGeometry {
                 if model.cropOffset != nil {
