@@ -74,6 +74,13 @@ let mainWindow = MainWindow(
     grade: gradeModel, actions: actions)
 let window = mainWindow.window
 actions.window = window
+// Held by Swift for the app's lifetime; AppKit's release on close would leave that dangling.
+window.isReleasedWhenClosed = false
+// One-window app: closing it quits, even with Settings still open, or every menu command would
+// act on a window nobody can bring back.
+NotificationCenter.default.addObserver(
+    forName: NSWindow.willCloseNotification, object: window, queue: .main
+) { _ in app.terminate(nil) }
 let settings = SettingsWindow(queue: renderQueue)
 
 // THE KEYBOARD. A grading tool lives under the fingers: you look, you nudge, you compare, you move
@@ -93,7 +100,10 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
     // belong to whatever has focus, such as the clip list. Shift moves by ten. Only the two arrows
     // along the axis the window moves: up and down on a portrait clip, left and right on a
     // landscape one.
-    if grade.cropIsPerClip, let geometry = grade.cropGeometry {
+    // The clip list's own arrows win while it has focus (an outline view is a table view).
+    if grade.cropIsPerClip, !(window.firstResponder is NSTableView),
+        let geometry = grade.cropGeometry
+    {
         let step = event.modifierFlags.contains(.shift) ? 10 : 1
         let (back, forward) =
             geometry.axis == .y
@@ -109,7 +119,10 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
     }
     // ONLY WHAT A MENU CANNOT DO. Compare has to be HELD — pressed and released — and a menu item
     // fires once on selection, so it stays here.
-    if key == "c" && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
+    // Not `.deviceIndependentFlagsMask`: that includes Caps Lock, which silently disabled compare.
+    if key == "c"
+        && event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
+    {
         // Key repeat sends keyDown again while held; one compare per press.
         if !event.isARepeat { grade.beginCompare() }
         return nil
