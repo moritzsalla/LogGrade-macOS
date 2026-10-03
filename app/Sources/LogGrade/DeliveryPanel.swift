@@ -20,9 +20,6 @@ struct DeliveryPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("deliver")
-                .font(Type.heading)
-                .foregroundColor(Palette.ink)
             presetRow
             if model.project.exportPreset == .custom {
                 aspectRow
@@ -46,7 +43,7 @@ struct DeliveryPanel: View {
     /// opened with nothing ticked and so could not export; the presets already are those shapes.
     private var aspectRow: some View {
         HStack(spacing: 8) {
-            Text("aspect").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
+            Text("Aspect").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
             Picker(
                 "",
                 selection: Binding(
@@ -68,9 +65,9 @@ struct DeliveryPanel: View {
             }
             .labelsHidden().frame(width: 84)
             Spacer(minLength: 4)
-            Text("fps").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
+            Text("Frame rate").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
             Picker("", selection: fpsBinding) {
-                Text("source").tag(0)
+                Text("Source").tag(0)
                 Text("30").tag(30)
                 Text("24").tag(24)
                 Text("12").tag(12)
@@ -89,7 +86,7 @@ struct DeliveryPanel: View {
     /// guess about which side is 1080.
     private var sizeRow: some View {
         HStack(spacing: 8) {
-            Text("size").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
+            Text("Size").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
             Picker("", selection: custom(\.shortSide)) {
                 ForEach(Project.Delivery.shortSides, id: \.self) { side in
                     Text(sizeLabel(side)).tag(side)
@@ -145,7 +142,7 @@ struct DeliveryPanel: View {
     private var codecRow: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text("codec").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
+                Text("Codec").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
                 Picker("", selection: custom(\.codec)) {
                     ForEach(Project.Delivery.Codec.allCases, id: \.self) {
                         Text($0.label).tag($0)
@@ -153,11 +150,11 @@ struct DeliveryPanel: View {
                 }
                 .labelsHidden().frame(width: 130)
                 Spacer(minLength: 4)
-                Text("quality").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
+                Text("Quality").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
                 Picker("", selection: custom(\.quality)) {
-                    Text("auto").tag(Project.Delivery.Quality.auto)
-                    Text("high").tag(Project.Delivery.Quality.high)
-                    Text("max").tag(Project.Delivery.Quality.max)
+                    Text("Auto").tag(Project.Delivery.Quality.auto)
+                    Text("High").tag(Project.Delivery.Quality.high)
+                    Text("Maximum").tag(Project.Delivery.Quality.max)
                 }
                 .labelsHidden().frame(width: 76)
                 .disabled(model.project.customDelivery.codec.isProRes)
@@ -186,7 +183,7 @@ struct DeliveryPanel: View {
 
     private var formatRow: some View {
         HStack(spacing: 8) {
-            Text("file").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
+            Text("File").font(Type.label).foregroundColor(Palette.inkSecondary).fixedSize()
             Picker("", selection: custom(\.container)) {
                 Text(".mp4").tag(Project.Delivery.Container.mp4)
                 Text(".mov").tag(Project.Delivery.Container.mov)
@@ -194,7 +191,7 @@ struct DeliveryPanel: View {
             .labelsHidden().frame(width: 76)
             .disabled(model.project.customDelivery.codec.isProRes)
             Spacer(minLength: 4)
-            Toggle("sound", isOn: custom(\.audio))
+            Toggle("Sound", isOn: custom(\.audio))
                 .toggleStyle(.checkbox)
                 .font(Type.label)
                 .foregroundColor(Palette.inkSecondary)
@@ -240,9 +237,9 @@ struct DeliveryPanel: View {
 
     private var saveRow: some View {
         HStack(spacing: 8) {
-            Text("save to").font(Type.label).foregroundColor(Palette.inkSecondary)
+            Text("Save to").font(Type.label).foregroundColor(Palette.inkSecondary)
                 .fixedSize()
-            Text(model.outputDirectory.map { $0.path } ?? "drop a clip first")
+            Text(model.outputDirectory.map { $0.path } ?? "Add a clip first")
                 .font(Type.value)
                 .foregroundColor(Palette.inkTertiary)
                 .lineLimit(1).truncationMode(.head)
@@ -253,7 +250,7 @@ struct DeliveryPanel: View {
                 let panel = NSOpenPanel()
                 panel.canChooseDirectories = true
                 panel.canChooseFiles = false
-                panel.prompt = "deliver here"
+                panel.prompt = "Choose"
                 if panel.runModal() == .OK, let url = panel.url {
                     model.chooseOutputDirectory(url)
                 }
@@ -302,7 +299,7 @@ struct DeliveryPanel: View {
     /// croppable aspect the moment the set opened up.
     private var cropLabel: String {
         model.project.delivery.clipFramedTargets(model.selectedFrameSize).first
-            .map { "\($0.aspectWidth):\($0.aspectHeight) crop" } ?? "crop"
+            .map { "\($0.aspectWidth):\($0.aspectHeight) crop" } ?? "Crop"
     }
 
     private var cropRow: some View {
@@ -343,18 +340,18 @@ struct DeliveryPanel: View {
                         model.nudgeCrop(by: -upward)
                     }
                     .labelsHidden()
-                    Button("clear") { model.cropOffset = nil }
+                    Button("Clear") { model.cropOffset = nil }
                         .buttonStyle(.borderless).font(Type.caption)
                 } else {
                     // Named as an action, because it is one and nothing else will do it: the
                     // framing is a composition call per clip and the engine will not render a
                     // feed without it.
-                    Text("drag the picture to place it")
+                    Text("Drag the picture to place it")
                         .font(Type.caption).foregroundColor(Palette.lamp)
                 }
             } else {
                 // The box waits for the engine to measure the decoded frame (`GradeModel.cropGeometry`).
-                Text(model.selectedClip == nil ? "select a clip first" : "measuring the clip…")
+                Text(model.selectedClip == nil ? "Select a clip first" : "Measuring the clip…")
                     .font(Type.caption).foregroundColor(Palette.inkTertiary)
             }
         }

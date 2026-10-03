@@ -102,8 +102,8 @@ final class GradeModel: ObservableObject {
     /// the unit of work rather than a file.
     @Published var project: Project
 
-    /// Told when something finishes that you were not watching.
-    weak var toaster: Toaster?
+    /// Told when something the person asked for could not be done: a title and the reason.
+    var reportProblem: (String, String) -> Void = { _, _ in }
 
     /// What a control goes back to when you double-click its name: the value it had in the
     /// active preset, not a neutral. "Default" in a grading tool means the look you started this
@@ -594,6 +594,24 @@ final class GradeModel: ObservableObject {
         case selected, all
     }
 
+    /// Why an export cannot run, in the words of whatever is actually stopping it. Nil when it can.
+    ///
+    /// ONE PLACE, because the toolbar's Export, the menu items and the Export tab all have to give
+    /// the same reason (docs/APP_DESIGN.md: disabled controls say why).
+    func exportBlocker(queue: RenderQueue, _ scope: ExportScope) -> String? {
+        if queue.isRunning { return "An export is already running." }
+        if clipNames.isEmpty { return "Add a clip first." }
+        if project.delivery.targets.isEmpty { return "Choose at least one deliverable." }
+        if let blocker = blockers.first { return blocker.description }
+        if outputDirectory == nil { return "Choose a folder to save into." }
+        if scope == .selected {
+            guard let selected = selectedClip, clipNames.contains(selected.stem) else {
+                return "Select a clip to export."
+            }
+        }
+        return nil
+    }
+
     /// Renders clips through the engine, each with its own settings from the project. The look is
     /// written to a file per clip and handed over with LOOK_FILE, so a render never edits the
     /// checkout's own look.json.
@@ -643,9 +661,7 @@ final class GradeModel: ObservableObject {
                 at: destination,
                 withIntermediateDirectories: true)
         } catch {
-            toaster?.show(
-                "exclamationmark.triangle.fill", "Export not started",
-                String(describing: error))
+            reportProblem("The export didn’t start.", String(describing: error))
             return
         }
         queue.clearFinished()
@@ -907,4 +923,5 @@ enum DefaultsKey {
     static let lastProject = "lastProject"
     static let openStages = "openStages"
     static let concurrency = "concurrency"
+    static let inspectorTab = "inspectorTab"
 }

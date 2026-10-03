@@ -125,7 +125,7 @@ final class RenderQueueTests: XCTestCase {
         XCTAssertEqual(queue.jobs[0].frame, 5)
     }
 
-    /// The count the "clips delivered" toast shows. It was read before the delivered state landed,
+    /// The delivered count `onFinished` reports. It was read before the delivered state landed,
     /// so a run that delivered a clip announced zero.
     func testTheFinishedCountIncludesTheClipJustDelivered() throws {
         let engine = try stubEngine(

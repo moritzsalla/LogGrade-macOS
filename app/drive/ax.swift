@@ -85,12 +85,12 @@ func matches(_ pid: pid_t, _ needle: String) -> [AXUIElement] {
         }
         return true
     }
-    // The window's own control before the menu item of the same name: "Export clip" is both.
+    // The window's own control before the menu item of the same name: "Export" is both.
     return found.filter { text($0, kAXRoleAttribute) != kAXMenuItemRole }
         + found.filter { text($0, kAXRoleAttribute) == kAXMenuItemRole }
 }
 
-/// Polls, because a control appears only once the splash and the first render are done; a fixed
+/// Polls, because a control appears only once the first render is done; a fixed
 /// sleep is either too short on a cold start or wasted on a warm one.
 func waitFor(_ pid: pid_t, _ needle: String, _ timeout: Double) -> [AXUIElement] {
     let deadline = Date().addingTimeInterval(timeout)
