@@ -19,8 +19,8 @@ struct InspectorView: View {
                 denoiseStage
                 grainStage
             }
-            .padding(.vertical, 18)
-            .padding(.trailing, 16)
+            .padding(.vertical, Space.l)
+            .padding(.trailing, Space.l)
             .frame(maxWidth: .infinity, alignment: .top)
         }
         .background(Palette.panel)
@@ -105,7 +105,7 @@ struct InspectorView: View {
     }
 
     private var presetRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Space.s) {
             Text("Look").font(Type.label).foregroundColor(Palette.inkSecondary)
             Picker(
                 "",
@@ -126,10 +126,10 @@ struct InspectorView: View {
                 .disabled(!model.hasAdjustments)
         }
         .padding(.leading, Self.inset)
-        .padding(.bottom, 18)
+        .padding(.bottom, Space.l)
     }
 
-    static let inset: CGFloat = 18
+    static let inset = Space.l
 
     /// One section, collapsible, with a switch. Which ones are open is remembered.
     ///

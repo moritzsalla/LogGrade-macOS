@@ -19,7 +19,7 @@ struct QueuePanel: View {
     @ObservedObject var queue: RenderQueue
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Space.s) {
             // THE SELECTED CLIP IS THE TOOLBAR'S EXPORT, the window's one prominent action; this
             // section is the whole list and what happened to each clip.
             HStack(spacing: Space.s) {

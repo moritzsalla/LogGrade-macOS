@@ -18,7 +18,7 @@ struct ScopesView: View {
     private static let vectorSpan = 0.7
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: Space.s) {
             panel("levels") { histogram }
             panel("parade") { parade }
             panel("vector") { vectorscope }
@@ -29,7 +29,7 @@ struct ScopesView: View {
         _ title: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Space.xs) {
             Text(title).font(Type.caption).foregroundColor(Palette.inkTertiary)
             content()
                 .frame(height: 78)
