@@ -64,8 +64,17 @@ public final class ClipList: ObservableObject {
         return added
     }
 
-    public func remove(_ stem: String) {
-        entries.removeAll { $0.stem == stem }
+    /// The entry and where it was, so an undo can put it back in capture order.
+    @discardableResult
+    public func remove(_ stem: String) -> (entry: Entry, index: Int)? {
+        guard let index = entries.firstIndex(where: { $0.stem == stem }) else { return nil }
+        return (entries.remove(at: index), index)
+    }
+
+    /// Puts back an entry `remove` returned, as it was measured.
+    public func restore(_ entry: Entry, at index: Int) {
+        guard !entries.contains(where: { $0.stem == entry.stem }) else { return }
+        entries.insert(entry, at: min(index, entries.count))
     }
 
     public var usable: [Entry] { entries.filter(\.isUsable) }

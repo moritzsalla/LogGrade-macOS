@@ -54,9 +54,11 @@ struct DeliveryPanel: View {
                                 aspectTag($0.0, $0.1) == tag
                             })
                         else { return }
-                        model.project.customDelivery.targets = [
-                            .custom(aspectWidth: w, aspectHeight: h)
-                        ]
+                        model.undoable("Aspect") {
+                            model.project.customDelivery.targets = [
+                                .custom(aspectWidth: w, aspectHeight: h)
+                            ]
+                        }
                     })
             ) {
                 ForEach(Deliverable.customAspects.map { aspectTag($0.0, $0.1) }, id: \.self) {
@@ -110,7 +112,9 @@ struct DeliveryPanel: View {
             "",
             selection: Binding(
                 get: { model.project.exportPreset },
-                set: { model.project.exportPreset = $0 })
+                set: { preset in
+                    model.undoable("Export Preset") { model.project.exportPreset = preset }
+                })
         ) {
             ForEach(Project.ExportPreset.allCases, id: \.self) { Text($0.label).tag($0) }
         }
@@ -134,7 +138,11 @@ struct DeliveryPanel: View {
     private func custom<T>(_ path: WritableKeyPath<Project.Delivery, T>) -> Binding<T> {
         Binding(
             get: { model.project.customDelivery[keyPath: path] },
-            set: { model.project.customDelivery[keyPath: path] = $0 })
+            set: { value in
+                model.undoable("Export Setting") {
+                    model.project.customDelivery[keyPath: path] = value
+                }
+            })
     }
 
     // Says where 10-bit and ProRes help, because they read as simply better, and a file a platform
@@ -252,7 +260,7 @@ struct DeliveryPanel: View {
                 panel.canChooseFiles = false
                 panel.prompt = "Choose"
                 if panel.runModal() == .OK, let url = panel.url {
-                    model.chooseOutputDirectory(url)
+                    model.undoable("Save Location") { model.chooseOutputDirectory(url) }
                 }
             } label: {
                 Label("Choose…", systemImage: "folder")
@@ -314,7 +322,11 @@ struct DeliveryPanel: View {
                         "",
                         value: Binding(
                             get: { model.cropOffset ?? 0 },
-                            set: { model.cropOffset = geometry.clamp($0) }),
+                            set: { offset in
+                                model.undoable("Framing") {
+                                    model.cropOffset = geometry.clamp(offset)
+                                }
+                            }),
                         formatter: Self.pixels
                     )
                     .font(Type.value)
@@ -340,7 +352,7 @@ struct DeliveryPanel: View {
                         model.nudgeCrop(by: -upward)
                     }
                     .labelsHidden()
-                    Button("Clear") { model.cropOffset = nil }
+                    Button("Clear") { model.undoable("Clear Framing") { model.cropOffset = nil } }
                         .buttonStyle(.borderless).font(Type.caption)
                 } else {
                     // Named as an action, because it is one and nothing else will do it: the
@@ -385,7 +397,11 @@ struct DeliveryPanel: View {
     private var fpsBinding: Binding<Int> {
         Binding(
             get: { model.project.delivery.fps ?? 0 },
-            set: { model.project.customDelivery.fps = $0 == 0 ? nil : $0 })
+            set: { fps in
+                model.undoable("Frame Rate") {
+                    model.project.customDelivery.fps = fps == 0 ? nil : fps
+                }
+            })
     }
 }
 
@@ -416,6 +432,7 @@ struct CropOverlay: View {
     /// it to the box's CURRENT position adds it again on every event and the box runs off the
     /// frame after a few pixels of travel. It has to be added to where the box was.
     @State private var startedAt: Int?
+    @State private var projectAtStart: Project?
 
     var body: some View {
         GeometryReader { geo in
@@ -457,7 +474,10 @@ struct CropOverlay: View {
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         let from = startedAt ?? model.cropOffset ?? 0
-                        if startedAt == nil { startedAt = from }
+                        if startedAt == nil {
+                            startedAt = from
+                            projectAtStart = model.project
+                        }
                         let travelled =
                             geometry.axis == .y
                             ? value.translation.height / geo.size.height
@@ -465,7 +485,13 @@ struct CropOverlay: View {
                         model.cropOffset = geometry.offset(
                             forFraction: geometry.fraction(forOffset: from) + travelled)
                     }
-                    .onEnded { _ in startedAt = nil }
+                    .onEnded { _ in
+                        startedAt = nil
+                        if let before = projectAtStart {
+                            model.recordEdit("Framing", since: before)
+                        }
+                        projectAtStart = nil
+                    }
             )
             .allowsHitTesting(framedPerClip)
         }
