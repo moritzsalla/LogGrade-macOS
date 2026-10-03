@@ -526,9 +526,6 @@ final class GradeModel: ObservableObject {
 
     /// The window's, so Edit ▸ Undo and a text field's own typing share one history.
     weak var undoManager: UndoManager?
-    /// The project as it was when a drag or a typed value began, so the whole gesture is one step.
-    private var editStart: Project?
-
     /// WHOLE-PROJECT SNAPSHOTS, not per-property inverses: every grading and delivery change is a
     /// write to `project`, a value type, so one mechanism covers all of them and cannot drift.
     func undoable(_ name: String, _ change: () -> Void) {
@@ -537,13 +534,10 @@ final class GradeModel: ObservableObject {
         recordUndo(name, before: before)
     }
 
-    func beginEdit() {
-        if editStart == nil { editStart = project }
-    }
-
-    func endEdit(_ name: String) {
-        guard let before = editStart else { return }
-        editStart = nil
+    /// A drag or a typed value is one step: the gesture keeps the project as it began and hands
+    /// it back here when it ends. HELD BY THE GESTURE, not here, so a drag that never ends or
+    /// two that overlap cannot leave a stale start for the next one.
+    func recordEdit(_ name: String, since before: Project) {
         recordUndo(name, before: before)
     }
 
@@ -617,6 +611,8 @@ final class GradeModel: ObservableObject {
         opened.adopt(presets: project.presets, fallback: Self.neutralPresetName)
         project = opened
         projectURL = url
+        // Another shoot: its steps would write this one's grades into the new file.
+        undoManager?.removeAllActions()
         RecentProjects.note(url)
         renderPreview()
     }

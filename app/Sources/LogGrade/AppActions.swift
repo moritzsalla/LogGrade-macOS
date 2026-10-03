@@ -33,10 +33,9 @@ final class AppActions {
     /// The neighbour takes the selection, so the keyboard can keep removing.
     func remove(_ stem: String) {
         let usable = clips.usable
-        guard let url = clips.entries.first(where: { $0.stem == stem })?.url else { return }
-        clips.remove(stem)
+        guard let (entry, position) = clips.remove(stem) else { return }
         // The clip's grade and framing stay in the project, so putting it back restores them.
-        window?.undoManager?.registerUndo(withTarget: self) { $0.restore(url, stem: stem) }
+        window?.undoManager?.registerUndo(withTarget: self) { $0.restore(entry, at: position) }
         window?.undoManager?.setActionName("Remove Clip")
         guard let grade, grade.selectedClip?.stem == stem else { return }
         let index = usable.firstIndex(where: { $0.stem == stem }) ?? 0
@@ -44,12 +43,10 @@ final class AppActions {
         grade.selectedClip = rest.isEmpty ? nil : rest[min(index, rest.count - 1)]
     }
 
-    private func restore(_ url: URL, stem: String) {
-        take([url])
-        if let entry = clips.usable.first(where: { $0.stem == stem }) {
-            grade?.selectedClip = entry
-        }
-        window?.undoManager?.registerUndo(withTarget: self) { $0.remove(stem) }
+    private func restore(_ entry: ClipList.Entry, at position: Int) {
+        clips.restore(entry, at: position)
+        if entry.isUsable { grade?.selectedClip = entry }
+        window?.undoManager?.registerUndo(withTarget: self) { $0.remove(entry.stem) }
         window?.undoManager?.setActionName("Remove Clip")
     }
 

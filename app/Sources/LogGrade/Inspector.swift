@@ -196,6 +196,8 @@ struct InspectorView: View {
         let original: Double?
         let model: GradeModel
         let set: (Double) -> Void
+        /// The project as the drag began; not part of equality.
+        @State private var dragStart: Project?
 
         static func == (a: Self, b: Self) -> Bool {
             a.value == b.value && a.label == b.label && a.range == b.range
@@ -222,8 +224,12 @@ struct InspectorView: View {
                     .help(original == nil ? "" : "Double-click to reset")
                 Slider(value: binding, in: range) { editing in
                     // The whole drag is one undo step, recorded on release.
-                    guard !editing else { return model.beginEdit() }
-                    model.endEdit(label)
+                    guard !editing else {
+                        dragStart = model.project
+                        return
+                    }
+                    if let before = dragStart { model.recordEdit(label, since: before) }
+                    dragStart = nil
                     // On release, so the settled picture is kept for switching back.
                     model.renderPreview()
                 }
@@ -233,9 +239,7 @@ struct InspectorView: View {
                 // go is a control you cannot find a value with.
                 .onChange(of: value) { _ in model.liveUpdate() }
                 // A typed value is final, like a release.
-                ValueField(
-                    value: binding, format: format, begin: model.beginEdit,
-                    end: { model.endEdit(label) }, commit: model.renderPreview)
+                ValueField(value: binding, format: format, label: label, model: model)
             }
         }
     }
@@ -248,9 +252,9 @@ struct InspectorView: View {
     private struct ValueField: View {
         @Binding var value: Double
         let format: String
-        let begin: () -> Void
-        let end: () -> Void
-        let commit: () -> Void
+        let label: String
+        let model: GradeModel
+        @State private var projectWhenOpened: Project?
         @State private var editing = false
         @State private var valueWhenOpened: Double?
         @FocusState private var focused: Bool
@@ -268,11 +272,13 @@ struct InspectorView: View {
                         // Only for a changed value: clicking a readout to look at it is not
                         // worth a three-second render.
                         .onDisappear {
-                            end()
-                            if value != valueWhenOpened { commit() }
+                            if let before = projectWhenOpened {
+                                model.recordEdit(label, since: before)
+                            }
+                            if value != valueWhenOpened { model.renderPreview() }
                         }
                         .onAppear {
-                            begin()
+                            projectWhenOpened = model.project
                             valueWhenOpened = value
                             focused = true
                         }

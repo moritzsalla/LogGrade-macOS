@@ -432,6 +432,7 @@ struct CropOverlay: View {
     /// it to the box's CURRENT position adds it again on every event and the box runs off the
     /// frame after a few pixels of travel. It has to be added to where the box was.
     @State private var startedAt: Int?
+    @State private var projectAtStart: Project?
 
     var body: some View {
         GeometryReader { geo in
@@ -475,7 +476,7 @@ struct CropOverlay: View {
                         let from = startedAt ?? model.cropOffset ?? 0
                         if startedAt == nil {
                             startedAt = from
-                            model.beginEdit()
+                            projectAtStart = model.project
                         }
                         let travelled =
                             geometry.axis == .y
@@ -486,7 +487,10 @@ struct CropOverlay: View {
                     }
                     .onEnded { _ in
                         startedAt = nil
-                        model.endEdit("Framing")
+                        if let before = projectAtStart {
+                            model.recordEdit("Framing", since: before)
+                        }
+                        projectAtStart = nil
                     }
             )
             .allowsHitTesting(framedPerClip)
