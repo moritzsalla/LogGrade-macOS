@@ -61,7 +61,9 @@ struct InspectorView: View {
     private var stabilisationStage: some View {
         stage(
             "Stabilisation",
-            isOn: Binding(get: { model.stabilise }, set: { model.stabilise = $0 }),
+            isOn: Binding(
+                get: { model.stabilise },
+                set: { on in model.undoable("Stabilisation") { model.stabilise = on } }),
             help: "Smooths handheld shake in this clip. It crops in slightly. Not shown in the "
                 + "still; it is in the export."
         ) {
@@ -213,13 +215,15 @@ struct InspectorView: View {
                     .contentShape(Rectangle())
                     .onTapGesture(count: 2) {
                         guard let original else { return }
-                        set(original)
+                        model.undoable(label) { set(original) }
                         model.liveUpdate()
                         model.renderPreview()
                     }
                     .help(original == nil ? "" : "Double-click to reset")
                 Slider(value: binding, in: range) { editing in
-                    guard !editing else { return }
+                    // The whole drag is one undo step, recorded on release.
+                    guard !editing else { return model.beginEdit() }
+                    model.endEdit(label)
                     // On release, so the settled picture is kept for switching back.
                     model.renderPreview()
                 }
@@ -229,9 +233,9 @@ struct InspectorView: View {
                 // go is a control you cannot find a value with.
                 .onChange(of: value) { _ in model.liveUpdate() }
                 // A typed value is final, like a release.
-                ValueField(value: binding, format: format) {
-                    model.renderPreview()
-                }
+                ValueField(
+                    value: binding, format: format, begin: model.beginEdit,
+                    end: { model.endEdit(label) }, commit: model.renderPreview)
             }
         }
     }
@@ -244,6 +248,8 @@ struct InspectorView: View {
     private struct ValueField: View {
         @Binding var value: Double
         let format: String
+        let begin: () -> Void
+        let end: () -> Void
         let commit: () -> Void
         @State private var editing = false
         @State private var valueWhenOpened: Double?
@@ -261,8 +267,12 @@ struct InspectorView: View {
                         // when focus goes, and clicking away is also how a typed value is kept.
                         // Only for a changed value: clicking a readout to look at it is not
                         // worth a three-second render.
-                        .onDisappear { if value != valueWhenOpened { commit() } }
+                        .onDisappear {
+                            end()
+                            if value != valueWhenOpened { commit() }
+                        }
                         .onAppear {
+                            begin()
                             valueWhenOpened = value
                             focused = true
                         }

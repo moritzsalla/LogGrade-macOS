@@ -55,7 +55,7 @@ final class GradeModel: ObservableObject {
     var matches: Bool { adjust.match && !bypassed.contains(.adjust) }
 
     func setMatch(_ on: Bool) {
-        adjust.match = on
+        undoable("Match Exposure") { adjust.match = on }
         renderPreview()
     }
 
@@ -66,13 +66,16 @@ final class GradeModel: ObservableObject {
 
     func setEnabled(_ stage: Look.Stage, _ enabled: Bool) {
         let preset = defaultLook
-        editClip { s in
-            switch stage {
-            case .adjust: s.adjustOff = !enabled
-            // A switch that turns on at strength 0 does nothing, which reads as broken.
-            case .denoise:
-                s.denoise = enabled ? (preset.finish.denoise > 0 ? preset.finish.denoise : 1) : nil
-            case .grain: s.grain = enabled
+        undoable(stage.rawValue) {
+            editClip { s in
+                switch stage {
+                case .adjust: s.adjustOff = !enabled
+                // A switch that turns on at strength 0 does nothing, which reads as broken.
+                case .denoise:
+                    s.denoise =
+                        enabled ? (preset.finish.denoise > 0 ? preset.finish.denoise : 1) : nil
+                case .grain: s.grain = enabled
+                }
             }
         }
         renderPreview()
@@ -519,6 +522,55 @@ final class GradeModel: ObservableObject {
     let changes = Changes()
     private var relayed: Set<AnyCancellable> = []
 
+    // MARK: - undo
+
+    /// The window's, so Edit ▸ Undo and a text field's own typing share one history.
+    weak var undoManager: UndoManager?
+    /// The project as it was when a drag or a typed value began, so the whole gesture is one step.
+    private var editStart: Project?
+
+    /// WHOLE-PROJECT SNAPSHOTS, not per-property inverses: every grading and delivery change is a
+    /// write to `project`, a value type, so one mechanism covers all of them and cannot drift.
+    func undoable(_ name: String, _ change: () -> Void) {
+        let before = project
+        change()
+        recordUndo(name, before: before)
+    }
+
+    func beginEdit() {
+        if editStart == nil { editStart = project }
+    }
+
+    func endEdit(_ name: String) {
+        guard let before = editStart else { return }
+        editStart = nil
+        recordUndo(name, before: before)
+    }
+
+    private func recordUndo(_ name: String, before: Project) {
+        guard before != project, let undoManager else { return }
+        let stem = selectedClip?.stem
+        // Registered from inside an undo, this lands on the redo stack, which is how redo works.
+        undoManager.registerUndo(withTarget: self) { model in
+            let after = model.project
+            model.restore(before, selecting: stem)
+            model.recordUndo(name, before: after)
+        }
+        undoManager.setActionName(name)
+    }
+
+    /// Shows the result of an undo (HIG): the clip it changed is selected again.
+    private func restore(_ snapshot: Project, selecting stem: String?) {
+        project = snapshot
+        if let stem, stem != selectedClip?.stem,
+            let entry = clips?.usable.first(where: { $0.stem == stem })
+        {
+            selectedClip = entry
+        } else {
+            renderPreview()
+        }
+    }
+
     // MARK: - presets and the project file
 
     /// Switches to a preset, which replaces the whole look.
@@ -527,11 +579,13 @@ final class GradeModel: ObservableObject {
     /// graded with one choice still takes one click; a clip already given a look keeps it.
     func apply(preset name: String) {
         guard project.presets.contains(where: { $0.name == name }) else { return }
-        project.activePreset = name
-        // Grain follows the preset: a film stock has one, Neutral does not.
-        editClip {
-            $0.look = name
-            $0.grain = nil
+        undoable("Look") {
+            project.activePreset = name
+            // Grain follows the preset: a film stock has one, Neutral does not.
+            editClip {
+                $0.look = name
+                $0.grain = nil
+            }
         }
         renderPreview()
     }
@@ -539,7 +593,7 @@ final class GradeModel: ObservableObject {
     /// The selected clip's grade back to where its look starts. Other clips keep theirs: a reset
     /// while looking at one clip must not undo work on eighteen others.
     func resetAdjustments() {
-        editClip { $0 = $0.gradeReset }
+        undoable("Reset Adjustments") { editClip { $0 = $0.gradeReset } }
         renderPreview()
     }
 
@@ -552,7 +606,7 @@ final class GradeModel: ObservableObject {
     func saveProject(to url: URL) throws {
         try project.serialised().write(to: url, options: .atomic)
         projectURL = url
-        UserDefaults.standard.set(url, forKey: DefaultsKey.lastProject)
+        RecentProjects.note(url)
     }
 
     /// The app's own rendering with nothing on top: the preset a new project starts on.
@@ -563,7 +617,7 @@ final class GradeModel: ObservableObject {
         opened.adopt(presets: project.presets, fallback: Self.neutralPresetName)
         project = opened
         projectURL = url
-        UserDefaults.standard.set(url, forKey: DefaultsKey.lastProject)
+        RecentProjects.note(url)
         renderPreview()
     }
 
@@ -755,7 +809,9 @@ final class GradeModel: ObservableObject {
     /// inspector can be typed into.
     func nudgeCrop(by pixels: Int) {
         guard cropIsPerClip, let geometry = cropGeometry else { return }
-        cropOffset = geometry.clamp((cropOffset ?? geometry.maximumOffset / 2) + pixels)
+        undoable("Framing") {
+            cropOffset = geometry.clamp((cropOffset ?? geometry.maximumOffset / 2) + pixels)
+        }
     }
 
     /// The window's geometry for the selected clip, from what was measured about it rather than
@@ -924,4 +980,28 @@ enum DefaultsKey {
     static let openStages = "openStages"
     static let concurrency = "concurrency"
     static let inspectorTab = "inspectorTab"
+    static let recentProjects = "recentProjects"
+}
+
+/// File ▸ Open Recent, newest first. Kept by hand: `NSDocumentController`'s list only reopens
+/// files it can open as an `NSDocument`, which a project here is not.
+enum RecentProjects {
+    private static let limit = 10
+
+    static var urls: [URL] {
+        (UserDefaults.standard.stringArray(forKey: DefaultsKey.recentProjects) ?? [])
+            .map { URL(fileURLWithPath: $0) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// The newest is also the one reopened at launch.
+    static func note(_ url: URL) {
+        let paths = [url.path] + urls.map(\.path).filter { $0 != url.path }
+        UserDefaults.standard.set(Array(paths.prefix(limit)), forKey: DefaultsKey.recentProjects)
+        UserDefaults.standard.set(url, forKey: DefaultsKey.lastProject)
+    }
+
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: DefaultsKey.recentProjects)
+    }
 }

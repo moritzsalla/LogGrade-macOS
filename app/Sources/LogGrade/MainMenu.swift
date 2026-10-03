@@ -53,6 +53,10 @@ enum MainMenu {
         file.addItem(action(commands, "Add Clips…", "o", [.command], \.addClips))
         file.addItem(.separator())
         file.addItem(action(commands, "Open Project…", "o", [.command, .shift], \.openProject))
+        let recent = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
+        recent.submenu = NSMenu(title: "Open Recent")
+        recent.submenu?.delegate = commands
+        file.addItem(recent)
         file.addItem(action(commands, "Save Project…", "s", [.command], \.saveProject))
         file.addItem(.separator())
         file.addItem(
@@ -100,6 +104,19 @@ enum MainMenu {
         clip.addItem(action(commands, "Export Clip", "\r", [.command], \.exportClip))
         clip.addItem(action(commands, "Export All Clips", "\r", [.command, .shift], \.exportAll))
 
+        // The presets are fixed (docs/BACKLOG.md), so their items are built once.
+        let look = submenu(of: main, "Look")
+        for (i, name) in commands.presetNames.enumerated() {
+            let item = NSMenuItem(
+                title: name, action: #selector(Commands.pickPreset(_:)),
+                keyEquivalent: i < 9 ? String(i + 1) : "")
+            item.target = commands
+            item.representedObject = name
+            look.addItem(item)
+        }
+        look.addItem(.separator())
+        look.addItem(action(commands, "Reset Adjustments", "", [], \.resetAdjustments))
+
         let windowMenu = submenu(of: main, "Window")
         windowMenu.addItem(
             withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)),
@@ -129,7 +146,7 @@ enum MainMenu {
     }
 
     /// The app's own actions, held as closures so this file knows nothing about the model.
-    final class Commands: NSObject, NSMenuItemValidation {
+    final class Commands: NSObject, NSMenuItemValidation, NSMenuDelegate {
         var settings: () -> Void = {}
         var addClips: () -> Void = {}
         var openProject: () -> Void = {}
@@ -140,6 +157,12 @@ enum MainMenu {
         var nextClip: () -> Void = {}
         var exportClip: () -> Void = {}
         var exportAll: () -> Void = {}
+        var resetAdjustments: () -> Void = {}
+
+        var presetNames: [String] = []
+        var currentPreset: () -> String? = { nil }
+        var applyPreset: (String) -> Void = { _ in }
+        var openRecent: (URL) -> Void = { _ in }
 
         /// Asked each time a menu opens, so an item is disabled rather than hidden (HIG).
         var isEnabled: (Command) -> Bool = { _ in true }
@@ -151,11 +174,45 @@ enum MainMenu {
             self[keyPath: which.command]()
         }
 
+        @objc fileprivate func pickPreset(_ sender: NSMenuItem) {
+            (sender.representedObject as? String).map(applyPreset)
+        }
+
+        @objc fileprivate func pickRecent(_ sender: NSMenuItem) {
+            (sender.representedObject as? URL).map(openRecent)
+        }
+
+        @objc fileprivate func clearRecent(_ sender: NSMenuItem) { RecentProjects.clear() }
+
+        func menuNeedsUpdate(_ menu: NSMenu) { MainMenu.fillRecent(menu, self) }
+
         func validateMenuItem(_ item: NSMenuItem) -> Bool {
+            if let preset = item.representedObject as? String {
+                let current = currentPreset()
+                item.state = preset == current ? .on : .off
+                return current != nil
+            }
             guard let which = item.representedObject as? CommandBox else { return true }
             if let title = title(which.command) { item.title = title }
             return isEnabled(which.command)
         }
+    }
+
+    /// Rebuilt each time it opens, so it lists what is on disk now.
+    private static func fillRecent(_ menu: NSMenu, _ commands: Commands) {
+        menu.removeAllItems()
+        for url in RecentProjects.urls {
+            let item = NSMenuItem(
+                title: MainWindow.projectName(url), action: #selector(Commands.pickRecent(_:)),
+                keyEquivalent: "")
+            item.target = commands
+            item.representedObject = url
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        menu.addItem(
+            withTitle: "Clear Menu", action: #selector(Commands.clearRecent(_:)), keyEquivalent: ""
+        ).target = commands
     }
 
     /// A key path in an object, which is what `representedObject` can hold.

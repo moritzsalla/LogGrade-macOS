@@ -74,6 +74,7 @@ let mainWindow = MainWindow(
     grade: gradeModel, actions: actions)
 let window = mainWindow.window
 actions.window = window
+gradeModel?.undoManager = window.undoManager
 // Held by Swift for the app's lifetime; AppKit's release on close would leave that dangling.
 window.isReleasedWhenClosed = false
 // One-window app: closing it quits, even with Settings still open, or every menu command would
@@ -143,6 +144,7 @@ let delegate = AppDelegate(actions: actions)
 app.delegate = delegate
 // Built by hand because the bundle is assembled by a script rather than by Xcode.
 let commands = MainMenu.Commands()
+commands.presetNames = gradeModel?.project.presets.map(\.name) ?? []
 MainMenu.install(commands: commands)
 
 // The rows say which clips finished; this only fetches the person back if they went elsewhere.
@@ -158,12 +160,17 @@ commands.previousClip = { actions.step(-1) }
 commands.nextClip = { actions.step(1) }
 commands.exportClip = { actions.export(.selected) }
 commands.exportAll = { actions.export(.all) }
+commands.resetAdjustments = { gradeModel?.resetAdjustments() }
+commands.currentPreset = { gradeModel?.selectedClip == nil ? nil : gradeModel?.lookName }
+commands.applyPreset = { gradeModel?.apply(preset: $0) }
+commands.openRecent = { actions.openProject(at: $0) }
 commands.toggleSidebar = { mainWindow.toggleSidebar(nil) }
 commands.toggleInspector = { mainWindow.toggleInspector(nil) }
 commands.isEnabled = { which in
     if which == \.exportClip { return actions.exportBlocker(.selected) == nil }
     if which == \.exportAll { return actions.exportBlocker(.all) == nil }
     if which == \.saveProject { return gradeModel != nil }
+    if which == \.resetAdjustments { return gradeModel?.hasAdjustments ?? false }
     return true
 }
 commands.title = { which in
