@@ -77,7 +77,7 @@ struct PreviewView: View {
                 // NO PREVIEW BUTTON. Every path that changes the look updates the picture on its
                 // own. A button that re-does what just happened is a button that teaches you to
                 // distrust the picture.
-                Text("hold C to compare with the look as it ships")
+                Text("Hold C to compare with the look as it ships")
                     .font(Type.label)
                     .foregroundColor(Palette.inkSecondary)
                 Spacer()

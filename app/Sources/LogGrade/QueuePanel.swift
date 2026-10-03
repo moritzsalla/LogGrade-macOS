@@ -20,52 +20,32 @@ struct QueuePanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                // THE SELECTED CLIP FIRST. Clips are graded one at a time, and each is exported
-                // when it is done; the whole list is the second choice.
-                Button(queue.isRunning ? "Exporting…" : "Export clip") {
-                    model.convert(queue: queue, .selected)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .tint(Palette.plate)
-                .disabled(whyNotClip != nil)
-                .help(whyNotClip ?? "Render the selected clip")
-                if !queue.isRunning && model.clipNames.count > 1 {
-                    Button("export all \(model.clipNames.count)") {
+            // THE SELECTED CLIP IS THE TOOLBAR'S EXPORT, the window's one prominent action; this
+            // section is the whole list and what happened to each clip.
+            HStack(spacing: Space.s) {
+                if queue.isRunning {
+                    Button("Stop") { model.cancel(queue: queue) }
+                } else if model.clipNames.count > 1 {
+                    Button("Export All \(model.clipNames.count)") {
                         model.convert(queue: queue, .all)
                     }
-                    .buttonStyle(.borderless)
-                    .disabled(whyNot != nil)
-                    .help(whyNot ?? "Render every clip in the list, each with its own grade")
-                }
-                if queue.isRunning {
-                    Button("stop") { model.cancel(queue: queue) }
-                        .buttonStyle(.borderless)
+                    .disabled(whyNotAll != nil)
+                    .help(whyNotAll ?? "Render every clip in the list, each with its own grade")
                 }
                 // Only when there is something to retry, and it re-runs through convert so a
                 // crop offset or a look value fixed since the failure is picked up.
                 if !queue.isRunning && needsRetry > 0 {
-                    Button(needsRetry == 1 ? "retry 1 clip" : "retry \(needsRetry) clips") {
+                    Button(needsRetry == 1 ? "Retry 1 Clip" : "Retry \(needsRetry) Clips") {
                         queue.retryAllFailed()
                         model.convert(queue: queue, nil)
                     }
-                    .buttonStyle(.borderless)
                 }
-                Spacer()
-                Picker("", selection: concurrencyBinding) {
-                    Text("1 at a time").tag(1)
-                    Text("2 at a time").tag(2)
-                    Text("3 at a time").tag(3)
-                }
-                .labelsHidden().frame(width: 104).disabled(queue.isRunning)
             }
 
-            // A DISABLED BUTTON THAT DOES NOT SAY WHY IS A DEAD END. Convert can be blocked for
-            // four different reasons and the interface used to show the same grey rectangle for
-            // all of them, leaving the only remaining move to guess. Whatever is in the way is
-            // named where the button is, not in a panel somewhere else.
-            if let reason = whyNotClip, !queue.isRunning {
+            // A DISABLED BUTTON THAT DOES NOT SAY WHY IS A DEAD END. Export can be blocked for
+            // several reasons, and whichever is in the way is named here and on the toolbar's
+            // tooltip.
+            if let reason = model.exportBlocker(queue: queue, .selected), !queue.isRunning {
                 Label(reason, systemImage: "exclamationmark.circle")
                     .font(Type.caption)
                     .foregroundColor(Palette.lamp)
@@ -73,7 +53,7 @@ struct QueuePanel: View {
             }
 
             if queue.jobs.isEmpty {
-                Text("Export clip renders the selected clip with its own grade.")
+                Text("Export in the toolbar renders the selected clip with its own grade.")
                     .font(Type.caption).foregroundColor(Palette.inkTertiary)
             } else {
                 // A BAR PER CLIP, not a percentage. A number tells you how far along something
@@ -92,7 +72,6 @@ struct QueuePanel: View {
                                 ProgressView(value: fraction)
                                     .progressViewStyle(.linear)
                                     .controlSize(.small)
-                                    .tint(Palette.plate)
                                     .frame(width: 92)
                             } else {
                                 ProgressView()
@@ -107,11 +86,11 @@ struct QueuePanel: View {
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
                         if !queue.isRunning, job.state.isFinished, job.state != .done {
-                            Button("retry") {
+                            Button("Retry") {
                                 queue.retry(job.id)
                                 model.convert(queue: queue, nil)
                             }
-                            .buttonStyle(.borderless).font(Type.caption)
+                            .buttonStyle(.link).font(Type.caption)
                         }
                     }
                 }
@@ -121,26 +100,7 @@ struct QueuePanel: View {
         .background(Palette.panel)
     }
 
-    /// Why the selected clip cannot be exported.
-    private var whyNotClip: String? {
-        if let reason = whyNot { return reason }
-        guard let selected = model.selectedClip, model.clipNames.contains(selected.stem) else {
-            return "Select a clip to export."
-        }
-        return nil
-    }
-
-    /// Why an export cannot run, in the words of whatever is actually stopping it. Nil when it can.
-    private var whyNot: String? {
-        if queue.isRunning { return "A conversion is already running." }
-        if model.clipNames.isEmpty { return "Add a clip first." }
-        if model.project.delivery.targets.isEmpty {
-            return "Choose at least one deliverable."
-        }
-        if let blocker = model.blockers.first { return blocker.description }
-        if model.outputDirectory == nil { return "Choose a folder to save into." }
-        return nil
-    }
+    private var whyNotAll: String? { model.exportBlocker(queue: queue, .all) }
 
     /// How many clips ended in something other than success. A skipped clip counts: the engine
     /// refused it for a reason the person can usually fix, which is exactly what a retry is for.
@@ -152,36 +112,26 @@ struct QueuePanel: View {
     /// not: "failed" alone sends someone to a log file that the app has already read.
     private func describe(_ job: RenderQueue.Job) -> String {
         switch job.state {
-        case .waiting: return "waiting"
+        case .waiting: return "Waiting"
         case .running:
-            let doing = job.analysing ? "analysing shake" : "rendering"
+            let doing = job.analysing ? "Analysing shake" : "Rendering"
             if let fraction = job.fractionDone {
                 return "\(doing), \(Int(fraction * 100))%"
             }
             return job.frame.map { "\(doing), frame \($0)" } ?? doing
         case .done:
             let names = job.outputs.map(\.lastPathComponent)
-            return names.isEmpty ? "done" : "done: " + names.joined(separator: ", ")
-        case .skipped(let code): return "skipped — " + code.message
+            return names.isEmpty ? "Done" : "Done: " + names.joined(separator: ", ")
+        case .skipped(let code): return "Skipped — " + code.message
         case .failed(let why): return why
-        case .cancelled: return "stopped"
+        case .cancelled: return "Stopped"
         }
     }
 
     private func colour(_ state: RenderQueue.State) -> Color {
         switch state {
         case .failed, .skipped: return Palette.lamp
-        case .running: return Palette.plate
         default: return Palette.inkSecondary
         }
-    }
-
-    private var concurrencyBinding: Binding<Int> {
-        Binding(
-            get: { queue.concurrency },
-            set: {
-                queue.concurrency = $0
-                UserDefaults.standard.set($0, forKey: DefaultsKey.concurrency)
-            })
     }
 }

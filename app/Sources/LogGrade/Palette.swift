@@ -32,7 +32,7 @@ enum Palette {
     static let scopeBlue = Color(red: 0.42, green: 0.60, blue: 0.90)
 }
 
-/// The type scale: four roles for text, and four named exceptions.
+/// The type scale: four roles for text.
 ///
 /// FOUR ROLES, NOT TEN SIZES. There were ten — 8, 9.5, 10, 10.5, 11, 12, 12.5, 13, 15, 33 — chosen
 /// one control at a time, which is how an interface ends up looking assembled rather than designed.
@@ -46,17 +46,6 @@ enum Type {
     static let label = Font.system(size: 11)
     static let value = Font.system(size: 11, design: .monospaced)
     static let caption = Font.system(size: 10)
-
-    // THE EXCEPTIONS, named so they stay four. Each appears in one place and is not a role to
-    // reach for in a new control.
-    /// The app's name at the head of the clip column.
-    static let title = Font.system(size: 15, weight: .semibold)
-    /// The app's name on the startup screen, the one moment nothing else competes with it.
-    static let splash = Font.system(size: 22, weight: .semibold)
-    /// A toast's symbol, which carries the message's kind before its words are read.
-    static let symbol = Font.system(size: 15)
-    /// The lock beside the conversion's title: a mark on a heading, not a word.
-    static let glyph = Font.system(size: 9)
 }
 
 /// Spacing, on a 4-point grid.

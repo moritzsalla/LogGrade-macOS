@@ -104,7 +104,7 @@ struct InspectorView: View {
 
     private var presetRow: some View {
         HStack(spacing: 8) {
-            Text("look").font(Type.label).foregroundColor(Palette.inkSecondary)
+            Text("Look").font(Type.label).foregroundColor(Palette.inkSecondary)
             Picker(
                 "",
                 selection: Binding(
@@ -119,7 +119,7 @@ struct InspectorView: View {
             // NO AUTO BUTTON. It stretched every clip to fill the histogram, which turned an
             // overcast wall bright; the rendering and the per-clip metering are what make a
             // clip right with no step at all.
-            Button("reset") { model.resetAdjustments() }
+            Button("Reset") { model.resetAdjustments() }
                 .buttonStyle(.bordered).controlSize(.small).font(Type.label)
                 .disabled(!model.hasAdjustments)
         }

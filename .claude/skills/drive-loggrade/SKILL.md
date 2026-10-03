@@ -23,7 +23,7 @@ app/drive/loggrade.sh quit
 - `click TEXT [SECS]` / `wait TEXT [SECS]`: exact, case-insensitive match on title, description, identifier or value, polled up to 15s. SwiftUI puts a button's label in `desc=` and a picker's choice in `val=`. Several matches: the first in tree order is pressed, the rest listed on stderr; a window control beats a menu item of the same name. A control without AXPress (a row, a text field) gets a real mouse click.
 - `shot OUT --screen`: for a popover, open menu or sheet. Plain `shot` (`screencapture -l`) draws child windows at the wrong offset; `--screen` brings the app forward and captures the screen under the window.
 - `shot OUT X,Y,W,H`: a close-up, in the screen points `tree` prints (the PNG is scaled and Retina, so don't crop it by tree coordinates; `sips -c` silently does nothing here anyway).
-- The export panel is the section headed **"deliver"** at the bottom of the left sidebar (preset picker, "save to", "Export clip", concurrency picker). After `launch` it is `shot $S/deliver.png 0,690,340,250`; re-read `rg 'val="deliver"|Export clip' $S/t.txt` if the layout moved.
+- The export settings are the inspector's **Export** tab: `click Export` presses the window's control first, which is the toolbar's Export (it starts a render), so switch tabs with the segmented control's AX value instead: `rg 'Grade|Export' $S/t.txt` for its position and `click` that. Concurrency lives in Settings (⌘,). Close-ups go by the inspector's frame in `tree`, never by a remembered rectangle.
 
 ## Traps
 
@@ -33,4 +33,4 @@ app/drive/loggrade.sh quit
 - **Worktree builds stay in the worktree.** The user's app is the main checkout's `dist/LogGrade.app`; it changes only when `make-app.sh` runs there after a merge. `launch` uses `open -n`, so the user's open copy is left alone. Never `killall LogGrade`.
 - **Release by default.** A `--debug` build's preview is ~100× slower; that is not a bug.
 - **Shared preferences.** Every copy uses the `local.loggrade` defaults (window frame, open inspector stages, `lastProject`, reopened at launch). If you save a project while driving, delete it and `defaults delete local.loggrade lastProject`, or the user's app reopens your test project.
-- After an export, `wait "Export finished" 600` (the toast) before the next shot.
+- After an export, `wait "Stop"` vanishes and `wait "Export All N"` returns when the queue is done; the clip row shows a checkmark.

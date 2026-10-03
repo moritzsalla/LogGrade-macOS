@@ -3,23 +3,23 @@ import GradeKit
 
 /// The things the app does that are not a view: bring clips in, open and save a shoot.
 ///
-/// WHY A CLASS AND NOT VIEW CODE. Each of these now has two callers — a control in the window and
-/// an item in the menu bar — and a SwiftUI view is a struct that is rebuilt constantly, so a menu
-/// item cannot hold one. Keeping them here also means there is exactly ONE door for clips: a drop
-/// on the window, the startup screen's button, File ▸ Add Clips and files handed over by the Finder
-/// or the dock all arrive at `take`, which is what stopped the last two import bugs from being
-/// three. The Finder's door was a copy in `AppDelegate` until it was routed here.
+/// WHY A CLASS AND NOT VIEW CODE. Each of these has several callers — the toolbar, the menu bar, a
+/// context menu — and a SwiftUI view is a struct that is rebuilt constantly, so a menu item cannot
+/// hold one. Keeping them here also means there is exactly ONE door for clips: a drop on the
+/// window, the startup screen's button, File ▸ Add Clips and files handed over by the Finder or
+/// the dock all arrive at `take`, which is what stopped the last two import bugs from being three.
 final class AppActions {
     private let clips: ClipList
     private let grade: GradeModel?
     private let queue: RenderQueue
-    private let toaster: Toaster
+    /// Where alerts are attached, as sheets.
+    weak var window: NSWindow?
 
-    init(clips: ClipList, grade: GradeModel?, queue: RenderQueue, toaster: Toaster) {
+    init(clips: ClipList, grade: GradeModel?, queue: RenderQueue) {
         self.clips = clips
         self.grade = grade
         self.queue = queue
-        self.toaster = toaster
+        grade?.reportProblem = { [weak self] title, detail in self?.alert(title, detail) }
     }
 
     /// Every clip that enters the app enters here.
@@ -28,6 +28,16 @@ final class AppActions {
             guard let grade, grade.selectedClip == nil, added.isUsable else { continue }
             grade.selectedClip = added
         }
+    }
+
+    /// The neighbour takes the selection, so the keyboard can keep removing.
+    func remove(_ stem: String) {
+        let usable = clips.usable
+        clips.remove(stem)
+        guard let grade, grade.selectedClip?.stem == stem else { return }
+        let index = usable.firstIndex(where: { $0.stem == stem }) ?? 0
+        let rest = usable.filter { $0.stem != stem }
+        grade.selectedClip = rest.isEmpty ? nil : rest[min(index, rest.count - 1)]
     }
 
     func chooseClips() {
@@ -50,11 +60,8 @@ final class AppActions {
         do {
             try grade.saveProject(to: url)
         } catch {
-            // SAID, not beeped. A beep is indistinguishable from a key the window refused, and a
-            // shoot's crop decisions that were not saved are the one loss this panel exists to stop.
-            toaster.show(
-                "exclamationmark.triangle.fill", "Project not saved",
-                String(describing: error))
+            // SAID, not beeped: unsaved crop decisions are the one loss this exists to stop.
+            alert("The project couldn’t be saved.", String(describing: error))
         }
     }
 
@@ -74,12 +81,24 @@ final class AppActions {
         do {
             try grade.openProject(at: url)
         } catch {
-            toaster.show(
-                "exclamationmark.triangle.fill",
-                "Couldn’t open \(url.lastPathComponent)", String(describing: error))
+            alert("“\(url.lastPathComponent)” couldn’t be opened.", String(describing: error))
         }
     }
 
     func export(_ scope: GradeModel.ExportScope) { grade?.convert(queue: queue, scope) }
+    func exportBlocker(_ scope: GradeModel.ExportScope) -> String? {
+        grade.map { $0.exportBlocker(queue: queue, scope) } ?? "No look is loaded."
+    }
     func step(_ direction: Int) { grade?.step(direction, in: clips.usable) }
+
+    private func alert(_ title: String, _ detail: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        if let window, window.isVisible {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
+    }
 }

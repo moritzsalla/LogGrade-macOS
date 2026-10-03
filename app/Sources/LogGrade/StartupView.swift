@@ -4,10 +4,8 @@ import SwiftUI
 
 /// What you see before there is anything to grade.
 ///
-/// WHY IT EXISTS. An empty three-column window with a dimmed inspector is a screen that looks
-/// broken rather than empty. The first thing this app needs is a clip, so the first thing it shows
-/// is where to put one — the same move Photoshop and the Final Cut library window make, for the
-/// same reason: give the empty state one job and say what it is.
+/// WHY IT EXISTS. The first thing this app needs is a clip, so the picture pane's first job is to
+/// say where to put one.
 ///
 /// It also carries the two things worth knowing before a first render, since this is the only
 /// moment nobody is busy: what the app expects as input, and whether the engine behind it is
@@ -32,12 +30,11 @@ struct StartupView: View {
 
             VStack(spacing: Space.s) {
                 Button(action: onChooseFiles) {
-                    Label("Choose clips…", systemImage: "photo.badge.plus")
+                    Label("Add Clips…", systemImage: "plus")
                         .frame(width: 190)
                 }
                 .controlSize(.large)
                 .buttonStyle(.borderedProminent)
-                .tint(Palette.plate)
 
                 if let recent = recentProject {
                     Button {
@@ -53,7 +50,7 @@ struct StartupView: View {
                     .buttonStyle(.bordered)
                 }
 
-                Text("or drag them onto this window")
+                Text("or drag clips onto this window")
                     .font(Type.caption)
                     .foregroundColor(Palette.inkTertiary)
                     .padding(.top, Space.xs)
@@ -88,5 +85,18 @@ struct StartupView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.surround)
+    }
+}
+
+/// The icon and the name.
+struct AppMark: View {
+    var body: some View {
+        VStack(spacing: Space.m) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 64, height: 64)
+            Text("LogGrade").font(.title2.weight(.semibold))
+                .foregroundColor(Palette.ink)
+        }
     }
 }

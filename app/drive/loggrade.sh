@@ -68,12 +68,12 @@ default_clip() {
 }
 
 # The window appears seconds before the picture does; a screenshot taken on the window alone shows
-# "Preparing the first frame". Ready is the export button present and no "Preparing" text left.
+# "Preparing the first frame". Ready is the picture pane's compare hint present and no "Preparing" text left.
 wait_for_picture() {
 	local tree
 	for _ in $(seq 1 240); do
 		tree="$(ax tree "$1")"
-		if grep -q 'Export clip' <<<"$tree" && ! grep -q 'Preparing' <<<"$tree"; then return; fi
+		if grep -q 'Hold C to compare' <<<"$tree" && ! grep -q 'Preparing' <<<"$tree"; then return; fi
 		sleep 0.5
 	done
 	echo "window up, but the picture was not ready after 120s" >&2

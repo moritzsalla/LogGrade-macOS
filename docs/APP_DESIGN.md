@@ -4,9 +4,13 @@ Each rule came from grading real clips or from a screenshot, not from theory.
 
 - **The photograph is the only saturated thing on screen.** Surround, panels and ink are neutral
   greys, because any cast in the chrome biases judgement.
-- **The accent is spent sparingly:** the selected clip's edge and the curve, not controls. A
-  yellow slider track or stage switch everywhere competes with the picture. The lamp colour
-  is for refusals only, and there is no green.
+- **The accent is spent sparingly:** the scopes' reference marks and the crop box, not controls.
+  A yellow slider track, stage switch or Export button competes with the picture. The lamp
+  colour is for refusals only, and there is no green. System controls and the clip list's
+  selection keep the user's system accent: a macOS 13 sidebar ignores `.tint`.
+- **Standard window, standard parts** (Apple's HIG): sidebar, picture, inspector in a split view
+  under a unified toolbar with one prominent action; every toolbar item is also a menu command;
+  alerts, not toasts; no splash. Buttons and menus in title case.
 - **Numbers use a POSIX formatter.** Values are written into `look.json` with dots, and a locale
   decimal comma made the panel disagree with the file.
 - **Readouts are SF Mono with tabular figures.** Labels are SF Pro, in sentence case.
