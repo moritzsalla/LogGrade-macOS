@@ -43,6 +43,25 @@ is no preview button and no slower "exact" render replacing it.
 
 ---
 
+## Shooting for it
+
+Settings for Final Cut Camera 2.4. The tool meters exposure and white balance once per clip, so it
+can correct a clip that is off, but not one that drifts while recording: lock everything.
+
+| setting | choice |
+|---|---|
+| Format | Apple Log, ProRes |
+| Frame rate | 25 fps where mains power is 50 Hz, otherwise 24 |
+| Exposure | Manual |
+| Shutter | Angle, 180°. At 24 fps under 50 Hz lights, 172.8° to stop flicker |
+| ISO | the lowest that exposes the shot; a variable ND in daylight, not a faster shutter |
+| Exposure target | false colour on, faces at or just above mid-grey, nothing that matters clipped. Log shadows are noisy, so err bright |
+| White balance | manual, set to the light |
+| Focus | manual or locked |
+| Timecode | time of day, so a second camera or sound recorder lines up |
+
+---
+
 ## Scope and licence
 
 macOS 13 or later. Nothing to download: the app renders Apple Log with its own conversion. It builds
